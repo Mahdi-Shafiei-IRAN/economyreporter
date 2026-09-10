@@ -21,8 +21,9 @@ const kEmptyStateKey = Key('empty-state');
 
 class DashboardScreen extends StatefulWidget {
   final DashboardController controller;
+  final VoidCallback? onLogout;
 
-  const DashboardScreen({super.key, required this.controller});
+  const DashboardScreen({super.key, required this.controller, this.onLogout});
 
   @override
   State<DashboardScreen> createState() => _DashboardScreenState();
@@ -57,7 +58,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('مدیریت مالی خانواده')),
+      appBar: AppBar(
+        title: const Text('مدیریت مالی خانواده'),
+        actions: [
+          if (widget.onLogout != null)
+            IconButton(
+              icon: const Icon(Icons.logout),
+              tooltip: 'خروج',
+              onPressed: widget.onLogout,
+            ),
+        ],
+      ),
       floatingActionButton: FloatingActionButton.extended(
         key: kAddSmsFabKey,
         onPressed: _openAddSmsSheet,

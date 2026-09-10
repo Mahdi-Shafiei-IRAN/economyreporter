@@ -1,6 +1,12 @@
 import 'package:flutter/material.dart';
 
+import 'core/auth/auth_repository.dart';
+import 'core/auth/token_store.dart';
+import 'core/config/app_config.dart';
 import 'core/database/app_database.dart';
+import 'core/network/api_client.dart';
+import 'features/auth/auth_controller.dart';
+import 'features/auth/login_screen.dart';
 import 'features/dashboard/dashboard_controller.dart';
 import 'features/dashboard/dashboard_screen.dart';
 import 'features/transactions/data/transaction_repository.dart';
@@ -19,7 +25,6 @@ class EconomyApp extends StatelessWidget {
       title: 'مدیریت مالی خانواده',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(colorSchemeSeed: Colors.teal, useMaterial3: true),
-      // چیدمان راست‌به‌چپ برای کل اپ.
       builder: (context, child) => Directionality(
         textDirection: TextDirection.rtl,
         child: child ?? const SizedBox.shrink(),
@@ -29,7 +34,12 @@ class EconomyApp extends StatelessWidget {
   }
 }
 
-/// باز کردن پایگاه‌داده و ساخت کنترلر، سپس نمایش داشبورد.
+class _Services {
+  final AuthController auth;
+  final DashboardController dashboard;
+  const _Services(this.auth, this.dashboard);
+}
+
 class _Bootstrap extends StatefulWidget {
   const _Bootstrap();
 
@@ -38,16 +48,23 @@ class _Bootstrap extends StatefulWidget {
 }
 
 class _BootstrapState extends State<_Bootstrap> {
-  late final Future<DashboardController> _future = _init();
+  late final Future<_Services> _future = _init();
 
-  Future<DashboardController> _init() async {
+  Future<_Services> _init() async {
+    final tokenStore = SecureTokenStore();
+    final api = ApiClient(baseUrl: AppConfig.apiBaseUrl, tokenStore: tokenStore);
+    final authRepo = AuthRepository(api, tokenStore);
+    final auth = AuthController(authRepo);
+    await auth.bootstrap();
+
     final db = await openAppDatabase();
-    return DashboardController(TransactionRepository(db));
+    final dashboard = DashboardController(TransactionRepository(db));
+    return _Services(auth, dashboard);
   }
 
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder<DashboardController>(
+    return FutureBuilder<_Services>(
       future: _future,
       builder: (context, snapshot) {
         if (snapshot.hasError) {
@@ -55,10 +72,8 @@ class _BootstrapState extends State<_Bootstrap> {
             body: Center(
               child: Padding(
                 padding: const EdgeInsets.all(24),
-                child: Text(
-                  'خطا در باز کردن پایگاه‌داده:\n${snapshot.error}',
-                  textAlign: TextAlign.center,
-                ),
+                child: Text('خطا در راه‌اندازی:\n${snapshot.error}',
+                    textAlign: TextAlign.center),
               ),
             ),
           );
@@ -66,7 +81,30 @@ class _BootstrapState extends State<_Bootstrap> {
         if (!snapshot.hasData) {
           return const Scaffold(body: Center(child: CircularProgressIndicator()));
         }
-        return DashboardScreen(controller: snapshot.data!);
+        return _Root(services: snapshot.data!);
+      },
+    );
+  }
+}
+
+/// بسته به وضعیت احراز هویت، ورود یا داشبورد را نشان می‌دهد.
+class _Root extends StatelessWidget {
+  final _Services services;
+
+  const _Root({required this.services});
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: services.auth,
+      builder: (context, _) {
+        if (services.auth.authenticated) {
+          return DashboardScreen(
+            controller: services.dashboard,
+            onLogout: services.auth.logout,
+          );
+        }
+        return LoginScreen(controller: services.auth);
       },
     );
   }

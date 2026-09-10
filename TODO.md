@@ -71,9 +71,19 @@
   - ✅ **`GET /api/v1/dashboard/summary/`** — جمع درآمد/هزینه/مانده + تفکیک عضو/دسته/کارت (transfer حذف می‌شود)
   - ✅ تراکنش id از دستگاه می‌گیرد (idempotency)؛ ولیدیشن ارجاع‌ها (حساب/کارت/دسته هم‌خانواده)
 
+## فاز ۵ — اتصال موبایل به بک‌اند
+- ✅ **لایه‌ی شبکه/احراز هویت + تست (۶ تست، مجموع موبایل: ۳۷ پاس)**
+  - ✅ `core/config/app_config.dart`: آدرس API (قابل override با --dart-define)
+  - ✅ `core/auth/token_store.dart`: ذخیره‌ی امن توکن (اینترفیس + SecureTokenStore با Keystore)
+  - ✅ `core/network/api_client.dart`: Dio + interceptor الصاق توکن و **تازه‌سازی خودکار روی 401**
+  - ✅ `core/auth/auth_repository.dart`: register/login/me/logout + UserProfile
+  - ✅ `features/auth`: `AuthController` + `LoginScreen`
+  - ✅ `main.dart`: مسیریابی ورود↔داشبورد + دکمه‌ی خروج
+  - ✅ تست: auth_repository (login/me/register/refresh با mock Dio) + widget ورود (موفق/ناموفق)
+- ⬜ اتصال بصری واقعی به سرور (نیازمند اجرای اپ روی گوشی/امولاتور + Developer Mode ویندوز برای بیلد پلاگین)
+
 ## فازهای بعدی (خلاصه — جزئیات در docs/roadmap.md)
 - ⬜ فاز −۱: جمع‌آوری ۵۰–۱۰۰ پیامک واقعی (نمونه‌ها را کاربر بعداً می‌فرستد)
-- ⬜ فاز ۵: پایه‌ی Flutter (auth، repository، api client)
 - ⬜ فاز ۶: موتور تراکنش محلی + صف بازبینی
 - ⬜ فاز ۷: پارسر کامل همه‌ی بانک‌ها + تست رگرسیون
 - ⬜ فاز ۸: Background Sync (outbox، batch، retry)
