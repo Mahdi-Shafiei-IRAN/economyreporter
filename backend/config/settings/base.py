@@ -39,6 +39,10 @@ INSTALLED_APPS = [
     # local apps
     "apps.users",
     "apps.families",
+    "apps.accounts",
+    "apps.categories",
+    "apps.transactions",
+    "apps.budgets",
 ]
 
 MIDDLEWARE = [

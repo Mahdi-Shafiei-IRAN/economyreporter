@@ -54,9 +54,16 @@
   - ✅ **۱۴ تست (`manage.py test`) همه پاس + تست عملی روی سرور زنده (register/login/me/family)**
 - ⬜ اجرای روی Postgres واقعی (وقتی سرور خریده شد یا Docker بالا آمد)
 
+## فاز ۳ — مدل داده‌ی اصلی بک‌اند
+- ✅ **مدل‌ها + مایگریشن + تست (۱۴ تست مدل، مجموع بک‌اند: ۲۸ پاس)**
+  - ✅ `apps/accounts`: `BankAccount` (+ bank_id هم‌راستا با پارسر) و `Card` (unique در هر حساب)
+  - ✅ `apps/categories`: `Category` (unique نام در هر خانواده)
+  - ✅ `apps/transactions`: `Transaction` — نوع income/expense/**transfer**، `amount_rial`، `balance_after_rial`، `counterparty`، `transfer_group`، سه زمان (transaction_date/client_created_at/server_received_at)، ایندکس‌ها، و **ایندکس یکتای جزئی ضدتکرار** (family+source_message_hash)
+  - ✅ `apps/budgets`: `Budget` (unique در category+period)
+  - ✅ رفتار SET_NULL هنگام حذف دسته/حساب/کارت (تراکنش حفظ می‌شود)
+
 ## فازهای بعدی (خلاصه — جزئیات در docs/roadmap.md)
 - ⬜ فاز −۱: جمع‌آوری ۵۰–۱۰۰ پیامک واقعی (نمونه‌ها را کاربر بعداً می‌فرستد)
-- ⬜ فاز ۳: مدل داده‌ی اصلی (Account/Card/Category/Transaction/Budget) روی بک‌اند
 - ⬜ فاز ۴: CRUD API + Authorization سطح‌شیء
 - ⬜ فاز ۵: پایه‌ی Flutter (auth، repository، api client)
 - ⬜ فاز ۶: موتور تراکنش محلی + صف بازبینی
