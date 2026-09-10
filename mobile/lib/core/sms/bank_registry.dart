@@ -44,6 +44,14 @@ const List<BankProfile> kBankRegistry = [
   BankProfile(id: 'blu', name: 'بلوبانک', senderAliases: ['blu', 'blubank', 'بلو']),
 ];
 
+/// نام نمایشی بانک از روی شناسه (برای UI). اگر نبود، خود شناسه.
+String bankNameById(String bankId) {
+  for (final bank in kBankRegistry) {
+    if (bank.id == bankId) return bank.name;
+  }
+  return bankId;
+}
+
 /// قدم اولِ پارس: تشخیص بانک از روی فرستنده. اگر شناخته نشود null برمی‌گرداند.
 BankProfile? detectBank(String sender) {
   final s = normalizeForParsing(sender).trim();

@@ -28,7 +28,20 @@ class FinanceSummary {
   int get balanceRial => incomeRial - expenseRial;
 }
 
-class TransactionRepository {
+/// انتزاع مخزن تراکنش برای تزریق: اپ از SQLite استفاده می‌کند،
+/// تست‌های ویجت از یک پیاده‌سازی in-memory (بدون I/O بومی).
+abstract class TransactionStore {
+  Future<TxInsertOutcome> saveParsed(
+    ParsedTransaction parsed, {
+    required String sender,
+    String? deviceId,
+    DateTime? receivedAt,
+  });
+  Future<List<TransactionRecord>> getAll({int? limit});
+  Future<FinanceSummary> summary({DateTime? from, DateTime? to});
+}
+
+class TransactionRepository implements TransactionStore {
   final Database _db;
   final Uuid _uuid;
 
@@ -36,6 +49,7 @@ class TransactionRepository {
 
   /// ذخیره‌ی خروجی پارسر. اگر پیامک قبلاً ذخیره شده باشد (اثرانگشت یکسان)،
   /// رکورد جدید ساخته نمی‌شود و وضعیت `duplicate` برمی‌گردد.
+  @override
   Future<TxInsertOutcome> saveParsed(
     ParsedTransaction parsed, {
     required String sender,
@@ -77,6 +91,7 @@ class TransactionRepository {
     await _db.insert('transactions', record.toMap());
   }
 
+  @override
   Future<List<TransactionRecord>> getAll({int? limit}) async {
     final rows = await _db.query(
       'transactions',
@@ -94,6 +109,7 @@ class TransactionRepository {
   }
 
   /// جمع درآمد/هزینه‌ی بازه (transfer و unknown و رکورد بدون مبلغ حذف می‌شوند).
+  @override
   Future<FinanceSummary> summary({DateTime? from, DateTime? to}) async {
     final where = StringBuffer(
       "amount_rial IS NOT NULL AND kind IN ('income','expense')",
