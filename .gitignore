@@ -1,0 +1,40 @@
+# ── Python / Django ──
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+*.sqlite3
+db.sqlite3
+/backend/staticfiles/
+/backend/media/
+.env
+.env.*
+!.env.example
+
+# ── Flutter / Dart ──
+.dart_tool/
+.packages
+.pub-cache/
+.pub/
+build/
+/mobile/.flutter-plugins
+/mobile/.flutter-plugins-dependencies
+*.iml
+.gradle/
+/mobile/android/local.properties
+/mobile/android/key.properties
+*.keystore
+*.jks
+
+# ── محرمانه‌ها ──
+# هرگز نمونه‌ی پیامک واقعی با داده‌ی حساس یا کلیدها commit نشود
+/mobile/test/fixtures/sms/*.private.json
+
+# ── IDE / OS ──
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
