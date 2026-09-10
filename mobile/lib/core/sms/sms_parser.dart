@@ -24,6 +24,10 @@ class SmsParser {
   static final _balanceRe = RegExp(r'(?:مانده|موجودی)\s*:?\s*([0-9][0-9,]*)');
   static final _amountLabeledRe = RegExp(r'مبلغ\s*:?\s*([0-9][0-9,]*)');
   static final _currencyRe = RegExp(r'([0-9][0-9,]*)\s*(ریال|تومان)');
+  // مبلغِ چسبیده به فعل، بدون واحد و بدون «مبلغ» (مثل «برداشت13,625,000»).
+  static final _amountAfterActionRe = RegExp(
+    r'(?:برداشت|واریز|خرید|پرداخت|کسر|عودت|انتقال)\s*:?\s*([0-9][0-9,]{1,})',
+  );
   static final _cardRe = RegExp(r'کارت\s*:?\s*([0-9x\*\.\-]{4,})');
   static final _fourDigitsRe = RegExp(r'[0-9]{4}');
 
@@ -33,8 +37,9 @@ class SmsParser {
   static final _merchantRe = RegExp(r'(?:پذیرنده|فروشگاه)\s*:?\s*(.+?)(?:\s+مانده|\s+تاریخ|$)');
 
   ParsedTransaction parse({required String sender, required String body}) {
-    // قدم ۱: تشخیص بانک
-    final bank = detectBank(sender);
+    // قدم ۱: تشخیص بانک — اول از فرستنده، اگر نشد از داخل متن (بعضی بانک‌ها
+    // نامشان را در متن پیامک می‌آورند).
+    final bank = detectBank(sender) ?? detectBank(body);
 
     final normalized = normalizeForParsing(body);
     final compacted = compact(normalized);
@@ -130,6 +135,18 @@ class SmsParser {
       } else if (val == amount) {
         // واحدِ همان مبلغ برچسب‌دار را مشخص کن.
         unit = currency == 'تومان' ? 'toman' : 'rial';
+      }
+    }
+
+    // Fallback: مبلغِ چسبیده به فعل، بدون واحد (مثل «برداشت13,625,000»).
+    if (amount == null) {
+      final m = _amountAfterActionRe.firstMatch(normalized);
+      if (m != null) {
+        final val = parseIntSafe(m.group(1));
+        if (val != null && val != balance) {
+          amount = val;
+          rawAmount = m.group(1);
+        }
       }
     }
 

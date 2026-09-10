@@ -1,0 +1,14 @@
+{
+  "synthetic": false,
+  "note": "قالبِ واقعی بانک تجارت (اعداد ساختگی). نام بانک داخل متن است، نه فرستنده.",
+  "sender": "",
+  "body": "*بانک تجارت*\nحساب: 1000000002\nواریز: 500 ریال\nاز طريق: شعبه ديجيتال\nمانده: 700,000 ریال\n1405/05/31\n24:00",
+  "expect": {
+    "bankId": "tejarat",
+    "kind": "income",
+    "amountRial": 500,
+    "balanceAfterRial": 700000,
+    "hasDate": true,
+    "needsReview": false
+  }
+}

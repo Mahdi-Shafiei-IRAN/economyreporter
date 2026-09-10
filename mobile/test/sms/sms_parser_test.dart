@@ -158,4 +158,28 @@ void main() {
       expect(r.counterparty, 'نان');
     });
   });
+
+  group('parse — قالب‌های واقعی', () {
+    test('مبلغِ چسبیده به فعل، بدون واحد و بدون «مبلغ»', () {
+      final r = parser.parse(
+        sender: '',
+        body: 'حساب1000000001\nبرداشت12,345,000\nمانده6,000,000\n05/06/19-16:00',
+      );
+      expect(r.kind, TxKind.expense);
+      expect(r.amountRial, 12345000);
+      expect(r.balanceAfterRial, 6000000);
+      expect(r.occurredAt, isNotNull); // سالِ دورقمی هم پارس می‌شود
+    });
+
+    test('تشخیص بانک از داخل متن وقتی فرستنده خالی است', () {
+      final r = parser.parse(
+        sender: '',
+        body: '*بانک تجارت* واریز: 500 ریال مانده: 700,000 ریال',
+      );
+      expect(r.bankId, 'tejarat');
+      expect(r.kind, TxKind.income);
+      expect(r.amountRial, 500);
+      expect(r.needsReview, isFalse);
+    });
+  });
 }
