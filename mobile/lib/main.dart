@@ -4,6 +4,7 @@ import 'package:uuid/uuid.dart';
 import 'core/auth/auth_repository.dart';
 import 'core/auth/token_store.dart';
 import 'core/config/app_config.dart';
+import 'core/dashboard/remote_dashboard_api.dart';
 import 'core/database/app_database.dart';
 import 'core/network/api_client.dart';
 import 'core/sync/remote_transaction_api.dart';
@@ -12,6 +13,7 @@ import 'features/auth/auth_controller.dart';
 import 'features/auth/login_screen.dart';
 import 'features/dashboard/dashboard_controller.dart';
 import 'features/dashboard/dashboard_screen.dart';
+import 'features/family/family_dashboard_screen.dart';
 import 'features/transactions/data/transaction_repository.dart';
 
 Future<void> main() async {
@@ -41,7 +43,8 @@ class _Services {
   final AuthController auth;
   final DashboardController dashboard;
   final SyncService sync;
-  const _Services(this.auth, this.dashboard, this.sync);
+  final RemoteDashboardApi dashboardApi;
+  const _Services(this.auth, this.dashboard, this.sync, this.dashboardApi);
 }
 
 class _Bootstrap extends StatefulWidget {
@@ -69,11 +72,13 @@ class _BootstrapState extends State<_Bootstrap> {
       api: DioRemoteTransactionApi(api.dio),
       deviceId: const Uuid().v4(),
     );
+    final dashboardApi = DioRemoteDashboardApi(api.dio);
+
     // تلاش اولیه برای همگام‌سازی آنچه هنوز نرفته (در صورت آنلاین‌بودن).
     if (auth.authenticated) {
       sync.sync().ignore();
     }
-    return _Services(auth, dashboard, sync);
+    return _Services(auth, dashboard, sync, dashboardApi);
   }
 
   @override
@@ -120,6 +125,12 @@ class _Root extends StatelessWidget {
               final s = await services.sync.sync();
               return 'همگام‌سازی: ${s.synced} موفق، ${s.failed} ناموفق';
             },
+            onOpenFamilyDashboard: () => Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) =>
+                    FamilyDashboardScreen(api: services.dashboardApi),
+              ),
+            ),
           );
         }
         return LoginScreen(controller: services.auth);

@@ -2,6 +2,7 @@ import 'package:economy/core/format/money_format.dart';
 import 'package:economy/core/sms/sms_parser.dart';
 import 'package:economy/features/dashboard/dashboard_controller.dart';
 import 'package:economy/features/dashboard/dashboard_screen.dart';
+import 'package:economy/features/transactions/data/transaction_record.dart';
 import 'package:economy/features/transactions/edit_transaction_sheet.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -135,5 +136,34 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(textOfKey(tester, kExpenseValueKey), formatToman(5000000));
+  });
+
+  testWidgets('بنر تطبیق مانده هنگام وجود گپ نشان داده می‌شود', (tester) async {
+    final at = DateTime.utc(2026, 1, 1, 12, 0);
+    store.addRecord(TransactionRecord(
+      id: 'a',
+      cardLast4: '1234',
+      kind: 'income',
+      amountRial: 0,
+      balanceAfterRial: 1000000,
+      transactionDate: at,
+      createdAt: at,
+      updatedAt: at,
+    ));
+    store.addRecord(TransactionRecord(
+      id: 'b',
+      cardLast4: '1234',
+      kind: 'expense',
+      amountRial: 200000,
+      balanceAfterRial: 500000, // انتظار 800000 → گپ
+      transactionDate: at.add(const Duration(minutes: 1)),
+      createdAt: at,
+      updatedAt: at,
+    ));
+
+    await tester.pumpWidget(app());
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(kReconcileBannerKey), findsOneWidget);
   });
 }

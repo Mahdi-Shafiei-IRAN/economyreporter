@@ -15,6 +15,9 @@ class FakeTransactionStore implements TransactionStore {
     _put(parsed, sender: sender, receivedAt: receivedAt);
   }
 
+  /// افزودن مستقیم یک رکورد ساخته‌شده (برای تست‌هایی که به فیلدهای دقیق نیاز دارند).
+  void addRecord(TransactionRecord record) => _items.add(record);
+
   TxInsertOutcome _put(
     ParsedTransaction parsed, {
     required String sender,

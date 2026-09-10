@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/format/money_format.dart';
 import '../../core/sms/bank_registry.dart';
+import '../review/reconciliation_screen.dart';
 import '../review/review_screen.dart';
 import '../transactions/data/transaction_record.dart';
 import '../transactions/data/transaction_repository.dart';
@@ -21,6 +22,8 @@ const kSmsBodyFieldKey = Key('sms-body-field');
 const kSmsSaveButtonKey = Key('sms-save-button');
 const kEmptyStateKey = Key('empty-state');
 const kReviewActionKey = Key('review-action');
+const kReconcileBannerKey = Key('reconcile-banner');
+const kFamilyDashboardActionKey = Key('family-dashboard-action');
 
 class DashboardScreen extends StatefulWidget {
   final DashboardController controller;
@@ -29,11 +32,15 @@ class DashboardScreen extends StatefulWidget {
   /// همگام‌سازی دستی؛ پیام نتیجه را برمی‌گرداند تا در snackbar نشان داده شود.
   final Future<String> Function()? onSync;
 
+  /// باز کردن داشبورد خانواده از سرور (نیازمند شبکه).
+  final VoidCallback? onOpenFamilyDashboard;
+
   const DashboardScreen({
     super.key,
     required this.controller,
     this.onLogout,
     this.onSync,
+    this.onOpenFamilyDashboard,
   });
 
   @override
@@ -78,6 +85,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
+  void _openReconciliation() {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ReconciliationScreen(gaps: _c.balanceGaps),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
@@ -97,6 +112,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 tooltip: 'بازبینی',
                 onPressed: _openReview,
               ),
+              if (widget.onOpenFamilyDashboard != null)
+                IconButton(
+                  key: kFamilyDashboardActionKey,
+                  icon: const Icon(Icons.insights_outlined),
+                  tooltip: 'داشبورد خانواده',
+                  onPressed: widget.onOpenFamilyDashboard,
+                ),
               if (widget.onSync != null)
                 IconButton(
                   icon: const Icon(Icons.cloud_upload_outlined),
@@ -125,6 +147,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     padding: const EdgeInsets.fromLTRB(12, 12, 12, 96),
                     children: [
                       _SummaryCard(summary: _c.summary),
+                      if (_c.balanceGaps.isNotEmpty) ...[
+                        const SizedBox(height: 12),
+                        _ReconcileBanner(
+                          count: _c.balanceGaps.length,
+                          onTap: _openReconciliation,
+                        ),
+                      ],
                       const SizedBox(height: 16),
                       if (_c.transactions.isEmpty)
                         const _EmptyState()
@@ -248,6 +277,27 @@ class _TransactionTile extends StatelessWidget {
                 backgroundColor: Color(0xFFFFF3CD),
               )
             : Text(meta.label, style: TextStyle(color: meta.color)),
+      ),
+    );
+  }
+}
+
+class _ReconcileBanner extends StatelessWidget {
+  final int count;
+  final VoidCallback onTap;
+  const _ReconcileBanner({required this.count, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      key: kReconcileBannerKey,
+      color: const Color(0xFFFFF3CD),
+      child: ListTile(
+        leading: const Icon(Icons.warning_amber_rounded, color: Colors.orange),
+        title: Text('$count مورد احتمال پیامک جاافتاده'),
+        subtitle: const Text('برای بررسی تطبیق مانده ضربه بزنید'),
+        trailing: const Icon(Icons.chevron_left),
+        onTap: onTap,
       ),
     );
   }

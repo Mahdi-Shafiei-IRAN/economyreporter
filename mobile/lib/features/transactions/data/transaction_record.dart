@@ -110,6 +110,9 @@ class TransactionRecord {
         'updated_at': updatedAt.toIso8601String(),
       };
 
+  /// زمان مؤثر برای مرتب‌سازی/تطبیق: زمان رخداد، وگرنه زمان ساخت روی دستگاه.
+  DateTime get effectiveTime => transactionDate ?? clientCreatedAt ?? createdAt;
+
   /// نسخه‌ی جدید با فیلدهای ویرایش‌شده (بقیه ثابت).
   TransactionRecord copyWith({
     String? kind,

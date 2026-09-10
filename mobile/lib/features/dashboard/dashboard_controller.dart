@@ -3,6 +3,7 @@ library;
 
 import 'package:flutter/foundation.dart';
 
+import '../../core/reconcile/reconciliation.dart';
 import '../../core/sms/sms_parser.dart';
 import '../transactions/data/transaction_record.dart';
 import '../transactions/data/transaction_repository.dart';
@@ -17,6 +18,7 @@ class DashboardController extends ChangeNotifier {
   FinanceSummary summary = const FinanceSummary(incomeRial: 0, expenseRial: 0);
   List<TransactionRecord> transactions = const [];
   int needsReviewCount = 0;
+  List<BalanceGap> balanceGaps = const [];
 
   List<TransactionRecord> get reviewItems =>
       transactions.where((t) => t.needsReview).toList();
@@ -27,6 +29,7 @@ class DashboardController extends ChangeNotifier {
     summary = await repository.summary();
     transactions = await repository.getAll(limit: 200);
     needsReviewCount = await repository.needsReviewCount();
+    balanceGaps = const ReconciliationService().findGaps(transactions);
     loading = false;
     notifyListeners();
   }
