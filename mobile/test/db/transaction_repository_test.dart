@@ -123,4 +123,69 @@ void main() {
     expect(s.expenseRial, 750000);
     expect(await repo.count(), 1);
   });
+
+  Future<int> outboxCount() async =>
+      Sqflite.firstIntValue(await db.rawQuery('SELECT COUNT(*) FROM outbox')) ?? 0;
+
+  test('needsReviewCount و فیلترهای getAll', () async {
+    // یک تراکنش نیازمند بازبینی (بانک ناشناخته) و یک عادی
+    await repo.saveParsed(
+      parser.parse(sender: 'Digikala', body: 'خرید مبلغ 100,000 ریال'),
+      sender: 'Digikala',
+    );
+    await repo.saveParsed(
+      parser.parse(sender: 'ملی', body: 'واریز مبلغ 5,000,000 ریال'),
+      sender: 'ملی',
+    );
+
+    expect(await repo.needsReviewCount(), 1);
+    expect((await repo.getAll(needsReview: true)), hasLength(1));
+    expect((await repo.getAll(kind: 'income')), hasLength(1));
+    expect((await repo.getAll(kind: 'expense')), hasLength(1));
+  });
+
+  test('updateTransaction فیلدها را تغییر و بازبینی را پاک می‌کند', () async {
+    final outcome = await repo.saveParsed(
+      parser.parse(sender: 'Digikala', body: 'خرید مبلغ 100,000 ریال'),
+      sender: 'Digikala',
+    );
+    expect(await repo.needsReviewCount(), 1);
+
+    await repo.updateTransaction(
+      outcome.id,
+      counterparty: 'دیجی‌کالا',
+      needsReview: false,
+    );
+
+    final rec = (await repo.getAll()).first;
+    expect(rec.counterparty, 'دیجی‌کالا');
+    expect(rec.needsReview, isFalse);
+    expect(await repo.needsReviewCount(), 0);
+  });
+
+  test('update نوع نامشخص به معتبر → به outbox صف می‌شود', () async {
+    // پیامک نامرتبط → نوع unknown → به outbox نمی‌رود
+    final outcome = await repo.saveParsed(
+      parser.parse(sender: 'BankMellat', body: 'سلام دوست عزیز'),
+      sender: 'BankMellat',
+    );
+    expect(await outboxCount(), 0);
+
+    // کاربر در بازبینی نوع را تعیین می‌کند
+    await repo.updateTransaction(outcome.id, kind: 'expense', amountRial: 50000);
+    expect(await outboxCount(), 1);
+  });
+
+  test('deleteTransaction تراکنش و outbox را حذف می‌کند', () async {
+    final outcome = await repo.saveParsed(
+      parser.parse(sender: 'ملی', body: 'واریز مبلغ 5,000,000 ریال'),
+      sender: 'ملی',
+    );
+    expect(await repo.count(), 1);
+    expect(await outboxCount(), 1);
+
+    await repo.deleteTransaction(outcome.id);
+    expect(await repo.count(), 0);
+    expect(await outboxCount(), 0);
+  });
 }

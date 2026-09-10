@@ -2,6 +2,7 @@ import 'package:economy/core/format/money_format.dart';
 import 'package:economy/core/sms/sms_parser.dart';
 import 'package:economy/features/dashboard/dashboard_controller.dart';
 import 'package:economy/features/dashboard/dashboard_screen.dart';
+import 'package:economy/features/transactions/edit_transaction_sheet.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -97,5 +98,42 @@ void main() {
     // تخلیه‌ی تایمرهای اسنک‌بار
     await tester.pump(const Duration(seconds: 5));
     await tester.pumpAndSettle();
+  });
+
+  testWidgets('نشان بازبینی تعداد موارد را نشان می‌دهد', (tester) async {
+    store.seed(parser.parse(sender: 'Digikala', body: 'خرید مبلغ 100,000 ریال'),
+        sender: 'Digikala');
+
+    await tester.pumpWidget(app());
+    await tester.pumpAndSettle();
+
+    expect(
+      find.descendant(
+        of: find.byKey(kReviewActionKey),
+        matching: find.text('1'),
+      ),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('ویرایش تراکنش از طریق ضربه روی ردیف جمع را به‌روز می‌کند',
+      (tester) async {
+    store.seed(
+        parser.parse(
+            sender: 'BankMellat', body: 'خرید مبلغ 3,000,000 ریال از کارت 1234'),
+        sender: 'BankMellat');
+
+    await tester.pumpWidget(app());
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byType(ListTile).first);
+    await tester.pumpAndSettle();
+
+    // مبلغ را به ۵۰۰٬۰۰۰ تومان (۵٬۰۰۰٬۰۰۰ ریال) تغییر بده
+    await tester.enterText(find.byKey(kEditAmountKey), '500000');
+    await tester.tap(find.byKey(kEditSaveKey));
+    await tester.pumpAndSettle();
+
+    expect(textOfKey(tester, kExpenseValueKey), formatToman(5000000));
   });
 }

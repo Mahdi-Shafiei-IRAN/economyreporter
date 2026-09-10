@@ -16,14 +16,48 @@ class DashboardController extends ChangeNotifier {
   bool loading = true;
   FinanceSummary summary = const FinanceSummary(incomeRial: 0, expenseRial: 0);
   List<TransactionRecord> transactions = const [];
+  int needsReviewCount = 0;
+
+  List<TransactionRecord> get reviewItems =>
+      transactions.where((t) => t.needsReview).toList();
 
   Future<void> load() async {
     loading = true;
     notifyListeners();
     summary = await repository.summary();
     transactions = await repository.getAll(limit: 200);
+    needsReviewCount = await repository.needsReviewCount();
     loading = false;
     notifyListeners();
+  }
+
+  Future<void> updateTransaction(
+    String id, {
+    String? kind,
+    int? amountRial,
+    String? counterparty,
+    String? description,
+    bool? needsReview,
+  }) async {
+    await repository.updateTransaction(
+      id,
+      kind: kind,
+      amountRial: amountRial,
+      counterparty: counterparty,
+      description: description,
+      needsReview: needsReview,
+    );
+    await load();
+  }
+
+  /// تأیید یک تراکنش در صف بازبینی: نوع نهایی + پاک‌کردن پرچم بازبینی.
+  Future<void> confirmReview(String id, {String? kind}) async {
+    await updateTransaction(id, kind: kind, needsReview: false);
+  }
+
+  Future<void> deleteTransaction(String id) async {
+    await repository.deleteTransaction(id);
+    await load();
   }
 
   /// یک پیامک را پارس و ذخیره می‌کند و سپس داشبورد را تازه‌سازی می‌کند.

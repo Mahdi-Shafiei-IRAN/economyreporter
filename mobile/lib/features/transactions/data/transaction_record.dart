@@ -110,6 +110,39 @@ class TransactionRecord {
         'updated_at': updatedAt.toIso8601String(),
       };
 
+  /// نسخه‌ی جدید با فیلدهای ویرایش‌شده (بقیه ثابت).
+  TransactionRecord copyWith({
+    String? kind,
+    int? amountRial,
+    String? counterparty,
+    String? description,
+    bool? needsReview,
+    String? syncStatus,
+    DateTime? updatedAt,
+  }) {
+    return TransactionRecord(
+      id: id,
+      bankId: bankId,
+      kind: kind ?? this.kind,
+      amountRial: amountRial ?? this.amountRial,
+      balanceAfterRial: balanceAfterRial,
+      rawAmount: rawAmount,
+      rawUnit: rawUnit,
+      cardLast4: cardLast4,
+      counterparty: counterparty ?? this.counterparty,
+      description: description ?? this.description,
+      transactionDate: transactionDate,
+      clientCreatedAt: clientCreatedAt,
+      source: source,
+      sourceMessageHash: sourceMessageHash,
+      deviceId: deviceId,
+      needsReview: needsReview ?? this.needsReview,
+      syncStatus: syncStatus ?? this.syncStatus,
+      createdAt: createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+    );
+  }
+
   /// payload برای endpoint سرور (`POST /sync/transactions/`).
   /// حساب/کارت/دسته فعلاً ارسال نمی‌شوند (در فاز بازبینی لینک می‌شوند).
   Map<String, Object?> toSyncPayload() => {

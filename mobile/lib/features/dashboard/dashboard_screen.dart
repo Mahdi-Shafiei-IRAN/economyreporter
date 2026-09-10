@@ -5,8 +5,10 @@ import 'package:flutter/material.dart';
 
 import '../../core/format/money_format.dart';
 import '../../core/sms/bank_registry.dart';
+import '../review/review_screen.dart';
 import '../transactions/data/transaction_record.dart';
 import '../transactions/data/transaction_repository.dart';
+import '../transactions/edit_transaction_sheet.dart';
 import 'dashboard_controller.dart';
 
 /// کلیدهای تست.
@@ -18,6 +20,7 @@ const kSmsSenderFieldKey = Key('sms-sender-field');
 const kSmsBodyFieldKey = Key('sms-body-field');
 const kSmsSaveButtonKey = Key('sms-save-button');
 const kEmptyStateKey = Key('empty-state');
+const kReviewActionKey = Key('review-action');
 
 class DashboardScreen extends StatefulWidget {
   final DashboardController controller;
@@ -69,54 +72,75 @@ class _DashboardScreenState extends State<DashboardScreen> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
   }
 
+  void _openReview() {
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => ReviewScreen(controller: _c)),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('مدیریت مالی خانواده'),
-        actions: [
-          if (widget.onSync != null)
-            IconButton(
-              icon: const Icon(Icons.cloud_upload_outlined),
-              tooltip: 'همگام‌سازی',
-              onPressed: _sync,
-            ),
-          if (widget.onLogout != null)
-            IconButton(
-              icon: const Icon(Icons.logout),
-              tooltip: 'خروج',
-              onPressed: widget.onLogout,
-            ),
-        ],
-      ),
-      floatingActionButton: FloatingActionButton.extended(
-        key: kAddSmsFabKey,
-        onPressed: _openAddSmsSheet,
-        icon: const Icon(Icons.sms_outlined),
-        label: const Text('افزودن پیامک'),
-      ),
-      body: AnimatedBuilder(
-        animation: _c,
-        builder: (context, _) {
-          if (_c.loading) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          return RefreshIndicator(
-            onRefresh: _c.load,
-            child: ListView(
-              padding: const EdgeInsets.fromLTRB(12, 12, 12, 96),
-              children: [
-                _SummaryCard(summary: _c.summary),
-                const SizedBox(height: 16),
-                if (_c.transactions.isEmpty)
-                  const _EmptyState()
-                else
-                  ..._c.transactions.map((t) => _TransactionTile(record: t)),
-              ],
-            ),
-          );
-        },
-      ),
+    return AnimatedBuilder(
+      animation: _c,
+      builder: (context, _) {
+        return Scaffold(
+          appBar: AppBar(
+            title: const Text('مدیریت مالی خانواده'),
+            actions: [
+              IconButton(
+                key: kReviewActionKey,
+                icon: Badge(
+                  isLabelVisible: _c.needsReviewCount > 0,
+                  label: Text('${_c.needsReviewCount}'),
+                  child: const Icon(Icons.rate_review_outlined),
+                ),
+                tooltip: 'بازبینی',
+                onPressed: _openReview,
+              ),
+              if (widget.onSync != null)
+                IconButton(
+                  icon: const Icon(Icons.cloud_upload_outlined),
+                  tooltip: 'همگام‌سازی',
+                  onPressed: _sync,
+                ),
+              if (widget.onLogout != null)
+                IconButton(
+                  icon: const Icon(Icons.logout),
+                  tooltip: 'خروج',
+                  onPressed: widget.onLogout,
+                ),
+            ],
+          ),
+          floatingActionButton: FloatingActionButton.extended(
+            key: kAddSmsFabKey,
+            onPressed: _openAddSmsSheet,
+            icon: const Icon(Icons.sms_outlined),
+            label: const Text('افزودن پیامک'),
+          ),
+          body: _c.loading
+              ? const Center(child: CircularProgressIndicator())
+              : RefreshIndicator(
+                  onRefresh: _c.load,
+                  child: ListView(
+                    padding: const EdgeInsets.fromLTRB(12, 12, 12, 96),
+                    children: [
+                      _SummaryCard(summary: _c.summary),
+                      const SizedBox(height: 16),
+                      if (_c.transactions.isEmpty)
+                        const _EmptyState()
+                      else
+                        ..._c.transactions.map(
+                          (t) => _TransactionTile(
+                            record: t,
+                            onTap: () =>
+                                showEditTransactionSheet(context, _c, t),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+        );
+      },
     );
   }
 }
@@ -190,7 +214,8 @@ class _SummaryItem extends StatelessWidget {
 
 class _TransactionTile extends StatelessWidget {
   final TransactionRecord record;
-  const _TransactionTile({required this.record});
+  final VoidCallback? onTap;
+  const _TransactionTile({required this.record, this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -204,6 +229,7 @@ class _TransactionTile extends StatelessWidget {
       elevation: 0,
       margin: const EdgeInsets.symmetric(vertical: 4),
       child: ListTile(
+        onTap: onTap,
         leading: CircleAvatar(
           backgroundColor: meta.color.withOpacity(0.15),
           child: Icon(meta.icon, color: meta.color),

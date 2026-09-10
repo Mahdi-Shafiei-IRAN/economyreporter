@@ -48,11 +48,59 @@ class FakeTransactionStore implements TransactionStore {
   }
 
   @override
-  Future<List<TransactionRecord>> getAll({int? limit}) async {
-    final sorted = [..._items]
-      ..sort((a, b) => (b.clientCreatedAt ?? b.createdAt)
-          .compareTo(a.clientCreatedAt ?? a.createdAt));
-    return limit == null ? sorted : sorted.take(limit).toList();
+  Future<List<TransactionRecord>> getAll({
+    int? limit,
+    String? kind,
+    bool? needsReview,
+    String? search,
+  }) async {
+    var items = [..._items];
+    if (kind != null) items = items.where((t) => t.kind == kind).toList();
+    if (needsReview != null) {
+      items = items.where((t) => t.needsReview == needsReview).toList();
+    }
+    if (search != null && search.trim().isNotEmpty) {
+      final q = search.trim();
+      items = items
+          .where((t) =>
+              (t.counterparty?.contains(q) ?? false) ||
+              (t.description?.contains(q) ?? false) ||
+              (t.bankId?.contains(q) ?? false))
+          .toList();
+    }
+    items.sort((a, b) => (b.clientCreatedAt ?? b.createdAt)
+        .compareTo(a.clientCreatedAt ?? a.createdAt));
+    return limit == null ? items : items.take(limit).toList();
+  }
+
+  @override
+  Future<int> needsReviewCount() async =>
+      _items.where((t) => t.needsReview).length;
+
+  @override
+  Future<void> updateTransaction(
+    String id, {
+    String? kind,
+    int? amountRial,
+    String? counterparty,
+    String? description,
+    bool? needsReview,
+  }) async {
+    final index = _items.indexWhere((t) => t.id == id);
+    if (index == -1) return;
+    _items[index] = _items[index].copyWith(
+      kind: kind,
+      amountRial: amountRial,
+      counterparty: counterparty,
+      description: description,
+      needsReview: needsReview,
+      updatedAt: DateTime.now().toUtc(),
+    );
+  }
+
+  @override
+  Future<void> deleteTransaction(String id) async {
+    _items.removeWhere((t) => t.id == id);
   }
 
   @override

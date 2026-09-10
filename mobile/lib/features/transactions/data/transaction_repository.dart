@@ -39,8 +39,23 @@ abstract class TransactionStore {
     String? deviceId,
     DateTime? receivedAt,
   });
-  Future<List<TransactionRecord>> getAll({int? limit});
+  Future<List<TransactionRecord>> getAll({
+    int? limit,
+    String? kind,
+    bool? needsReview,
+    String? search,
+  });
   Future<FinanceSummary> summary({DateTime? from, DateTime? to});
+  Future<int> needsReviewCount();
+  Future<void> updateTransaction(
+    String id, {
+    String? kind,
+    int? amountRial,
+    String? counterparty,
+    String? description,
+    bool? needsReview,
+  });
+  Future<void> deleteTransaction(String id);
 }
 
 class TransactionRepository implements TransactionStore {
@@ -111,9 +126,31 @@ class TransactionRepository implements TransactionStore {
   }
 
   @override
-  Future<List<TransactionRecord>> getAll({int? limit}) async {
+  Future<List<TransactionRecord>> getAll({
+    int? limit,
+    String? kind,
+    bool? needsReview,
+    String? search,
+  }) async {
+    final where = <String>[];
+    final args = <Object?>[];
+    if (kind != null) {
+      where.add('kind = ?');
+      args.add(kind);
+    }
+    if (needsReview != null) {
+      where.add('needs_review = ?');
+      args.add(needsReview ? 1 : 0);
+    }
+    if (search != null && search.trim().isNotEmpty) {
+      where.add('(counterparty LIKE ? OR description LIKE ? OR bank_id LIKE ?)');
+      final q = '%${search.trim()}%';
+      args..add(q)..add(q)..add(q);
+    }
     final rows = await _db.query(
       'transactions',
+      where: where.isEmpty ? null : where.join(' AND '),
+      whereArgs: where.isEmpty ? null : args,
       orderBy: 'COALESCE(transaction_date, client_created_at, created_at) DESC',
       limit: limit,
     );
@@ -125,6 +162,53 @@ class TransactionRepository implements TransactionStore {
           await _db.rawQuery('SELECT COUNT(*) FROM transactions'),
         ) ??
         0;
+  }
+
+  @override
+  Future<int> needsReviewCount() async {
+    return Sqflite.firstIntValue(
+          await _db.rawQuery(
+            'SELECT COUNT(*) FROM transactions WHERE needs_review = 1',
+          ),
+        ) ??
+        0;
+  }
+
+  @override
+  Future<void> updateTransaction(
+    String id, {
+    String? kind,
+    int? amountRial,
+    String? counterparty,
+    String? description,
+    bool? needsReview,
+  }) async {
+    final now = DateTime.now().toUtc();
+    final data = <String, Object?>{'updated_at': now.toIso8601String()};
+    if (kind != null) data['kind'] = kind;
+    if (amountRial != null) data['amount_rial'] = amountRial;
+    if (counterparty != null) data['counterparty'] = counterparty;
+    if (description != null) data['description'] = description;
+    if (needsReview != null) data['needs_review'] = needsReview ? 1 : 0;
+    await _db.update('transactions', data, where: 'id = ?', whereArgs: [id]);
+
+    final rows =
+        await _db.query('transactions', where: 'id = ?', whereArgs: [id], limit: 1);
+    if (rows.isEmpty) return;
+    final record = TransactionRecord.fromMap(rows.first);
+
+    // اگر نوع معتبر شد و هنوز sync نشده، با payload به‌روز دوباره صف کن.
+    if (record.kind != 'unknown' && record.syncStatus != 'synced') {
+      await _db.update('transactions', {'sync_status': 'pending'},
+          where: 'id = ?', whereArgs: [id]);
+      await _enqueueOutbox(record);
+    }
+  }
+
+  @override
+  Future<void> deleteTransaction(String id) async {
+    await _db.delete('outbox', where: 'transaction_id = ?', whereArgs: [id]);
+    await _db.delete('transactions', where: 'id = ?', whereArgs: [id]);
   }
 
   /// جمع درآمد/هزینه‌ی بازه (transfer و unknown و رکورد بدون مبلغ حذف می‌شوند).
