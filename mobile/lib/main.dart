@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:uuid/uuid.dart';
 
 import 'core/auth/auth_repository.dart';
 import 'core/auth/token_store.dart';
 import 'core/config/app_config.dart';
 import 'core/database/app_database.dart';
 import 'core/network/api_client.dart';
+import 'core/sync/remote_transaction_api.dart';
+import 'core/sync/sync_service.dart';
 import 'features/auth/auth_controller.dart';
 import 'features/auth/login_screen.dart';
 import 'features/dashboard/dashboard_controller.dart';
@@ -37,7 +40,8 @@ class EconomyApp extends StatelessWidget {
 class _Services {
   final AuthController auth;
   final DashboardController dashboard;
-  const _Services(this.auth, this.dashboard);
+  final SyncService sync;
+  const _Services(this.auth, this.dashboard, this.sync);
 }
 
 class _Bootstrap extends StatefulWidget {
@@ -59,7 +63,17 @@ class _BootstrapState extends State<_Bootstrap> {
 
     final db = await openAppDatabase();
     final dashboard = DashboardController(TransactionRepository(db));
-    return _Services(auth, dashboard);
+
+    final sync = SyncService(
+      db: db,
+      api: DioRemoteTransactionApi(api.dio),
+      deviceId: const Uuid().v4(),
+    );
+    // تلاش اولیه برای همگام‌سازی آنچه هنوز نرفته (در صورت آنلاین‌بودن).
+    if (auth.authenticated) {
+      sync.sync().ignore();
+    }
+    return _Services(auth, dashboard, sync);
   }
 
   @override
@@ -102,6 +116,10 @@ class _Root extends StatelessWidget {
           return DashboardScreen(
             controller: services.dashboard,
             onLogout: services.auth.logout,
+            onSync: () async {
+              final s = await services.sync.sync();
+              return 'همگام‌سازی: ${s.synced} موفق، ${s.failed} ناموفق';
+            },
           );
         }
         return LoginScreen(controller: services.auth);

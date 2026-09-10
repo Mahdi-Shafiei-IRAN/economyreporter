@@ -23,7 +23,15 @@ class DashboardScreen extends StatefulWidget {
   final DashboardController controller;
   final VoidCallback? onLogout;
 
-  const DashboardScreen({super.key, required this.controller, this.onLogout});
+  /// همگام‌سازی دستی؛ پیام نتیجه را برمی‌گرداند تا در snackbar نشان داده شود.
+  final Future<String> Function()? onSync;
+
+  const DashboardScreen({
+    super.key,
+    required this.controller,
+    this.onLogout,
+    this.onSync,
+  });
 
   @override
   State<DashboardScreen> createState() => _DashboardScreenState();
@@ -55,12 +63,24 @@ class _DashboardScreenState extends State<DashboardScreen> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
   }
 
+  Future<void> _sync() async {
+    final message = await widget.onSync!();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: const Text('مدیریت مالی خانواده'),
         actions: [
+          if (widget.onSync != null)
+            IconButton(
+              icon: const Icon(Icons.cloud_upload_outlined),
+              tooltip: 'همگام‌سازی',
+              onPressed: _sync,
+            ),
           if (widget.onLogout != null)
             IconButton(
               icon: const Icon(Icons.logout),

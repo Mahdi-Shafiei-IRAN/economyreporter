@@ -1,6 +1,8 @@
 /// مخزن تراکنش‌ها روی پایگاه‌داده‌ی محلی.
 library;
 
+import 'dart:convert';
+
 import 'package:sqflite/sqflite.dart';
 import 'package:uuid/uuid.dart';
 
@@ -83,12 +85,29 @@ class TransactionRepository implements TransactionStore {
       deviceId: deviceId,
     );
     await _db.insert('transactions', record.toMap());
+    await _enqueueOutbox(record);
     return TxInsertOutcome(TxInsertStatus.created, id);
   }
 
   /// درج مستقیم یک رکورد (برای ثبت دستی یا تست).
   Future<void> insert(TransactionRecord record) async {
     await _db.insert('transactions', record.toMap());
+    await _enqueueOutbox(record);
+  }
+
+  /// صف‌کردن تراکنش برای همگام‌سازی. تراکنش با نوع نامشخص تا بازبینی sync نمی‌شود.
+  Future<void> _enqueueOutbox(TransactionRecord record) async {
+    if (record.kind == 'unknown') return;
+    await _db.insert(
+      'outbox',
+      {
+        'transaction_id': record.id,
+        'payload': jsonEncode(record.toSyncPayload()),
+        'status': 'pending',
+        'retry_count': 0,
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
   }
 
   @override

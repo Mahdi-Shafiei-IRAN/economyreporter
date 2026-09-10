@@ -110,6 +110,25 @@ class TransactionRecord {
         'updated_at': updatedAt.toIso8601String(),
       };
 
+  /// payload برای endpoint سرور (`POST /sync/transactions/`).
+  /// حساب/کارت/دسته فعلاً ارسال نمی‌شوند (در فاز بازبینی لینک می‌شوند).
+  Map<String, Object?> toSyncPayload() => {
+        'id': id,
+        'kind': kind,
+        'amount_rial': amountRial,
+        'balance_after_rial': balanceAfterRial,
+        'raw_amount': rawAmount,
+        'raw_unit': rawUnit,
+        'counterparty': counterparty,
+        'description': description ?? '',
+        'source': source,
+        'source_message_hash': sourceMessageHash ?? '',
+        'device_id': deviceId ?? '',
+        'needs_review': needsReview,
+        'transaction_date': transactionDate?.toIso8601String(),
+        'client_created_at': clientCreatedAt?.toIso8601String(),
+      };
+
   factory TransactionRecord.fromMap(Map<String, Object?> map) {
     DateTime? parseDate(Object? v) =>
         v == null ? null : DateTime.parse(v as String);
