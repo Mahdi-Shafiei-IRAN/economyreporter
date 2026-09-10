@@ -1,0 +1,10 @@
+{
+  "synthetic": true,
+  "sender": "BankMellat",
+  "body": "مشتری گرامی، از خدمات بانک متشکریم.",
+  "expect": {
+    "kind": "unknown",
+    "amountRial": null,
+    "needsReview": true
+  }
+}

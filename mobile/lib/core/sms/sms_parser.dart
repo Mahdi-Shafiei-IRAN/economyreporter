@@ -10,6 +10,7 @@ library;
 
 import 'bank_registry.dart';
 import 'digit_utils.dart';
+import 'jalali.dart';
 import 'models.dart';
 
 class SmsParser {
@@ -26,6 +27,11 @@ class SmsParser {
   static final _cardRe = RegExp(r'کارت\s*:?\s*([0-9x\*\.\-]{4,})');
   static final _fourDigitsRe = RegExp(r'[0-9]{4}');
 
+  // استخراج طرف حساب/پذیرنده: «بابت ...»، «به کارت ...»، «پذیرنده/فروشگاه ...».
+  static final _reasonRe = RegExp(r'بابت\s*:?\s*(.+?)(?:\s+مانده|\s+تاریخ|\s+\d{2,4}/|$)');
+  static final _destCardRe = RegExp(r'به\s*کارت\s*:?\s*([0-9x\*\.\-]{4,})');
+  static final _merchantRe = RegExp(r'(?:پذیرنده|فروشگاه)\s*:?\s*(.+?)(?:\s+مانده|\s+تاریخ|$)');
+
   ParsedTransaction parse({required String sender, required String body}) {
     // قدم ۱: تشخیص بانک
     final bank = detectBank(sender);
@@ -38,6 +44,8 @@ class SmsParser {
     final balance = _extractBalance(normalized);
     final amountResult = _extractAmount(normalized, balance);
     final cardLast4 = _extractCardLast4(normalized);
+    final occurredAt = extractOccurredAt(normalized);
+    final counterparty = _extractCounterparty(normalized);
 
     final needsReview =
         amountResult.amountRial == null || kind == TxKind.unknown || bank == null;
@@ -53,8 +61,27 @@ class SmsParser {
       rawUnit: amountResult.unit,
       balanceAfterRial: balance,
       cardLast4: cardLast4,
+      counterparty: counterparty,
+      occurredAt: occurredAt,
       needsReview: needsReview,
     );
+  }
+
+  String? _extractCounterparty(String normalized) {
+    final reason = _reasonRe.firstMatch(normalized)?.group(1)?.trim();
+    if (reason != null && reason.isNotEmpty) return reason;
+
+    final dest = _destCardRe.firstMatch(normalized);
+    if (dest != null) {
+      final digits =
+          _fourDigitsRe.allMatches(dest.group(1)!).map((e) => e.group(0)!).toList();
+      if (digits.isNotEmpty) return 'کارت مقصد ${digits.last}';
+    }
+
+    final merchant = _merchantRe.firstMatch(normalized)?.group(1)?.trim();
+    if (merchant != null && merchant.isNotEmpty) return merchant;
+
+    return null;
   }
 
   TxKind _detectKind(String compacted) {

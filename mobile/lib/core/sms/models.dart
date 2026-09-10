@@ -33,6 +33,9 @@ class ParsedTransaction {
   /// طرف حساب/پذیرنده (نام فروشگاه/پایانه یا کارت مقصد).
   final String? counterparty;
 
+  /// زمانِ رخداد استخراج‌شده از پیامک (UTC)، اگر تاریخ در متن بود.
+  final DateTime? occurredAt;
+
   /// فرستنده‌ی خام پیامک.
   final String rawSender;
 
@@ -55,6 +58,7 @@ class ParsedTransaction {
     this.balanceAfterRial,
     this.cardLast4,
     this.counterparty,
+    this.occurredAt,
   });
 
   @override

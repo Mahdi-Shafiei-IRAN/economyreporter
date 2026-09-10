@@ -129,4 +129,33 @@ void main() {
       expect(r.needsReview, isTrue);
     });
   });
+
+  group('parse — تاریخ و طرف حساب', () {
+    test('تاریخ شمسی استخراج می‌شود', () {
+      final r = parser.parse(
+        sender: 'BankMellat',
+        body: 'برداشت مبلغ 500,000 ریال از کارت 1234 در 1405/06/19 12:30',
+      );
+      expect(r.occurredAt, isNotNull);
+      expect(r.occurredAt!.isUtc, isTrue);
+    });
+
+    test('کارت مقصد در انتقال به‌عنوان طرف حساب', () {
+      final r = parser.parse(
+        sender: 'BankMellat',
+        body: 'انتقال کارت به کارت مبلغ 500,000 ریال از کارت 1234 به کارت 5678',
+      );
+      expect(r.kind, TxKind.transfer);
+      expect(r.cardLast4, '1234');
+      expect(r.counterparty, 'کارت مقصد 5678');
+    });
+
+    test('«بابت» به‌عنوان طرف حساب', () {
+      final r = parser.parse(
+        sender: 'ملی',
+        body: 'خرید مبلغ 200,000 ریال بابت نان مانده 1,000,000 ریال',
+      );
+      expect(r.counterparty, 'نان');
+    });
+  });
 }

@@ -1,0 +1,14 @@
+{
+  "synthetic": true,
+  "sender": "BankMellat",
+  "body": "برداشت مبلغ 2,500,000 ریال از کارت 1234\n1405/06/19 12:30 مانده 43,000,000 ریال",
+  "expect": {
+    "bankId": "mellat",
+    "kind": "expense",
+    "amountRial": 2500000,
+    "cardLast4": "1234",
+    "balanceAfterRial": 43000000,
+    "hasDate": true,
+    "needsReview": false
+  }
+}

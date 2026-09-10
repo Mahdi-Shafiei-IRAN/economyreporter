@@ -76,7 +76,7 @@ class TransactionRecord {
       rawUnit: parsed.rawUnit,
       cardLast4: parsed.cardLast4,
       counterparty: parsed.counterparty,
-      transactionDate: null,
+      transactionDate: parsed.occurredAt,
       clientCreatedAt: now,
       source: 'sms',
       sourceMessageHash: sourceMessageHash,

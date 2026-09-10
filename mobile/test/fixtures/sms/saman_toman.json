@@ -1,0 +1,12 @@
+{
+  "synthetic": true,
+  "sender": "SB24",
+  "body": "خرید مبلغ 250000 تومان از کارت 5678",
+  "expect": {
+    "bankId": "saman",
+    "kind": "expense",
+    "amountRial": 2500000,
+    "cardLast4": "5678",
+    "needsReview": false
+  }
+}

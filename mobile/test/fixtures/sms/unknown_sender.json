@@ -1,0 +1,11 @@
+{
+  "synthetic": true,
+  "sender": "Digikala",
+  "body": "خرید مبلغ 100,000 ریال",
+  "expect": {
+    "bankId": null,
+    "kind": "expense",
+    "amountRial": 100000,
+    "needsReview": true
+  }
+}

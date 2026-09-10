@@ -1,0 +1,13 @@
+{
+  "synthetic": true,
+  "sender": "BankMellat",
+  "body": "انتقال کارت به کارت مبلغ 500,000 ریال از کارت 1234 به کارت 5678",
+  "expect": {
+    "bankId": "mellat",
+    "kind": "transfer",
+    "amountRial": 500000,
+    "cardLast4": "1234",
+    "counterparty": "کارت مقصد 5678",
+    "needsReview": false
+  }
+}

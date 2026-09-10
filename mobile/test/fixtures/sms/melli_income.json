@@ -1,0 +1,13 @@
+{
+  "synthetic": true,
+  "sender": "بانک ملی ایران",
+  "body": "واریز مبلغ 10,000,000 ریال به حساب شما مانده 20,000,000 ریال 1405/06/20",
+  "expect": {
+    "bankId": "melli",
+    "kind": "income",
+    "amountRial": 10000000,
+    "balanceAfterRial": 20000000,
+    "hasDate": true,
+    "needsReview": false
+  }
+}
