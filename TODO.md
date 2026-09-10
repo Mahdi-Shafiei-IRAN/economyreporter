@@ -22,7 +22,13 @@
   - ⬜ استخراج تاریخ (نیازمند تبدیل تقویم شمسی — بعداً)
   - ✅ مدل `ParsedTransaction` (`models.dart`)
   - ✅ **تست واحد و اجرای واقعی (`flutter test`) — پاس شد**
-- ⬜ لایه‌ی SQLite (ذخیره‌ی تراکنش‌ها + outbox)
+- ✅ **لایه‌ی SQLite (تست‌شده — روی ویندوز با sqflite_common_ffi)**
+  - ✅ اسکیما و باز کردن دیتابیس (`core/database/app_database.dart`) — جدول‌های transactions و outbox + ایندکس‌ها + ایندکس یکتای جزئی ضدتکرار
+  - ✅ مدل ردیف `TransactionRecord` + نگاشت از/به Map و از `ParsedTransaction`
+  - ✅ اثرانگشت پیامک `smsFingerprint` (`core/sms/sms_fingerprint.dart`)
+  - ✅ مخزن `TransactionRepository`: درج، ضدتکرار، لیست، `summary` (درآمد/هزینه/مانده با حذف transfer)
+  - ✅ کمک‌تابع تست FFI با fallback به winsqlite3 (`test/helpers/db_test_helper.dart`)
+  - ✅ **۶ تست دیتابیس — همه پاس** (مجموع تست‌ها: ۲۲)
 - ⬜ SMS Receiver اندروید (دریافت پیامک واقعی) — نیازمند گوشی/امولاتور + Android SDK
 - ⬜ UI: لیست تراکنش‌ها + جمع ساده‌ی درآمد/هزینه
 - ⬜ **تست عملی روی گوشی/امولاتور قبل از فاز بعد**
