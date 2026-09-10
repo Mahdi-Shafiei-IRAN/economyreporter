@@ -17,6 +17,7 @@ class SecureTokenStore implements TokenStore {
 
   final FlutterSecureStorage _storage;
 
+  // در این نسخه، ذخیره‌سازی به‌صورت پیش‌فرض با رمزنگاری پشتیبانِ Keystore انجام می‌شود.
   SecureTokenStore([FlutterSecureStorage? storage])
       : _storage = storage ?? const FlutterSecureStorage();
 

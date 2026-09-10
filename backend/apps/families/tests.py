@@ -1,4 +1,5 @@
 from django.contrib.auth import get_user_model
+from django.core.cache import cache
 from django.urls import reverse
 from rest_framework.test import APITestCase
 
@@ -11,6 +12,7 @@ PWD = "StrongPass123"
 
 class FamilyTests(APITestCase):
     def setUp(self):
+        cache.clear()  # سطل throttle auth را بین تست‌ها ایزوله کن
         self.owner = User.objects.create_user(email="owner@x.com", password=PWD)
         self.member = User.objects.create_user(email="member@x.com", password=PWD)
         self.outsider = User.objects.create_user(email="out@x.com", password=PWD)

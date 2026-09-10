@@ -121,6 +121,11 @@ REST_FRAMEWORK = {
     "DEFAULT_PERMISSION_CLASSES": (
         "rest_framework.permissions.IsAuthenticated",
     ),
+    # rate limiting فقط روی endpointهای احراز هویت (ضد brute-force) اعمال می‌شود
+    # (throttle به‌صورت scoped روی همان ویوها؛ سراسری نیست تا رفتار بقیه‌ی API ساده بماند).
+    "DEFAULT_THROTTLE_RATES": {
+        "auth": "10/min",
+    },
 }
 
 SIMPLE_JWT = {
