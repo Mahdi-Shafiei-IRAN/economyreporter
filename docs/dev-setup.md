@@ -105,6 +105,13 @@ GET/POST /api/v1/family/        لیست/ساخت خانواده
 GET  /api/v1/family/{id}/members/
 POST /api/v1/family/{id}/members/invite/     (فقط مالک)
 DELETE /api/v1/family/{id}/members/{mid}/     (فقط مالک)
+
+# فاز ۴: CRUD + Sync + داشبورد (همه محدود به خانواده‌ی کاربر)
+GET/POST/PATCH/DELETE /api/v1/accounts/    و  /api/v1/cards/
+GET/POST/PATCH/DELETE /api/v1/categories/  و  /api/v1/budgets/
+GET/POST/PATCH/DELETE /api/v1/transactions/    (فیلتر: kind, category, account, card, member, needs_review)
+POST /api/v1/sync/transactions/     آپلود دسته‌ای idempotent (بدنه: device_id, transactions[])
+GET  /api/v1/dashboard/summary/     جمع درآمد/هزینه/مانده + تفکیک عضو/دسته/کارت (?from=&to=)
 ```
 
 ### سوییچ به PostgreSQL (اختیاری، مثلاً با Docker)

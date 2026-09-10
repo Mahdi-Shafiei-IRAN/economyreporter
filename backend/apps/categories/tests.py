@@ -1,6 +1,8 @@
 from django.db import IntegrityError, transaction
 from django.test import TestCase
+from django.urls import reverse
 
+from apps.common.testutils import ApiTestCase
 from apps.families.models import FamilyGroup
 
 from .models import Category
@@ -26,3 +28,28 @@ class CategoryModelTests(TestCase):
         Category.objects.create(family=self.family, name="خوراک")
         Category.objects.create(family=other, name="خوراک")
         self.assertEqual(Category.objects.filter(name="خوراک").count(), 2)
+
+
+class CategoryApiTests(ApiTestCase):
+    def setUp(self):
+        self.user = self.create_user("owner@x.com")
+        self.family = self.create_family_with(self.user)
+        self.auth(self.user)
+
+    def test_create_category(self):
+        resp = self.client.post(
+            reverse("category-list"),
+            {"name": "خوراک", "color": "#f00"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 201)
+        self.assertEqual(str(resp.data["family"]), str(self.family.id))
+
+    def test_list_scoped_to_family(self):
+        Category.objects.create(family=self.family, name="خوراک")
+        outsider = self.create_user("out@x.com")
+        self.create_family_with(outsider, name="دیگر")
+        self.auth(outsider)
+        resp = self.client.get(reverse("category-list"))
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(len(resp.data), 0)

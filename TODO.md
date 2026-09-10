@@ -62,9 +62,17 @@
   - ✅ `apps/budgets`: `Budget` (unique در category+period)
   - ✅ رفتار SET_NULL هنگام حذف دسته/حساب/کارت (تراکنش حفظ می‌شود)
 
+## فاز ۴ — CRUD API + Sync + داشبورد
+- ✅ **API کامل + تست (۱۶ تست API، مجموع بک‌اند: ۴۴ پاس)**
+  - ✅ `apps/common`: تشخیص خانواده‌ی کاربر (`resolve_family`) + ابزار تست
+  - ✅ ViewSet برای accounts/cards/categories/budgets/transactions با **ایزوله‌سازی خانواده** (queryset محدود + غیرعضو ۴۰۴)
+  - ✅ فیلترهای تراکنش: kind/category/account/card/member/needs_review
+  - ✅ **`POST /api/v1/sync/transactions/`** — آپلود دسته‌ای idempotent با پاسخ per-item (created/already_exists/error)؛ dedup دولایه (id + اثرانگشت)
+  - ✅ **`GET /api/v1/dashboard/summary/`** — جمع درآمد/هزینه/مانده + تفکیک عضو/دسته/کارت (transfer حذف می‌شود)
+  - ✅ تراکنش id از دستگاه می‌گیرد (idempotency)؛ ولیدیشن ارجاع‌ها (حساب/کارت/دسته هم‌خانواده)
+
 ## فازهای بعدی (خلاصه — جزئیات در docs/roadmap.md)
 - ⬜ فاز −۱: جمع‌آوری ۵۰–۱۰۰ پیامک واقعی (نمونه‌ها را کاربر بعداً می‌فرستد)
-- ⬜ فاز ۴: CRUD API + Authorization سطح‌شیء
 - ⬜ فاز ۵: پایه‌ی Flutter (auth، repository، api client)
 - ⬜ فاز ۶: موتور تراکنش محلی + صف بازبینی
 - ⬜ فاز ۷: پارسر کامل همه‌ی بانک‌ها + تست رگرسیون

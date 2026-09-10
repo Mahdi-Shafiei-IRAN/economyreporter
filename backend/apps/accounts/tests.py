@@ -1,7 +1,9 @@
 from django.contrib.auth import get_user_model
 from django.db import IntegrityError, transaction
 from django.test import TestCase
+from django.urls import reverse
 
+from apps.common.testutils import ApiTestCase
 from apps.families.models import FamilyGroup
 
 from .models import BankAccount, Card
@@ -38,3 +40,71 @@ class AccountModelTests(TestCase):
         Card.objects.create(account=self._account(), card_last4="1234")
         Card.objects.create(account=self._account(), card_last4="1234")
         self.assertEqual(Card.objects.filter(card_last4="1234").count(), 2)
+
+
+class AccountApiTests(ApiTestCase):
+    def setUp(self):
+        self.user = self.create_user("owner@x.com")
+        self.family = self.create_family_with(self.user)
+        self.auth(self.user)
+
+    def test_create_account_sets_family_and_owner(self):
+        resp = self.client.post(
+            reverse("account-list"),
+            {"bank_name": "بانک ملت", "bank_id": "mellat"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 201)
+        self.assertEqual(str(resp.data["family"]), str(self.family.id))
+        self.assertEqual(str(resp.data["owner"]), str(self.user.id))
+
+    def test_list_scoped_to_family(self):
+        BankAccount.objects.create(family=self.family, owner=self.user, bank_name="ملت")
+        outsider = self.create_user("out@x.com")
+        self.create_family_with(outsider, name="دیگر")
+        self.auth(outsider)
+        resp = self.client.get(reverse("account-list"))
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(len(resp.data), 0)
+
+    def test_cannot_retrieve_other_family_account(self):
+        acc = BankAccount.objects.create(
+            family=self.family, owner=self.user, bank_name="ملت"
+        )
+        outsider = self.create_user("out@x.com")
+        self.create_family_with(outsider, name="دیگر")
+        self.auth(outsider)
+        resp = self.client.get(reverse("account-detail", args=[acc.id]))
+        self.assertEqual(resp.status_code, 404)
+
+
+class CardApiTests(ApiTestCase):
+    def setUp(self):
+        self.user = self.create_user("owner@x.com")
+        self.family = self.create_family_with(self.user)
+        self.auth(self.user)
+        self.account = BankAccount.objects.create(
+            family=self.family, owner=self.user, bank_name="ملت"
+        )
+
+    def test_create_card(self):
+        resp = self.client.post(
+            reverse("card-list"),
+            {"account": str(self.account.id), "card_last4": "1234"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 201)
+        self.assertEqual(resp.data["card_last4"], "1234")
+
+    def test_cannot_attach_card_to_other_family_account(self):
+        other_user = self.create_user("x2@x.com")
+        other_fam = self.create_family_with(other_user, name="دیگر")
+        other_acc = BankAccount.objects.create(
+            family=other_fam, owner=other_user, bank_name="ملی"
+        )
+        resp = self.client.post(
+            reverse("card-list"),
+            {"account": str(other_acc.id), "card_last4": "9999"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 404)
