@@ -16,6 +16,9 @@ class TransactionRecord {
   final String? rawAmount;
   final String rawUnit;
   final String? cardLast4;
+
+  /// شماره‌ی حساب (محلی؛ برای تطبیق مانده). به سرور فرستاده نمی‌شود.
+  final String? accountRef;
   final String? counterparty;
   final String? description;
 
@@ -47,6 +50,7 @@ class TransactionRecord {
     this.rawAmount,
     this.rawUnit = 'rial',
     this.cardLast4,
+    this.accountRef,
     this.counterparty,
     this.description,
     this.transactionDate,
@@ -75,6 +79,7 @@ class TransactionRecord {
       rawAmount: parsed.rawAmount,
       rawUnit: parsed.rawUnit,
       cardLast4: parsed.cardLast4,
+      accountRef: parsed.accountRef,
       counterparty: parsed.counterparty,
       transactionDate: parsed.occurredAt,
       clientCreatedAt: now,
@@ -97,6 +102,7 @@ class TransactionRecord {
         'raw_amount': rawAmount,
         'raw_unit': rawUnit,
         'card_last4': cardLast4,
+        'account_ref': accountRef,
         'counterparty': counterparty,
         'description': description,
         'transaction_date': transactionDate?.toIso8601String(),
@@ -132,6 +138,7 @@ class TransactionRecord {
       rawAmount: rawAmount,
       rawUnit: rawUnit,
       cardLast4: cardLast4,
+      accountRef: accountRef,
       counterparty: counterparty ?? this.counterparty,
       description: description ?? this.description,
       transactionDate: transactionDate,
@@ -177,6 +184,7 @@ class TransactionRecord {
       rawAmount: map['raw_amount'] as String?,
       rawUnit: (map['raw_unit'] as String?) ?? 'rial',
       cardLast4: map['card_last4'] as String?,
+      accountRef: map['account_ref'] as String?,
       counterparty: map['counterparty'] as String?,
       description: map['description'] as String?,
       transactionDate: parseDate(map['transaction_date']),

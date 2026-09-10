@@ -38,6 +38,7 @@ void main() {
       check('kind', r.kind.name);
       check('amountRial', r.amountRial);
       check('cardLast4', r.cardLast4);
+      check('accountRef', r.accountRef);
       check('balanceAfterRial', r.balanceAfterRial);
       check('counterparty', r.counterparty);
       check('needsReview', r.needsReview);

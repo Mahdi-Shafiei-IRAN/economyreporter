@@ -168,6 +168,7 @@ void main() {
       expect(r.kind, TxKind.expense);
       expect(r.amountRial, 12345000);
       expect(r.balanceAfterRial, 6000000);
+      expect(r.accountRef, '1000000001'); // حساب استخراج می‌شود
       expect(r.occurredAt, isNotNull); // سالِ دورقمی هم پارس می‌شود
     });
 

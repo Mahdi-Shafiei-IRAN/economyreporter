@@ -30,6 +30,8 @@ class SmsParser {
   );
   static final _cardRe = RegExp(r'کارت\s*:?\s*([0-9x\*\.\-]{4,})');
   static final _fourDigitsRe = RegExp(r'[0-9]{4}');
+  // شماره‌ی حساب: «حساب» و بعد حداقل ۵ رقم (تا با اعداد کوتاه اشتباه نشود).
+  static final _accountRe = RegExp(r'حساب\s*:?\s*([0-9]{5,})');
 
   // استخراج طرف حساب/پذیرنده: «بابت ...»، «به کارت ...»، «پذیرنده/فروشگاه ...».
   static final _reasonRe = RegExp(r'بابت\s*:?\s*(.+?)(?:\s+مانده|\s+تاریخ|\s+\d{2,4}/|$)');
@@ -49,6 +51,7 @@ class SmsParser {
     final balance = _extractBalance(normalized);
     final amountResult = _extractAmount(normalized, balance);
     final cardLast4 = _extractCardLast4(normalized);
+    final accountRef = _accountRe.firstMatch(normalized)?.group(1);
     final occurredAt = extractOccurredAt(normalized);
     final counterparty = _extractCounterparty(normalized);
 
@@ -66,6 +69,7 @@ class SmsParser {
       rawUnit: amountResult.unit,
       balanceAfterRial: balance,
       cardLast4: cardLast4,
+      accountRef: accountRef,
       counterparty: counterparty,
       occurredAt: occurredAt,
       needsReview: needsReview,

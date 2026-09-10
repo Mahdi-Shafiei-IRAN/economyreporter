@@ -8,7 +8,7 @@ import 'package:path/path.dart' as p;
 import 'package:sqflite/sqflite.dart';
 
 const String kDbName = 'economy.db';
-const int kDbVersion = 1;
+const int kDbVersion = 2;
 
 /// پایگاه‌داده را باز می‌کند. اگر [path] داده نشود، مسیر پیش‌فرض دستگاه.
 /// برای تست، `inMemoryDatabasePath` پاس داده می‌شود.
@@ -24,8 +24,19 @@ Future<Database> openAppDatabase({String? path}) async {
       onCreate: (db, version) async {
         await createSchema(db);
       },
+      onUpgrade: (db, oldVersion, newVersion) async {
+        await migrateSchema(db, oldVersion, newVersion);
+      },
     ),
   );
+}
+
+/// مهاجرت‌های نسخه‌به‌نسخه (داده‌ی موجود حفظ می‌شود).
+Future<void> migrateSchema(Database db, int oldVersion, int newVersion) async {
+  if (oldVersion < 2) {
+    // نسخه ۲: افزودن شماره‌ی حساب برای تطبیق مانده‌ی بانک‌های حساب‌محور.
+    await db.execute('ALTER TABLE transactions ADD COLUMN account_ref TEXT');
+  }
 }
 
 /// ساخت جداول نسخه‌ی ۱.
@@ -40,6 +51,7 @@ Future<void> createSchema(Database db) async {
       raw_amount TEXT,
       raw_unit TEXT NOT NULL DEFAULT 'rial',
       card_last4 TEXT,
+      account_ref TEXT,
       counterparty TEXT,
       description TEXT,
       transaction_date TEXT,

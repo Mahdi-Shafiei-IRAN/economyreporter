@@ -30,6 +30,9 @@ class ParsedTransaction {
   /// چهار رقم آخر کارت (اگر تشخیص داده شد).
   final String? cardLast4;
 
+  /// شماره‌ی حساب (اگر پیامک حساب‌محور بود؛ برای تطبیق مانده استفاده می‌شود).
+  final String? accountRef;
+
   /// طرف حساب/پذیرنده (نام فروشگاه/پایانه یا کارت مقصد).
   final String? counterparty;
 
@@ -57,6 +60,7 @@ class ParsedTransaction {
     this.rawUnit = 'rial',
     this.balanceAfterRial,
     this.cardLast4,
+    this.accountRef,
     this.counterparty,
     this.occurredAt,
   });

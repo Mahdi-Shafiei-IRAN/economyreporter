@@ -43,13 +43,16 @@ class _GapCard extends StatelessWidget {
     final missing = gap.missingAmountRial;
     final direction = missing < 0 ? 'برداشتِ ثبت‌نشده' : 'واریزِ ثبت‌نشده';
     final amount = formatToman(missing.abs());
+    final source = gap.cardLast4 != null
+        ? 'کارت ${gap.cardLast4}'
+        : (gap.accountRef != null ? 'حساب ${gap.accountRef}' : 'نامشخص');
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 6),
       child: ListTile(
         leading: const Icon(Icons.warning_amber_rounded, color: Colors.orange),
         title: Text('$direction: $amount'),
         subtitle: Text(
-          'کارت ${gap.cardLast4 ?? "?"} — '
+          '$source — '
           'مانده‌ی موردانتظار ${formatToman(gap.expectedBalanceRial)}، '
           'واقعی ${formatToman(gap.actualBalanceRial)}',
         ),

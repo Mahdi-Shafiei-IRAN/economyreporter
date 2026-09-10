@@ -76,6 +76,40 @@ void main() {
     expect(service.findGaps(txs), isEmpty);
   });
 
+  test('تطبیق مانده‌ی حساب‌محور (بدون کارت) هم کار می‌کند', () {
+    TransactionRecord acc({
+      required String id,
+      required String account,
+      required String kind,
+      required int amount,
+      required int balance,
+      required int minute,
+    }) {
+      final at = DateTime.utc(2026, 1, 1, 12, minute);
+      return TransactionRecord(
+        id: id,
+        accountRef: account,
+        kind: kind,
+        amountRial: amount,
+        balanceAfterRial: balance,
+        transactionDate: at,
+        createdAt: at,
+        updatedAt: at,
+      );
+    }
+
+    final txs = [
+      acc(id: 'a', account: '0279049244816', kind: 'income', amount: 0, balance: 1000000, minute: 0),
+      // انتظار 800000 ولی واقعی 500000 → برداشت 300000 جاافتاده
+      acc(id: 'b', account: '0279049244816', kind: 'expense', amount: 200000, balance: 500000, minute: 1),
+    ];
+    final gaps = service.findGaps(txs);
+    expect(gaps, hasLength(1));
+    expect(gaps.first.accountRef, '0279049244816');
+    expect(gaps.first.cardLast4, isNull);
+    expect(gaps.first.missingAmountRial, -300000);
+  });
+
   test('رکورد بدون مانده یا کارت نادیده گرفته می‌شود', () {
     final noBalance = TransactionRecord(
       id: 'x',

@@ -9,6 +9,7 @@ import '../../features/transactions/data/transaction_record.dart';
 
 class BalanceGap {
   final String? cardLast4;
+  final String? accountRef;
   final String previousTxId;
   final String currentTxId;
 
@@ -20,6 +21,7 @@ class BalanceGap {
 
   const BalanceGap({
     required this.cardLast4,
+    required this.accountRef,
     required this.previousTxId,
     required this.currentTxId,
     required this.expectedBalanceRial,
@@ -38,18 +40,20 @@ class ReconciliationService {
   const ReconciliationService();
 
   List<BalanceGap> findGaps(List<TransactionRecord> transactions) {
-    final byCard = <String, List<TransactionRecord>>{};
+    // کلید گروه: کارت، وگرنه حساب (بانک‌های حساب‌محور).
+    final byKey = <String, List<TransactionRecord>>{};
     for (final t in transactions) {
-      if (t.cardLast4 == null ||
+      final key = t.cardLast4 ?? t.accountRef;
+      if (key == null ||
           t.balanceAfterRial == null ||
           t.amountRial == null) {
         continue;
       }
-      byCard.putIfAbsent(t.cardLast4!, () => []).add(t);
+      byKey.putIfAbsent(key, () => []).add(t);
     }
 
     final gaps = <BalanceGap>[];
-    for (final list in byCard.values) {
+    for (final list in byKey.values) {
       list.sort((a, b) => a.effectiveTime.compareTo(b.effectiveTime));
       for (var i = 1; i < list.length; i++) {
         final prev = list[i - 1];
@@ -60,6 +64,7 @@ class ReconciliationService {
         if (expected != curr.balanceAfterRial) {
           gaps.add(BalanceGap(
             cardLast4: curr.cardLast4,
+            accountRef: curr.accountRef,
             previousTxId: prev.id,
             currentTxId: curr.id,
             expectedBalanceRial: expected,
