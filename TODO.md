@@ -41,10 +41,22 @@
 
 > وضعیت فاز ۱: هسته‌ی منطقی (پارسر + دیتابیس + UI) کامل و تست‌شده. تنها بخش وابسته به سخت‌افزار (دریافت پیامک و اجرای بصری) مانده که به Android SDK + گوشی/امولاتور نیاز دارد.
 
+## فاز ۲ — پایه‌ی بک‌اند Django (روی کامپیوتر کاربر)
+- ✅ **پروژه‌ی Django + DRF + JWT (تست‌شده — ۱۴ تست + smoke واقعی روی سرور)**
+  - ✅ ساختار `backend/` با settings چندمحیطی (base/development/production)
+  - ✅ دیتابیس تزریق‌پذیر: SQLite پیش‌فرض dev، Postgres با متغیر محیطی
+  - ✅ کاربر سفارشی با UUID و ورود با ایمیل (`apps/users`)
+  - ✅ endpointهای auth: register / login (JWT) / refresh / me
+  - ✅ خانواده و عضویت (`apps/families`) + سقف ۳ نفر (server-side)
+  - ✅ endpointهای family: ساخت/لیست، اعضا، دعوت (فقط مالک)، حذف عضو
+  - ✅ Authorization سطح‌شیء (غیرعضو=۴۰۴ تا وجود خانواده لو نرود، عضو غیرمالک=۴۰۳)
+  - ✅ requirements/{base,development,production}.txt + `.env.example`
+  - ✅ **۱۴ تست (`manage.py test`) همه پاس + تست عملی روی سرور زنده (register/login/me/family)**
+- ⬜ اجرای روی Postgres واقعی (وقتی سرور خریده شد یا Docker بالا آمد)
+
 ## فازهای بعدی (خلاصه — جزئیات در docs/roadmap.md)
 - ⬜ فاز −۱: جمع‌آوری ۵۰–۱۰۰ پیامک واقعی (نمونه‌ها را کاربر بعداً می‌فرستد)
-- ⬜ فاز ۲: پایه‌ی بک‌اند Django (روی کامپیوتر کاربر)
-- ⬜ فاز ۳: مدل داده‌ی اصلی
+- ⬜ فاز ۳: مدل داده‌ی اصلی (Account/Card/Category/Transaction/Budget) روی بک‌اند
 - ⬜ فاز ۴: CRUD API + Authorization سطح‌شیء
 - ⬜ فاز ۵: پایه‌ی Flutter (auth، repository، api client)
 - ⬜ فاز ۶: موتور تراکنش محلی + صف بازبینی

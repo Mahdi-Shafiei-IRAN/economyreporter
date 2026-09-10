@@ -66,7 +66,69 @@ Remove-NetFirewallRule -DisplayName "Django Dev 8000"
 
 و در `AndroidManifest.xml` این فایل را به `<application android:networkSecurityConfig="@xml/network_security_config">` وصل کن. **این فقط برای توسعه است**؛ در تولید حذف و به HTTPS سوییچ می‌شود.
 
-## ۵) مهاجرت به VPS
+## ۵) اجرای بک‌اند Django (فاز ۲)
+
+پیش‌فرض دیتابیس در توسعه **SQLite** است (بدون نیاز به نصب Postgres). محیط مجازی و پکیج‌ها یک‌بار:
+
+```bash
+cd backend
+python -m venv .venv
+.venv\Scripts\python.exe -m pip install -r requirements/development.txt
+```
+
+سپس مایگریشن، ساخت کاربر مدیر، و اجرا:
+
+```bash
+.venv\Scripts\python.exe manage.py migrate
+```
+
+```bash
+.venv\Scripts\python.exe manage.py createsuperuser
+```
+
+برای اینکه گوشی روی شبکه‌ی محلی به بک‌اند وصل شود، روی همه‌ی اینترفیس‌ها گوش بده (بخش‌های ۲ و ۳ بالا برای IP و فایروال):
+
+```bash
+.venv\Scripts\python.exe manage.py runserver 0.0.0.0:8000
+```
+
+آدرس پایه‌ی API: `http://<IP کامپیوتر>:8000/api/v1/`
+
+endpointهای آماده‌ی این فاز:
+
+```text
+POST /api/v1/auth/register/     ثبت‌نام (email, full_name, password)
+POST /api/v1/auth/login/        ورود → access + refresh (JWT)
+POST /api/v1/auth/refresh/      تازه‌سازی access
+GET  /api/v1/auth/me/           کاربر جاری (نیازمند توکن)
+GET/POST /api/v1/family/        لیست/ساخت خانواده
+GET  /api/v1/family/{id}/members/
+POST /api/v1/family/{id}/members/invite/     (فقط مالک)
+DELETE /api/v1/family/{id}/members/{mid}/     (فقط مالک)
+```
+
+### سوییچ به PostgreSQL (اختیاری، مثلاً با Docker)
+
+اگر خواستی همین حالا با Postgres کار کنی (به‌جای SQLite):
+
+```bash
+docker run --name economy-pg -e POSTGRES_DB=economy -e POSTGRES_USER=economy -e POSTGRES_PASSWORD=economy -p 5432:5432 -d postgres
+```
+
+بعد در `backend/.env` بگذار:
+
+```env
+DB_ENGINE=postgres
+DB_NAME=economy
+DB_USER=economy
+DB_PASSWORD=economy
+DB_HOST=127.0.0.1
+DB_PORT=5432
+```
+
+و دوباره `migrate` بزن. (روی سرور واقعی هم همین متغیرها استفاده می‌شوند.)
+
+## ۶) مهاجرت به VPS
 
 وقتی سرور خریدی (پیشنهاد: ابر ایرانی مثل آروان/لیارا/پارس‌پک، چون AWS/GCP از ایران بلاک‌اند):
 

@@ -1,0 +1,4 @@
+-r base.txt
+
+# در توسعه پیش‌فرض SQLite است؛ اگر خواستی Postgres محلی (مثلاً Docker) تست کنی، این را نصب کن:
+psycopg2-binary==2.9.13
