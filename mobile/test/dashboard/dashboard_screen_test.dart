@@ -4,6 +4,7 @@ import 'package:economy/features/dashboard/dashboard_controller.dart';
 import 'package:economy/features/dashboard/dashboard_screen.dart';
 import 'package:economy/features/transactions/data/transaction_record.dart';
 import 'package:economy/features/transactions/edit_transaction_sheet.dart';
+import 'package:economy/features/wallets/data/wallet.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -165,5 +166,24 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byKey(kReconcileBannerKey), findsOneWidget);
+  });
+
+  testWidgets('تراکنش، کیفِ متناظر را نشان می‌دهد (شخص • کارت)', (tester) async {
+    store.seed(
+      parser.parse(
+          sender: 'BankMellat', body: 'خرید مبلغ 2,000,000 ریال از کارت 1234'),
+      sender: 'BankMellat',
+    );
+    await store.addWallet(const Wallet(
+      id: '',
+      ownerName: 'بابا',
+      label: 'کارت حقوق',
+      cardLast4: '1234',
+    ));
+
+    await tester.pumpWidget(app());
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('بابا • کارت حقوق'), findsOneWidget);
   });
 }

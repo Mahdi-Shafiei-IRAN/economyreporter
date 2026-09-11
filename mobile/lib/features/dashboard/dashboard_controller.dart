@@ -8,6 +8,7 @@ import '../../core/sms/sms_parser.dart';
 import '../categories/data/category.dart';
 import '../transactions/data/transaction_record.dart';
 import '../transactions/data/transaction_repository.dart';
+import '../wallets/data/wallet.dart';
 
 class DashboardController extends ChangeNotifier {
   final TransactionStore repository;
@@ -21,6 +22,7 @@ class DashboardController extends ChangeNotifier {
   int needsReviewCount = 0;
   List<BalanceGap> balanceGaps = const [];
   List<TransactionRecord> uncategorized = const [];
+  List<Wallet> wallets = const [];
 
   List<TransactionRecord> get reviewItems =>
       transactions.where((t) => t.needsReview).toList();
@@ -35,8 +37,27 @@ class DashboardController extends ChangeNotifier {
     needsReviewCount = await repository.needsReviewCount();
     balanceGaps = const ReconciliationService().findGaps(transactions);
     uncategorized = await repository.uncategorized(limit: 200);
+    wallets = await repository.wallets();
     loading = false;
     notifyListeners();
+  }
+
+  /// کیفِ متناظر با کارت/حساب یک تراکنش (اگر ثبت شده باشد).
+  Wallet? walletFor(TransactionRecord t) {
+    for (final w in wallets) {
+      if (w.matches(cardLast4: t.cardLast4, accountRef: t.accountRef)) return w;
+    }
+    return null;
+  }
+
+  Future<void> addWallet(Wallet wallet) async {
+    await repository.addWallet(wallet);
+    await load();
+  }
+
+  Future<void> deleteWallet(String id) async {
+    await repository.deleteWallet(id);
+    await load();
   }
 
   Future<TransactionRecord?> transactionById(String id) =>

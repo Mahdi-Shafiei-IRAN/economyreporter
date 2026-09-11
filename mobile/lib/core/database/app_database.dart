@@ -9,7 +9,7 @@ import 'package:sqflite/sqflite.dart';
 import 'package:uuid/uuid.dart';
 
 const String kDbName = 'economy.db';
-const int kDbVersion = 3;
+const int kDbVersion = 4;
 
 /// دسته‌های پیش‌فرض (قابل ویرایش توسط کاربر بعداً).
 const List<String> kDefaultCategories = [
@@ -61,6 +61,10 @@ Future<void> migrateSchema(Database db, int oldVersion, int newVersion) async {
     // نسخه ۳: دسته‌بندی (دسته‌ها + تخصیص چندتاییِ مبلغ به دسته‌ها).
     await _createCategoryTables(db);
     await _seedCategories(db);
+  }
+  if (oldVersion < 4) {
+    // نسخه ۴: کیف‌ها (کارت/حساب اعضا).
+    await _createWalletsTable(db);
   }
 }
 
@@ -119,6 +123,22 @@ Future<void> createSchema(Database db) async {
 
   await _createCategoryTables(db);
   await _seedCategories(db);
+  await _createWalletsTable(db);
+}
+
+/// جدول کیف‌ها: کارت/حساب هر عضو خانواده.
+Future<void> _createWalletsTable(Database db) async {
+  await db.execute('''
+    CREATE TABLE wallets (
+      id TEXT PRIMARY KEY,
+      owner_name TEXT NOT NULL,
+      label TEXT NOT NULL,
+      bank_id TEXT,
+      card_last4 TEXT,
+      account_ref TEXT,
+      created_at TEXT NOT NULL
+    )
+  ''');
 }
 
 /// جدول‌های دسته‌بندی: دسته‌ها + تخصیص مبلغ هر تراکنش به چند دسته.

@@ -9,6 +9,7 @@ import 'package:uuid/uuid.dart';
 import '../../../core/sms/models.dart';
 import '../../../core/sms/sms_fingerprint.dart';
 import '../../categories/data/category.dart';
+import '../../wallets/data/wallet.dart';
 import 'transaction_record.dart';
 
 enum TxInsertStatus { created, duplicate }
@@ -68,6 +69,11 @@ abstract class TransactionStore {
   Future<List<CategoryTotal>> categoryTotals({DateTime? from, DateTime? to});
   Future<List<TransactionRecord>> uncategorized({int? limit});
   Future<TransactionRecord?> getById(String id);
+
+  // --- کیف‌ها (کارت/حساب اعضا) ---
+  Future<List<Wallet>> wallets();
+  Future<void> addWallet(Wallet wallet);
+  Future<void> deleteWallet(String id);
 }
 
 class TransactionRepository implements TransactionStore {
@@ -230,6 +236,25 @@ class TransactionRepository implements TransactionStore {
     final rows = await _db
         .query('transactions', where: 'id = ?', whereArgs: [id], limit: 1);
     return rows.isEmpty ? null : TransactionRecord.fromMap(rows.first);
+  }
+
+  @override
+  Future<List<Wallet>> wallets() async {
+    final rows = await _db.query('wallets', orderBy: 'owner_name, label');
+    return rows.map(Wallet.fromMap).toList();
+  }
+
+  @override
+  Future<void> addWallet(Wallet wallet) async {
+    final map = wallet.toMap();
+    map['id'] = _uuid.v4();
+    map['created_at'] = DateTime.now().toUtc().toIso8601String();
+    await _db.insert('wallets', map);
+  }
+
+  @override
+  Future<void> deleteWallet(String id) async {
+    await _db.delete('wallets', where: 'id = ?', whereArgs: [id]);
   }
 
   @override

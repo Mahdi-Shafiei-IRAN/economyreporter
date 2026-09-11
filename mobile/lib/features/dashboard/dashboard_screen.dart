@@ -13,6 +13,8 @@ import '../review/review_screen.dart';
 import '../transactions/data/transaction_record.dart';
 import '../transactions/data/transaction_repository.dart';
 import '../transactions/edit_transaction_sheet.dart';
+import '../wallets/data/wallet.dart';
+import '../wallets/wallets_screen.dart';
 import 'dashboard_controller.dart';
 
 /// کلیدهای تست.
@@ -30,6 +32,7 @@ const kFamilyDashboardActionKey = Key('family-dashboard-action');
 const kReportActionKey = Key('report-action');
 const kCategorizeBannerKey = Key('categorize-banner');
 const kThemeToggleKey = Key('theme-toggle');
+const kWalletsActionKey = Key('wallets-action');
 
 class DashboardScreen extends StatefulWidget {
   final DashboardController controller;
@@ -111,6 +114,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
+  void _openWallets() {
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => WalletsScreen(controller: _c)),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
@@ -135,6 +144,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 icon: const Icon(Icons.pie_chart_outline),
                 tooltip: 'گزارش دسته‌ها',
                 onPressed: _openReport,
+              ),
+              IconButton(
+                key: kWalletsActionKey,
+                icon: const Icon(Icons.account_balance_wallet_outlined),
+                tooltip: 'حساب‌ها و کارت‌ها',
+                onPressed: _openWallets,
               ),
               IconButton(
                 key: kThemeToggleKey,
@@ -202,6 +217,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         ..._c.transactions.map(
                           (t) => _TransactionTile(
                             record: t,
+                            wallet: _c.walletFor(t),
                             onTap: () =>
                                 showEditTransactionSheet(context, _c, t),
                           ),
@@ -284,15 +300,19 @@ class _SummaryItem extends StatelessWidget {
 
 class _TransactionTile extends StatelessWidget {
   final TransactionRecord record;
+  final Wallet? wallet;
   final VoidCallback? onTap;
-  const _TransactionTile({required this.record, this.onTap});
+  const _TransactionTile({required this.record, this.wallet, this.onTap});
 
   @override
   Widget build(BuildContext context) {
     final meta = _kindMeta(record.kind);
     final subtitleParts = <String>[
-      if (record.bankId != null) bankNameById(record.bankId!),
-      if (record.cardLast4 != null) 'کارت ${record.cardLast4}',
+      // اگر کارت/حساب ثبت‌شده باشد: «صاحب • برچسب» (کدام شخص و کدام کارت)
+      if (wallet != null) '${wallet!.ownerName} • ${wallet!.label}',
+      if (wallet == null && record.bankId != null) bankNameById(record.bankId!),
+      if (wallet == null && record.cardLast4 != null) 'کارت ${record.cardLast4}',
+      if (wallet == null && record.accountRef != null) 'حساب ${record.accountRef}',
     ];
 
     return Card(

@@ -6,6 +6,7 @@ import 'package:economy/core/sms/sms_fingerprint.dart';
 import 'package:economy/features/categories/data/category.dart';
 import 'package:economy/features/transactions/data/transaction_record.dart';
 import 'package:economy/features/transactions/data/transaction_repository.dart';
+import 'package:economy/features/wallets/data/wallet.dart';
 
 class FakeTransactionStore implements TransactionStore {
   final List<TransactionRecord> _items = [];
@@ -20,6 +21,9 @@ class FakeTransactionStore implements TransactionStore {
 
   // transactionId -> (categoryId -> amount)
   final Map<String, Map<String, int>> _allocations = {};
+
+  final List<Wallet> _wallets = [];
+  int _walletSeq = 0;
 
   /// افزودن همگام برای آماده‌سازی داده‌ی تست (بدون await).
   void seed(ParsedTransaction parsed, {required String sender, DateTime? receivedAt}) {
@@ -124,6 +128,26 @@ class FakeTransactionStore implements TransactionStore {
       if (t.id == id) return t;
     }
     return null;
+  }
+
+  @override
+  Future<List<Wallet>> wallets() async => List.of(_wallets);
+
+  @override
+  Future<void> addWallet(Wallet wallet) async {
+    _wallets.add(Wallet(
+      id: 'w${_walletSeq++}',
+      ownerName: wallet.ownerName,
+      label: wallet.label,
+      bankId: wallet.bankId,
+      cardLast4: wallet.cardLast4,
+      accountRef: wallet.accountRef,
+    ));
+  }
+
+  @override
+  Future<void> deleteWallet(String id) async {
+    _wallets.removeWhere((w) => w.id == id);
   }
 
   @override
