@@ -143,6 +143,25 @@ void main() {
       expect(r.looksLikeTransaction, isFalse);
     });
 
+    test('در واریز، «به کارت …» کارت خودمان است نه طرف حساب', () {
+      final r = parser.parse(
+        sender: 'Mellat',
+        body: 'بانک ملت\nواریز حقوق به کارت 1234\nمبلغ: 185,000,000 ریال',
+      );
+      expect(r.kind, TxKind.income);
+      expect(r.cardLast4, '1234');
+      expect(r.counterparty, isNull);
+    });
+
+    test('نام پذیرنده تاریخِ بعدش را نمی‌گیرد', () {
+      final r = parser.parse(
+        sender: 'Saman',
+        body: 'سامان\nخرید از کارت 5678\nمبلغ 2,400,000 ریال\nپذیرنده: داروخانه\n1405/06/20 10:30',
+      );
+      expect(r.counterparty, 'داروخانه');
+      expect(r.occurredAt, isNotNull);
+    });
+
     test('کد پیگیری در پیامک واقعی باعث تشخیص OTP نمی‌شود', () {
       final r = parser.parse(
         sender: 'BankMellat',

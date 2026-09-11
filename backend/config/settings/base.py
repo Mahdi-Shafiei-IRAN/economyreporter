@@ -90,7 +90,8 @@ else:
     DATABASES = {
         "default": {
             "ENGINE": "django.db.backends.sqlite3",
-            "NAME": BASE_DIR / "db.sqlite3",
+            # SQLITE_PATH برای اجرای یک سرور آزمایشی جدا (بدون دست‌زدن به دیتابیس اصلی).
+            "NAME": env("SQLITE_PATH", default=str(BASE_DIR / "db.sqlite3")),
         }
     }
 

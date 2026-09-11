@@ -1,11 +1,11 @@
-/// فهرست تراکنش‌های دسته‌بندی‌نشده؛ با لمس هرکدام، صفحه‌ی دسته‌بندی باز می‌شود.
+/// تراکنش‌های خودم که از «شروع دسته‌بندی» به بعدند و دسته ندارند.
 library;
 
 import 'package:flutter/material.dart';
 
-import '../../core/format/money_format.dart';
-import '../../core/sms/bank_registry.dart';
+import '../../core/format/date_format.dart';
 import '../dashboard/dashboard_controller.dart';
+import '../transactions/widgets/tx_widgets.dart';
 import 'categorize_screen.dart';
 
 const kCategorizeListEmptyKey = Key('categorize-list-empty');
@@ -17,46 +17,59 @@ class CategorizeListScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return Scaffold(
-      appBar: AppBar(title: const Text('دسته‌بندی‌نشده‌ها')),
+      appBar: AppBar(title: const Text('منتظر دسته‌بندی')),
       body: AnimatedBuilder(
         animation: controller,
         builder: (context, _) {
           final items = controller.uncategorized;
-          if (items.isEmpty) {
-            return const Center(
-              key: kCategorizeListEmptyKey,
-              child: Text('همه‌چیز دسته‌بندی شده 🎉'),
-            );
-          }
-          return ListView.builder(
-            padding: const EdgeInsets.all(8),
-            itemCount: items.length,
-            itemBuilder: (context, i) {
-              final t = items[i];
-              final sub = [
-                if (t.bankId != null) bankNameById(t.bankId!),
-                if (t.cardLast4 != null) 'کارت ${t.cardLast4}',
-                if (t.accountRef != null) 'حساب ${t.accountRef}',
-              ].join(' • ');
-              return Card(
-                margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
-                child: ListTile(
-                  title: Text(
-                    t.amountRial == null ? 'نامشخص' : formatToman(t.amountRial!),
-                    style: const TextStyle(fontWeight: FontWeight.bold),
+          final from = controller.categorizeFrom;
+          return ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
+              Text(
+                'تراکنش‌های خودت${from == null ? '' : ' از ${formatJalaliDate(from)} به بعد'} که هنوز '
+                'دسته ندارند. تراکنش‌های قبل از این تاریخ عمداً این‌جا نمی‌آیند؛ تاریخ '
+                'شروع را در «تنظیمات» می‌توانی عوض کنی.',
+                style: theme.textTheme.bodySmall
+                    ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+              ),
+              const SizedBox(height: 12),
+              if (items.isEmpty)
+                const Padding(
+                  key: kCategorizeListEmptyKey,
+                  padding: EdgeInsets.symmetric(vertical: 48),
+                  child: Column(
+                    children: [
+                      Icon(Icons.task_alt_rounded, size: 48),
+                      SizedBox(height: 8),
+                      Text('همه‌چیز دسته‌بندی شده'),
+                    ],
                   ),
-                  subtitle: sub.isEmpty ? null : Text(sub),
-                  trailing: const Icon(Icons.label_outline),
-                  onTap: () => Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) =>
-                          CategorizeScreen(controller: controller, record: t),
-                    ),
+                )
+              else
+                Card(
+                  clipBehavior: Clip.antiAlias,
+                  child: Column(
+                    children: [
+                      for (var i = 0; i < items.length; i++) ...[
+                        if (i > 0) const Divider(indent: 68),
+                        TransactionTile(
+                          key: ValueKey('uncat-${items[i].id}'),
+                          record: items[i],
+                          onTap: () => Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) =>
+                                  CategorizeScreen(controller: controller, record: items[i]),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
                 ),
-              );
-            },
+            ],
           );
         },
       ),

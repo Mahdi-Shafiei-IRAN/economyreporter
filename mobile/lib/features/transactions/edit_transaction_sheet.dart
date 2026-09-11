@@ -1,16 +1,17 @@
-/// شیت ویرایش/حذف یک تراکنش.
+/// شیت ویرایش یک تراکنش (نوع، مبلغ، طرف حساب، توضیح).
 library;
 
 import 'package:flutter/material.dart';
 
+import '../../core/sms/digit_utils.dart';
 import '../dashboard/dashboard_controller.dart';
 import 'data/transaction_record.dart';
 
 const kEditKindKey = Key('edit-kind');
 const kEditAmountKey = Key('edit-amount');
 const kEditCounterpartyKey = Key('edit-counterparty');
+const kEditDescriptionKey = Key('edit-description');
 const kEditSaveKey = Key('edit-save');
-const kEditDeleteKey = Key('edit-delete');
 
 Future<void> showEditTransactionSheet(
   BuildContext context,
@@ -20,6 +21,7 @@ Future<void> showEditTransactionSheet(
   return showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
+    useSafeArea: true,
     builder: (_) => _EditSheet(controller: controller, record: record),
   );
 }
@@ -45,6 +47,7 @@ class _EditSheetState extends State<_EditSheet> {
       TextEditingController(text: widget.record.counterparty ?? '');
   late final _description =
       TextEditingController(text: widget.record.description ?? '');
+  String? _amountError;
 
   static String _validKindOr(String kind) =>
       const {'income', 'expense', 'transfer'}.contains(kind) ? kind : 'expense';
@@ -58,12 +61,16 @@ class _EditSheetState extends State<_EditSheet> {
   }
 
   Future<void> _save() async {
-    final tomanText = _amount.text.trim().replaceAll(',', '');
-    final toman = int.tryParse(tomanText);
+    final raw = normalizeDigits(_amount.text.trim()).replaceAll(RegExp(r'[,٬\s]'), '');
+    final toman = int.tryParse(raw);
+    if (toman == null || toman <= 0) {
+      setState(() => _amountError = 'مبلغ را به تومان وارد کن');
+      return;
+    }
     await widget.controller.updateTransaction(
       widget.record.id,
       kind: _kind,
-      amountRial: toman == null ? null : toman * 10,
+      amountRial: toman * 10,
       counterparty: _counterparty.text.trim(),
       description: _description.text.trim(),
       needsReview: false,
@@ -71,83 +78,55 @@ class _EditSheetState extends State<_EditSheet> {
     if (mounted) Navigator.of(context).pop();
   }
 
-  Future<void> _delete() async {
-    await widget.controller.deleteTransaction(widget.record.id);
-    if (mounted) Navigator.of(context).pop();
-  }
-
   @override
   Widget build(BuildContext context) {
     final bottom = MediaQuery.of(context).viewInsets.bottom;
     return Padding(
-      padding: EdgeInsets.fromLTRB(16, 16, 16, 16 + bottom),
+      padding: EdgeInsets.fromLTRB(20, 0, 20, 20 + bottom),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text('ویرایش تراکنش',
-              style: Theme.of(context).textTheme.titleMedium),
-          const SizedBox(height: 12),
-          DropdownButtonFormField<String>(
+          Text('ویرایش تراکنش', style: Theme.of(context).textTheme.titleLarge),
+          const SizedBox(height: 16),
+          SegmentedButton<String>(
             key: kEditKindKey,
-            value: _kind,
-            decoration: const InputDecoration(
-              labelText: 'نوع',
-              border: OutlineInputBorder(),
-            ),
-            items: const [
-              DropdownMenuItem(value: 'income', child: Text('درآمد')),
-              DropdownMenuItem(value: 'expense', child: Text('هزینه')),
-              DropdownMenuItem(value: 'transfer', child: Text('انتقال')),
+            segments: const [
+              ButtonSegment(value: 'expense', label: Text('برداشت'), icon: Icon(Icons.north_east_rounded)),
+              ButtonSegment(value: 'income', label: Text('واریز'), icon: Icon(Icons.south_west_rounded)),
+              ButtonSegment(value: 'transfer', label: Text('انتقال'), icon: Icon(Icons.swap_horiz_rounded)),
             ],
-            onChanged: (v) => setState(() => _kind = v ?? _kind),
+            selected: {_kind},
+            onSelectionChanged: (s) => setState(() => _kind = s.first),
           ),
           const SizedBox(height: 12),
           TextField(
             key: kEditAmountKey,
             controller: _amount,
             keyboardType: TextInputType.number,
-            decoration: const InputDecoration(
+            decoration: InputDecoration(
               labelText: 'مبلغ (تومان)',
-              border: OutlineInputBorder(),
+              errorText: _amountError,
             ),
           ),
           const SizedBox(height: 12),
           TextField(
             key: kEditCounterpartyKey,
             controller: _counterparty,
-            decoration: const InputDecoration(
-              labelText: 'طرف حساب / بابت',
-              border: OutlineInputBorder(),
-            ),
+            decoration: const InputDecoration(labelText: 'طرف حساب / بابت'),
           ),
           const SizedBox(height: 12),
           TextField(
+            key: kEditDescriptionKey,
             controller: _description,
             maxLines: 2,
-            decoration: const InputDecoration(
-              labelText: 'توضیح',
-              border: OutlineInputBorder(),
-            ),
+            decoration: const InputDecoration(labelText: 'توضیح'),
           ),
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              Expanded(
-                child: FilledButton(
-                  key: kEditSaveKey,
-                  onPressed: _save,
-                  child: const Text('ذخیره'),
-                ),
-              ),
-              const SizedBox(width: 8),
-              OutlinedButton.icon(
-                key: kEditDeleteKey,
-                onPressed: _delete,
-                icon: const Icon(Icons.delete_outline),
-                label: const Text('حذف'),
-              ),
-            ],
+          const SizedBox(height: 20),
+          FilledButton(
+            key: kEditSaveKey,
+            onPressed: _save,
+            child: const Text('ذخیره'),
           ),
         ],
       ),

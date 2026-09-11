@@ -121,4 +121,67 @@ void main() {
     );
     expect(service.findGaps([noBalance]), isEmpty);
   });
+
+  test('ثبت دستیِ بدون مانده (بین دو پیامک) شکاف را پر می‌کند', () {
+    final manual = TransactionRecord(
+      id: 'm',
+      cardLast4: '1234',
+      kind: 'expense',
+      amountRial: 300000,
+      source: 'manual',
+      transactionDate: DateTime.utc(2026, 1, 1, 12, 0, 30),
+      createdAt: DateTime.utc(2026),
+      updatedAt: DateTime.utc(2026),
+    );
+    final txs = [
+      _tx(id: 'a', card: '1234', kind: 'income', amount: 0, balance: 1000000, minute: 0),
+      manual,
+      _tx(id: 'b', card: '1234', kind: 'expense', amount: 200000, balance: 500000, minute: 1),
+    ];
+    expect(service.findGaps(txs), isEmpty);
+  });
+
+  test('شکافِ نادیده‌گرفته‌شده دوباره نشان داده نمی‌شود', () {
+    final txs = [
+      _tx(id: 'a', card: '1234', kind: 'income', amount: 0, balance: 1000000, minute: 0),
+      _tx(id: 'b', card: '1234', kind: 'expense', amount: 200000, balance: 500000, minute: 1),
+    ];
+    final gap = service.findGaps(txs).single;
+    expect(gap.key, 'a|b');
+    expect(service.findGaps(txs, dismissed: {gap.key}), isEmpty);
+  });
+
+  test('بدون زمان واقعی (فقط زمانِ واردشدن) مقایسه نمی‌شود — هشدار اشتباه نمی‌دهد', () {
+    TransactionRecord imported(String id, int amount, int balance) => TransactionRecord(
+          id: id,
+          cardLast4: '1234',
+          kind: 'expense',
+          amountRial: amount,
+          balanceAfterRial: balance,
+          clientCreatedAt: DateTime.utc(2026, 9, 11),
+          createdAt: DateTime.utc(2026, 9, 11),
+          updatedAt: DateTime.utc(2026, 9, 11),
+        );
+    expect(service.findGaps([imported('a', 1, 1000), imported('b', 1, 5000)]), isEmpty);
+  });
+
+  test('تراکنش منتظر بازبینی زنجیره را از مانده‌ی خودش از نو شروع می‌کند', () {
+    final failed = TransactionRecord(
+      id: 'f',
+      cardLast4: '1234',
+      kind: 'expense',
+      amountRial: 900000,
+      balanceAfterRial: 1000000, // خرید ناموفق: مانده عوض نشده
+      needsReview: true,
+      transactionDate: DateTime.utc(2026, 1, 1, 12, 0, 30),
+      createdAt: DateTime.utc(2026),
+      updatedAt: DateTime.utc(2026),
+    );
+    final txs = [
+      _tx(id: 'a', card: '1234', kind: 'income', amount: 0, balance: 1000000, minute: 0),
+      failed,
+      _tx(id: 'b', card: '1234', kind: 'expense', amount: 200000, balance: 800000, minute: 1),
+    ];
+    expect(service.findGaps(txs), isEmpty);
+  });
 }

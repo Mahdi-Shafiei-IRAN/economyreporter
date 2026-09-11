@@ -77,6 +77,12 @@ flutter:
   assets:
     - assets/fonts/Vazirmatn-Regular.ttf
 
+  # فونت فارسی کل اپ (همان فایلِ خروجی PDF).
+  fonts:
+    - family: Vazirmatn
+      fonts:
+        - asset: assets/fonts/Vazirmatn-Regular.ttf
+
   # To add assets to your application, add an assets section, like this:
   # assets:
   #   - images/a_dot_burr.jpeg

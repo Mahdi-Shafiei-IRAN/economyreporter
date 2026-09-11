@@ -70,6 +70,9 @@ class SettingKeys {
 
   /// JSON: کلید گپ‌های تطبیق مانده که کاربر نادیده گرفته.
   static const dismissedGaps = 'dismissed_gaps';
+
+  /// شناسه‌ی ثابت این گوشی (برای sync).
+  static const deviceId = 'device_id';
 }
 
 /// پنجره‌ی ضدتکرارِ محتوایی: دریافت زنده و خواندن صندوقِ همان پیامک

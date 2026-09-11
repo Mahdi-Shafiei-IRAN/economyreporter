@@ -78,7 +78,9 @@ class SmsParser {
   // استخراج طرف حساب/پذیرنده: «بابت ...»، «به کارت ...»، «پذیرنده/فروشگاه ...».
   static final _reasonRe = RegExp(r'بابت\s*:?\s*(.+?)(?:\s+مانده|\s+تاریخ|\s+\d{2,4}/|$)');
   static final _destCardRe = RegExp(r'به\s*کارت\s*:?\s*([0-9x\*\.\-]{4,})');
-  static final _merchantRe = RegExp(r'(?:پذیرنده|فروشگاه)\s*:?\s*(.+?)(?:\s+مانده|\s+تاریخ|$)');
+  // پایانِ نام پذیرنده: «مانده»، «تاریخ» یا خودِ تاریخ (مثل 1405/06/20) — تا تاریخ جزو نام نشود.
+  static final _merchantRe = RegExp(
+      r'(?:پذیرنده|فروشگاه)\s*:?\s*(.+?)(?:\s+مانده|\s+تاریخ|\s+\d{2,4}/|$)');
 
   ParsedTransaction parse({required String sender, required String body}) {
     // قدم ۱: تشخیص بانک — اول از فرستنده، اگر نشد از داخل متن (بعضی بانک‌ها
@@ -100,7 +102,7 @@ class SmsParser {
     final cardLast4 = _extractCardLast4(normalized);
     final accountRef = _accountRe.firstMatch(normalized)?.group(1);
     final occurredAt = extractOccurredAt(normalized);
-    final counterparty = _extractCounterparty(normalized);
+    final counterparty = _extractCounterparty(normalized, kind);
 
     // بانکِ ناشناخته دلیل بازبینی نیست؛ فقط ابهام واقعی در مبلغ/نوع/موفقیت.
     final reviewReasons = [
@@ -131,11 +133,12 @@ class SmsParser {
     );
   }
 
-  String? _extractCounterparty(String normalized) {
+  String? _extractCounterparty(String normalized, TxKind kind) {
     final reason = _reasonRe.firstMatch(normalized)?.group(1)?.trim();
     if (reason != null && reason.isNotEmpty) return reason;
 
-    final dest = _destCardRe.firstMatch(normalized);
+    // «به کارت …» در واریز، کارتِ خودِ ماست نه طرف حساب.
+    final dest = kind == TxKind.income ? null : _destCardRe.firstMatch(normalized);
     if (dest != null) {
       final digits =
           _fourDigitsRe.allMatches(dest.group(1)!).map((e) => e.group(0)!).toList();

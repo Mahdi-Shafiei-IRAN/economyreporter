@@ -1,0 +1,142 @@
+/// تست زنده‌ی همگام‌سازی با سرور واقعی Django (HTTP واقعی + JWT)، با دو «گوشی»:
+/// من و بابا. جزو تست‌های عادی نیست.
+///
+/// اجرا (سرور آزمایشی با دیتابیس جدا و دو کاربر me@live.test / father@live.test):
+///   LIVE_API=http://127.0.0.1:8001/api/v1 flutter test test_live
+library;
+
+import 'dart:io';
+
+import 'package:economy/core/auth/auth_repository.dart';
+import 'package:economy/core/database/app_database.dart';
+import 'package:economy/core/family/family_api.dart';
+import 'package:economy/core/network/api_client.dart';
+import 'package:economy/core/sms/sms_importer.dart';
+import 'package:economy/core/sync/remote_transaction_api.dart';
+import 'package:economy/core/sync/sync_service.dart';
+import 'package:economy/features/transactions/data/transaction_repository.dart';
+import 'package:economy/features/wallets/data/wallet.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:sqflite/sqflite.dart';
+
+import '../test/helpers/db_test_helper.dart';
+import '../test/helpers/in_memory_token_store.dart';
+
+class _Phone {
+  final TransactionRepository repo;
+  final SyncService sync;
+  final ProfileService profile;
+  final SmsImporter importer;
+
+  _Phone(this.repo, this.sync, this.profile, this.importer);
+
+  static Future<_Phone> login(String base, String email, String deviceId) async {
+    final tokens = InMemoryTokenStore();
+    final api = ApiClient(baseUrl: base, tokenStore: tokens);
+    await AuthRepository(api, tokens).login(email: email, password: 'Live@12345');
+    // هر «گوشی» دیتابیس جدای خودش را دارد.
+    final db = await openAppDatabase(path: inMemoryDatabasePath, singleInstance: false);
+    final repo = TransactionRepository(db);
+    return _Phone(
+      repo,
+      SyncService(db: db, api: DioRemoteTransactionApi(api.dio), deviceId: deviceId),
+      ProfileService(DioFamilyApi(api.dio), repo),
+      SmsImporter(repo, deviceId: deviceId),
+    );
+  }
+}
+
+void main() {
+  final base = Platform.environment['LIVE_API'];
+  setUpAll(initSqfliteFfiForTests);
+
+  test('دو گوشی: ارسال بدون خطا، دریافت، صاحب کارت، ویرایش فقط توسط صاحب', () async {
+    final me = await _Phone.login(base!, 'me@live.test', 'phone-me');
+    final father = await _Phone.login(base, 'father@live.test', 'phone-father');
+    expect(await me.profile.refresh(), isTrue);
+    expect(await father.profile.refresh(), isTrue);
+    final fatherId = await father.repo.getSetting(SettingKeys.meUserId);
+    final meId = await me.repo.getSetting(SettingKeys.meUserId);
+
+    // روی گوشی من: کارت 1234 مال باباست (عضو اپ).
+    await me.repo.addWallet(Wallet(
+      id: '',
+      ownerName: 'بابا',
+      ownerUserId: fatherId,
+      label: 'کارت حقوق',
+      cardLast4: '1234',
+    ));
+
+    // پیامک‌های بدون «طرف حساب» (همان حالتی که قبلاً ۱۰۷ خطای sync می‌داد).
+    // مبلغ و زمان در هر اجرا یکتاست تا دیتابیسِ سرورِ آزمایشی تکراری نبیند.
+    final now = DateTime.now().toUtc();
+    final n = now.millisecondsSinceEpoch % 900 + 100;
+    final a = await me.importer.importOne(RawSms(
+      sender: 'BankMellat',
+      body: 'خرید مبلغ $n,000 ریال از کارت 1234 مانده 5,000,000 ریال',
+      receivedAt: now,
+    ));
+    final b = await me.importer.importOne(RawSms(
+      sender: 'BankMellat',
+      body: 'خرید مبلغ $n,500 ریال از کارت 9999',
+      receivedAt: now,
+    ));
+    expect(a, isNotNull);
+    expect(b, isNotNull);
+
+    final push = await me.sync.sync(force: true);
+    expect(push.error, isNull);
+    expect(push.failed, 0);
+    expect(push.synced, 2);
+
+    // گوشی بابا هر دو را دریافت می‌کند؛ فقط کارت 1234 مال خودش است.
+    final pull = await father.sync.sync(force: true);
+    expect(pull.pulled, greaterThanOrEqualTo(2));
+    final fathersTx = (await father.repo.getById(a!.id))!;
+    final myTx = (await father.repo.getById(b!.id))!;
+    expect(fathersTx.ownerUserId, fatherId);
+    expect(fathersTx.ownerName, 'بابا');
+    expect(fathersTx.walletLabel, 'کارت حقوق');
+    expect(myTx.ownerUserId, meId);
+    expect(fathersTx.smsBody, isNull); // متن پیامک هرگز از سرور نمی‌آید
+
+    // بابا تراکنش خودش را دسته‌بندی می‌کند → به گوشی من می‌رسد.
+    final fruit = (await father.repo.categories()).firstWhere((c) => c.name == 'میوه');
+    await father.repo.categorize(fathersTx.id, [fruit.id], description: 'میوه‌فروشی');
+    expect((await father.sync.sync(force: true)).synced, 1);
+
+    await me.sync.sync(force: true);
+    final onMe = await me.repo.getById(fathersTx.id);
+    expect(onMe!.allocations.single.categoryName, 'میوه');
+    expect(onMe.description, 'میوه‌فروشی');
+    expect(onMe.smsBody, isNotNull); // متن پیامک روی گوشیِ دریافت‌کننده ماند
+
+    // اگر گوشی بابا تراکنشِ من را عوض کند، سرور رد می‌کند و نسخه‌ی سرور برمی‌گردد.
+    await father.repo.updateTransaction(myTx.id, description: 'دست بابا');
+    final rejected = await father.sync.sync(force: true);
+    expect(rejected.rejected, 1);
+    expect((await father.repo.getById(myTx.id))!.description, isNot('دست بابا'));
+
+    // بابا تراکنشش را «نامعتبر» می‌کند → روی گوشی من هم پنهان می‌شود.
+    await father.repo.deleteTransaction(fathersTx.id);
+    await father.sync.sync(force: true);
+    await me.sync.sync(force: true);
+    expect((await me.repo.getAll()).map((t) => t.id), isNot(contains(fathersTx.id)));
+  }, skip: base == null ? 'LIVE_API تنظیم نشده' : false);
+
+  test('سرور در دسترس نیست → تراکنش در صف می‌ماند و پیام روشن است', () async {
+    final db = await openAppDatabase(path: inMemoryDatabasePath, singleInstance: false);
+    final repo = TransactionRepository(db);
+    final api = ApiClient(baseUrl: 'http://127.0.0.1:9/api/v1', tokenStore: InMemoryTokenStore());
+    final sync = SyncService(db: db, api: DioRemoteTransactionApi(api.dio), deviceId: 'x');
+    await SmsImporter(repo).importOne(const RawSms(
+      sender: 'BankMellat',
+      body: 'خرید مبلغ 50,000 ریال از کارت 9999',
+    ));
+
+    final s = await sync.sync(force: true);
+    expect(s.offline, isTrue);
+    expect(s.message, contains('سرور در دسترس نبود'));
+    expect(await repo.pendingSyncCount(), 1);
+  }, skip: base == null ? 'LIVE_API تنظیم نشده' : false);
+}

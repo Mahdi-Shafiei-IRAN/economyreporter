@@ -1,12 +1,14 @@
-/// صفحه‌ی دسته‌بندی یک تراکنش: تیک‌زدن چند دسته + توضیح کوتاه.
-/// مبلغ به‌طور مساوی بین دسته‌های تیک‌خورده تقسیم می‌شود.
+/// دسته‌بندی یک یا چند تراکنش: تیک‌زدن چند دسته + توضیح کوتاه.
+/// مبلغ هر تراکنش به‌طور مساوی بین دسته‌های تیک‌خورده تقسیم می‌شود.
 library;
 
 import 'package:flutter/material.dart';
 
+import '../../core/format/date_format.dart';
 import '../../core/format/money_format.dart';
 import '../dashboard/dashboard_controller.dart';
 import '../transactions/data/transaction_record.dart';
+import '../transactions/data/tx_query.dart';
 import 'data/category.dart';
 
 const kCategorizeSaveKey = Key('categorize-save');
@@ -14,13 +16,14 @@ const kCategorizeDescKey = Key('categorize-desc');
 
 class CategorizeScreen extends StatefulWidget {
   final DashboardController controller;
-  final TransactionRecord record;
+  final List<TransactionRecord> records;
 
-  const CategorizeScreen({
+  CategorizeScreen({
     super.key,
     required this.controller,
-    required this.record,
-  });
+    TransactionRecord? record,
+    List<TransactionRecord>? records,
+  }) : records = records ?? [record!];
 
   @override
   State<CategorizeScreen> createState() => _CategorizeScreenState();
@@ -32,11 +35,20 @@ class _CategorizeScreenState extends State<CategorizeScreen> {
   late Future<List<Category>> _categoriesFuture;
   bool _saving = false;
 
+  bool get _single => widget.records.length == 1;
+
   @override
   void initState() {
     super.initState();
-    _categoriesFuture = widget.controller.categories();
-    _desc.text = widget.record.description ?? '';
+    _categoriesFuture = widget.controller.categories().then((cats) {
+      // دسته‌های فعلیِ تراکنش (اگر قبلاً دسته‌بندی شده) از پیش تیک بخورند.
+      if (_single) {
+        final current = widget.records.first.allocations.map((a) => a.categoryName).toSet();
+        _selected.addAll(cats.where((c) => current.contains(c.name)).map((c) => c.id));
+      }
+      return cats;
+    });
+    if (_single) _desc.text = widget.records.first.description ?? '';
   }
 
   @override
@@ -48,18 +60,53 @@ class _CategorizeScreenState extends State<CategorizeScreen> {
   Future<void> _save() async {
     if (_selected.isEmpty || _saving) return;
     setState(() => _saving = true);
-    await widget.controller
-        .categorize(widget.record.id, _selected.toList(), description: _desc.text.trim());
+    await widget.controller.categorizeMany(
+      [for (final r in widget.records) r.id],
+      _selected.toList(),
+      description: _single ? _desc.text.trim() : null,
+    );
     if (mounted) Navigator.of(context).pop(true);
+  }
+
+  Widget _header(BuildContext context) {
+    final theme = Theme.of(context);
+    if (_single) {
+      final t = widget.records.first;
+      return Card(
+        child: ListTile(
+          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+          title: Text(
+            t.amountRial == null ? 'مبلغ نامشخص' : formatToman(t.amountRial!),
+            style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+          ),
+          subtitle: Text([
+            formatJalaliDateTime(t.effectiveTime),
+            personOf(t),
+            cardTitleOf(t),
+            if (t.counterparty?.isNotEmpty ?? false) t.counterparty!,
+          ].join(' • ')),
+        ),
+      );
+    }
+    final total = widget.records.fold<int>(0, (a, t) => a + (t.amountRial ?? 0));
+    return Card(
+      child: ListTile(
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+        title: Text('${toPersianDigits('${widget.records.length}')} تراکنش — جمع ${formatToman(total)}',
+            style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
+        subtitle: const Text('دسته‌های انتخابی به همه‌ی این تراکنش‌ها داده می‌شود.'),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    final amount = widget.record.amountRial ?? 0;
+    final theme = Theme.of(context);
+    final amount = _single ? (widget.records.first.amountRial ?? 0) : 0;
     final perCategory = _selected.isEmpty ? 0 : amount ~/ _selected.length;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('دسته‌بندی')),
+      appBar: AppBar(title: Text(_single ? 'دسته‌بندی تراکنش' : 'دسته‌بندی گروهی')),
       body: FutureBuilder<List<Category>>(
         future: _categoriesFuture,
         builder: (context, snapshot) {
@@ -70,13 +117,16 @@ class _CategorizeScreenState extends State<CategorizeScreen> {
           return ListView(
             padding: const EdgeInsets.all(16),
             children: [
+              _header(context),
+              const SizedBox(height: 16),
+              Text('دسته‌ها را تیک بزن', style: theme.textTheme.titleSmall),
+              const SizedBox(height: 2),
               Text(
-                'مبلغ: ${formatToman(amount)}',
-                style: Theme.of(context).textTheme.titleMedium,
+                'اگر یک خرید چند دسته دارد (مثلاً میوه و نان)، همه را تیک بزن؛ '
+                'مبلغ مساوی بینشان تقسیم می‌شود.',
+                style: theme.textTheme.bodySmall
+                    ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
               ),
-              const SizedBox(height: 4),
-              Text('دسته‌های این خرید را تیک بزن (مبلغ مساوی تقسیم می‌شود):',
-                  style: Theme.of(context).textTheme.bodySmall),
               const SizedBox(height: 12),
               Wrap(
                 spacing: 8,
@@ -96,20 +146,19 @@ class _CategorizeScreenState extends State<CategorizeScreen> {
                     ),
                 ],
               ),
-              if (_selected.length > 1) ...[
+              if (_single && _selected.length > 1) ...[
                 const SizedBox(height: 12),
-                Text('هر دسته: ${formatToman(perCategory)}',
-                    style: Theme.of(context).textTheme.bodyMedium),
+                Text('سهم هر دسته: ${formatToman(perCategory)}',
+                    style: theme.textTheme.bodyMedium),
               ],
-              const SizedBox(height: 16),
-              TextField(
-                key: kCategorizeDescKey,
-                controller: _desc,
-                decoration: const InputDecoration(
-                  labelText: 'توضیح کوتاه (اختیاری)',
-                  border: OutlineInputBorder(),
+              if (_single) ...[
+                const SizedBox(height: 16),
+                TextField(
+                  key: kCategorizeDescKey,
+                  controller: _desc,
+                  decoration: const InputDecoration(labelText: 'توضیح کوتاه (اختیاری)'),
                 ),
-              ),
+              ],
               const SizedBox(height: 20),
               FilledButton(
                 key: kCategorizeSaveKey,

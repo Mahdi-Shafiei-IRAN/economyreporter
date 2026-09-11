@@ -188,7 +188,7 @@ void main() {
   test('دریافت: تراکنش عضو دیگر اعمال و cursor نگه داشته می‌شود', () async {
     await repo.setSetting(SettingKeys.meUserId, 'u-me');
     final api = FakeRemoteTransactionApi()
-      ..pages.add(PullPage(
+      ..pages.add(const PullPage(
         results: [
           {
             'id': 'r1',
@@ -198,7 +198,7 @@ void main() {
             'owner_name': 'بابا',
             'captured_by': 'u-father',
             'is_deleted': false,
-            'allocations': const [],
+            'allocations': [],
           },
         ],
         cursor: 'c1',

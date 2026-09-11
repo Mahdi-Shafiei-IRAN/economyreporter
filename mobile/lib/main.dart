@@ -6,10 +6,12 @@ import 'core/auth/token_store.dart';
 import 'core/config/app_config.dart';
 import 'core/dashboard/remote_dashboard_api.dart';
 import 'core/database/app_database.dart';
+import 'core/family/family_api.dart';
 import 'core/network/api_client.dart';
 import 'core/sms/sms_importer.dart';
 import 'core/sync/remote_transaction_api.dart';
 import 'core/sync/sync_service.dart';
+import 'core/theme/app_theme.dart';
 import 'core/theme/theme_controller.dart';
 import 'features/auth/auth_controller.dart';
 import 'features/auth/login_screen.dart';
@@ -38,19 +40,11 @@ class EconomyApp extends StatelessWidget {
     return AnimatedBuilder(
       animation: themeController,
       builder: (context, _) => MaterialApp(
-        title: 'مدیریت مالی خانواده',
+        title: 'مالی خانواده',
         debugShowCheckedModeBanner: false,
         navigatorKey: navigatorKey,
-        theme: ThemeData(
-          colorSchemeSeed: Colors.teal,
-          brightness: Brightness.light,
-          useMaterial3: true,
-        ),
-        darkTheme: ThemeData(
-          colorSchemeSeed: Colors.teal,
-          brightness: Brightness.dark,
-          useMaterial3: true,
-        ),
+        theme: buildAppTheme(Brightness.light),
+        darkTheme: buildAppTheme(Brightness.dark),
         themeMode: themeController.mode,
         builder: (context, child) => Directionality(
           textDirection: TextDirection.rtl,
@@ -66,15 +60,27 @@ class _Services {
   final AuthController auth;
   final DashboardController dashboard;
   final SyncService sync;
+  final ProfileService profile;
   final RemoteDashboardApi dashboardApi;
   final SmsInboxService smsInbox;
-  const _Services(
-    this.auth,
-    this.dashboard,
-    this.sync,
-    this.dashboardApi,
-    this.smsInbox,
-  );
+
+  const _Services({
+    required this.auth,
+    required this.dashboard,
+    required this.sync,
+    required this.profile,
+    required this.dashboardApi,
+    required this.smsInbox,
+  });
+
+  /// پروفایل/اعضا از سرور → ارسال و دریافت تراکنش‌ها → تازه‌سازی صفحه.
+  /// در حالت آفلاین بی‌صدا شکست می‌خورد (چیزی گم نمی‌شود).
+  Future<SyncSummary> refreshFromServer({bool force = false}) async {
+    await profile.refresh();
+    final summary = await sync.sync(force: force);
+    await dashboard.load();
+    return summary;
+  }
 }
 
 class _Bootstrap extends StatefulWidget {
@@ -96,30 +102,46 @@ class _BootstrapState extends State<_Bootstrap> {
 
     final db = await openAppDatabase();
     final repo = TransactionRepository(db);
-    final dashboard = DashboardController(repo);
 
+    // شناسه‌ی ثابت گوشی (قبلاً هر اجرا یک شناسه‌ی تازه ساخته می‌شد).
+    var deviceId = await repo.getSetting(SettingKeys.deviceId);
+    if (deviceId == null) {
+      deviceId = const Uuid().v4();
+      await repo.setSetting(SettingKeys.deviceId, deviceId);
+    }
+
+    final dashboard = DashboardController(repo);
     final sync = SyncService(
       db: db,
       api: DioRemoteTransactionApi(api.dio),
-      deviceId: const Uuid().v4(),
+      deviceId: deviceId,
     );
-    final dashboardApi = DioRemoteDashboardApi(api.dio);
+    final profile = ProfileService(DioFamilyApi(api.dio), repo);
+
+    // هر ویرایش محلی (دسته‌بندی، حذف، کارت) بی‌درنگ برای بقیه‌ی اعضا فرستاده شود.
+    dashboard.onLocalChange = () => sync.sync().ignore();
 
     final smsInbox = SmsInboxService(
-      importer: SmsImporter(repo),
+      importer: SmsImporter(repo, deviceId: deviceId),
       onChanged: () {
-        dashboard.load(); // تازه‌سازی داشبورد محلی
-        sync.sync().ignore(); // ارسال خودکار به سرور (تا داشبورد خانواده هم به‌روز شود)
+        dashboard.load(); // تازه‌سازی صفحه
+        sync.sync().ignore(); // ارسال خودکار به سرور خانواده
       },
-      onTransactionCaptured: (tx) =>
-          NotificationService.showTransaction(tx.id, tx.amountRial),
+      onTransactionCaptured: (tx) {
+        if (tx.promptCategorize) {
+          NotificationService.showTransaction(tx.id, tx.amountRial);
+        }
+      },
     );
 
-    // تلاش اولیه برای همگام‌سازی آنچه هنوز نرفته (در صورت آنلاین‌بودن).
-    if (auth.authenticated) {
-      sync.sync().ignore();
-    }
-    return _Services(auth, dashboard, sync, dashboardApi, smsInbox);
+    return _Services(
+      auth: auth,
+      dashboard: dashboard,
+      sync: sync,
+      profile: profile,
+      dashboardApi: DioRemoteDashboardApi(api.dio),
+      smsInbox: smsInbox,
+    );
   }
 
   @override
@@ -147,7 +169,7 @@ class _BootstrapState extends State<_Bootstrap> {
   }
 }
 
-/// بسته به وضعیت احراز هویت، ورود یا داشبورد را نشان می‌دهد.
+/// بسته به وضعیت احراز هویت، ورود یا صفحه‌ی اصلی را نشان می‌دهد.
 class _Root extends StatefulWidget {
   final _Services services;
 
@@ -157,35 +179,48 @@ class _Root extends StatefulWidget {
   State<_Root> createState() => _RootState();
 }
 
-class _RootState extends State<_Root> {
-  bool _smsSetupDone = false;
+class _RootState extends State<_Root> with WidgetsBindingObserver {
+  bool _setupDone = false;
 
   @override
   void initState() {
     super.initState();
-    widget.services.auth.addListener(_maybeSetupSms);
-    WidgetsBinding.instance.addPostFrameCallback((_) => _maybeSetupSms());
+    WidgetsBinding.instance.addObserver(this);
+    widget.services.auth.addListener(_maybeSetup);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _maybeSetup());
   }
 
   @override
   void dispose() {
-    widget.services.auth.removeListener(_maybeSetupSms);
+    WidgetsBinding.instance.removeObserver(this);
+    widget.services.auth.removeListener(_maybeSetup);
     super.dispose();
   }
 
-  /// بعد از ورود: نوتیفیکیشن را آماده می‌کند، مجوز پیامک می‌گیرد، صندوق را وارد
-  /// و listener را شروع می‌کند؛ و اگر اپ از نوتیفیکیشن باز شده، به دسته‌بندی می‌رود.
-  Future<void> _maybeSetupSms() async {
-    if (_smsSetupDone || !widget.services.auth.authenticated) return;
-    _smsSetupDone = true;
+  /// برگشت به اپ: پیامک‌هایی که در پس‌زمینه ذخیره شده‌اند و تغییرات بقیه‌ی اعضا.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) return;
+    final s = widget.services;
+    s.dashboard.load();
+    if (s.auth.authenticated) s.refreshFromServer().ignore();
+  }
 
+  /// بعد از ورود: پروفایل و sync، نوتیفیکیشن، مجوز پیامک، وارد کردن صندوق و
+  /// گوش‌دادن زنده؛ و اگر اپ از نوتیفیکیشن باز شده، رفتن به دسته‌بندی.
+  Future<void> _maybeSetup() async {
+    final s = widget.services;
+    if (_setupDone || !s.auth.authenticated) return;
+    _setupDone = true;
+
+    s.refreshFromServer().ignore();
     await NotificationService.init(onTap: _openCategorize);
 
-    final sms = widget.services.smsInbox;
-    final granted = await sms.requestPermission();
+    final granted = await s.smsInbox.requestPermission();
     if (granted) {
-      await sms.importInbox();
-      sms.startListener();
+      await s.smsInbox.importInbox();
+      await s.dashboard.load();
+      s.smsInbox.startListener();
     }
 
     final launchPayload = await NotificationService.launchPayload();
@@ -215,15 +250,15 @@ class _RootState extends State<_Root> {
         if (services.auth.authenticated) {
           return DashboardScreen(
             controller: services.dashboard,
-            onLogout: services.auth.logout,
-            onSync: () async {
-              final s = await services.sync.sync();
-              return 'همگام‌سازی: ${s.synced} موفق، ${s.failed} ناموفق';
+            onLogout: () {
+              _setupDone = false;
+              services.auth.logout();
             },
+            onSync: () async =>
+                (await services.refreshFromServer(force: true)).message,
             onOpenFamilyDashboard: () => Navigator.of(context).push(
               MaterialPageRoute(
-                builder: (_) =>
-                    FamilyDashboardScreen(api: services.dashboardApi),
+                builder: (_) => FamilyDashboardScreen(api: services.dashboardApi),
               ),
             ),
           );
