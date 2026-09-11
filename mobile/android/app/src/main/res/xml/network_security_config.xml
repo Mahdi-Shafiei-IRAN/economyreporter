@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- فقط برای اتصال به سرور توسعه روی شبکه‌ی محلی، HTTP بدون TLS مجاز است.
+     بقیه‌ی مقصدها همچنان فقط HTTPS. در تولید (VPS) از HTTPS استفاده کن و در
+     صورت نیاز این دامنه‌ها را بردار. -->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">192.168.1.100</domain>
+        <domain includeSubdomains="true">10.0.2.2</domain>
+        <domain includeSubdomains="true">localhost</domain>
+    </domain-config>
+</network-security-config>

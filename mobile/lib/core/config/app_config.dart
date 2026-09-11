@@ -2,10 +2,11 @@
 library;
 
 class AppConfig {
-  /// امولاتور اندروید: `10.0.2.2` یعنی localhostِ کامپیوترِ میزبان.
-  /// گوشی واقعی روی Wi-Fi: IP کامپیوتر، مثلاً http://192.168.1.23:8000/api/v1
+  /// گوشی واقعی روی Wi-Fi: IP کامپیوترِ سرور. اگر IP کامپیوتر عوض شد،
+  /// این مقدار را عوض کن یا موقع بیلد با --dart-define=API_BASE_URL=... بده.
+  /// (امولاتور اندروید: به‌جای IP از 10.0.2.2 استفاده کن.)
   static const String apiBaseUrl = String.fromEnvironment(
     'API_BASE_URL',
-    defaultValue: 'http://10.0.2.2:8000/api/v1',
+    defaultValue: 'http://192.168.1.100:8000/api/v1',
   );
 }
