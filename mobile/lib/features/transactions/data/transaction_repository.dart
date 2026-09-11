@@ -8,6 +8,7 @@ import 'package:uuid/uuid.dart';
 
 import '../../../core/sms/models.dart';
 import '../../../core/sms/sms_fingerprint.dart';
+import '../../categories/data/category.dart';
 import 'transaction_record.dart';
 
 enum TxInsertStatus { created, duplicate }
@@ -56,6 +57,16 @@ abstract class TransactionStore {
     bool? needsReview,
   });
   Future<void> deleteTransaction(String id);
+
+  // --- دسته‌بندی ---
+  Future<List<Category>> categories();
+  Future<void> categorize(
+    String transactionId,
+    List<String> categoryIds, {
+    String? description,
+  });
+  Future<List<CategoryTotal>> categoryTotals({DateTime? from, DateTime? to});
+  Future<List<TransactionRecord>> uncategorized({int? limit});
 }
 
 class TransactionRepository implements TransactionStore {
@@ -208,7 +219,105 @@ class TransactionRepository implements TransactionStore {
   @override
   Future<void> deleteTransaction(String id) async {
     await _db.delete('outbox', where: 'transaction_id = ?', whereArgs: [id]);
+    await _db.delete('transaction_categories',
+        where: 'transaction_id = ?', whereArgs: [id]);
     await _db.delete('transactions', where: 'id = ?', whereArgs: [id]);
+  }
+
+  @override
+  Future<List<Category>> categories() async {
+    final rows = await _db.query('categories', orderBy: 'is_system DESC, name');
+    return rows.map(Category.fromMap).toList();
+  }
+
+  @override
+  Future<void> categorize(
+    String transactionId,
+    List<String> categoryIds, {
+    String? description,
+  }) async {
+    final now = DateTime.now().toUtc();
+    final txRows = await _db.query('transactions',
+        columns: ['amount_rial'],
+        where: 'id = ?',
+        whereArgs: [transactionId],
+        limit: 1);
+    final amount =
+        txRows.isEmpty ? 0 : ((txRows.first['amount_rial'] as int?) ?? 0);
+
+    await _db.delete('transaction_categories',
+        where: 'transaction_id = ?', whereArgs: [transactionId]);
+
+    final n = categoryIds.length;
+    if (n > 0) {
+      // تقسیم مساوی؛ باقی‌مانده‌ی ریالی به دسته‌های اول داده می‌شود تا جمع دقیق بماند.
+      final base = amount ~/ n;
+      final remainder = amount - base * n;
+      final batch = _db.batch();
+      for (var i = 0; i < n; i++) {
+        batch.insert('transaction_categories', {
+          'id': _uuid.v4(),
+          'transaction_id': transactionId,
+          'category_id': categoryIds[i],
+          'amount_rial': base + (i < remainder ? 1 : 0),
+        });
+      }
+      await batch.commit(noResult: true);
+    }
+
+    final data = <String, Object?>{
+      'needs_review': 0,
+      'updated_at': now.toIso8601String(),
+    };
+    if (description != null) data['description'] = description;
+    await _db.update('transactions', data,
+        where: 'id = ?', whereArgs: [transactionId]);
+  }
+
+  @override
+  Future<List<CategoryTotal>> categoryTotals({DateTime? from, DateTime? to}) async {
+    final where = StringBuffer("t.kind = 'expense'");
+    final args = <Object?>[];
+    const dateExpr =
+        'COALESCE(t.transaction_date, t.client_created_at, t.created_at)';
+    if (from != null) {
+      where.write(' AND $dateExpr >= ?');
+      args.add(from.toUtc().toIso8601String());
+    }
+    if (to != null) {
+      where.write(' AND $dateExpr <= ?');
+      args.add(to.toUtc().toIso8601String());
+    }
+    final rows = await _db.rawQuery('''
+      SELECT c.id AS cid, c.name AS cname, COALESCE(SUM(tc.amount_rial), 0) AS total
+      FROM transaction_categories tc
+      JOIN transactions t ON t.id = tc.transaction_id
+      JOIN categories c ON c.id = tc.category_id
+      WHERE $where
+      GROUP BY c.id, c.name
+      ORDER BY total DESC
+    ''', args);
+    return rows
+        .map((r) => CategoryTotal(
+              categoryId: r['cid'] as String,
+              name: r['cname'] as String,
+              amountRial: (r['total'] as int?) ?? 0,
+            ))
+        .toList();
+  }
+
+  @override
+  Future<List<TransactionRecord>> uncategorized({int? limit}) async {
+    final rows = await _db.rawQuery('''
+      SELECT t.* FROM transactions t
+      WHERE t.amount_rial IS NOT NULL AND t.kind IN ('income','expense')
+        AND NOT EXISTS (
+          SELECT 1 FROM transaction_categories tc WHERE tc.transaction_id = t.id
+        )
+      ORDER BY COALESCE(t.transaction_date, t.client_created_at, t.created_at) DESC
+      ${limit != null ? 'LIMIT $limit' : ''}
+    ''');
+    return rows.map(TransactionRecord.fromMap).toList();
   }
 
   /// جمع درآمد/هزینه‌ی بازه (transfer و unknown و رکورد بدون مبلغ حذف می‌شوند).

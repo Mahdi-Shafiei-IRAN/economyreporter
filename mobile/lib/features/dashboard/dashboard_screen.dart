@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 
 import '../../core/format/money_format.dart';
 import '../../core/sms/bank_registry.dart';
+import '../categories/categorize_list_screen.dart';
+import '../categories/category_report_screen.dart';
 import '../review/reconciliation_screen.dart';
 import '../review/review_screen.dart';
 import '../transactions/data/transaction_record.dart';
@@ -24,6 +26,8 @@ const kEmptyStateKey = Key('empty-state');
 const kReviewActionKey = Key('review-action');
 const kReconcileBannerKey = Key('reconcile-banner');
 const kFamilyDashboardActionKey = Key('family-dashboard-action');
+const kReportActionKey = Key('report-action');
+const kCategorizeBannerKey = Key('categorize-banner');
 
 class DashboardScreen extends StatefulWidget {
   final DashboardController controller;
@@ -93,6 +97,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
+  void _openCategorizeList() {
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => CategorizeListScreen(controller: _c)),
+    );
+  }
+
+  void _openReport() {
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => CategoryReportScreen(controller: _c)),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
@@ -111,6 +127,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 ),
                 tooltip: 'بازبینی',
                 onPressed: _openReview,
+              ),
+              IconButton(
+                key: kReportActionKey,
+                icon: const Icon(Icons.pie_chart_outline),
+                tooltip: 'گزارش دسته‌ها',
+                onPressed: _openReport,
               ),
               if (widget.onOpenFamilyDashboard != null)
                 IconButton(
@@ -147,6 +169,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     padding: const EdgeInsets.fromLTRB(12, 12, 12, 96),
                     children: [
                       _SummaryCard(summary: _c.summary),
+                      if (_c.uncategorizedCount > 0) ...[
+                        const SizedBox(height: 12),
+                        _CategorizeBanner(
+                          count: _c.uncategorizedCount,
+                          onTap: _openCategorizeList,
+                        ),
+                      ],
                       if (_c.balanceGaps.isNotEmpty) ...[
                         const SizedBox(height: 12),
                         _ReconcileBanner(
@@ -282,6 +311,61 @@ class _TransactionTile extends StatelessWidget {
   }
 }
 
+/// بنر هشدار روی داشبورد. عمداً از ListTile استفاده نمی‌کند تا شمارش ردیف‌های
+/// تراکنش (ListTile) دست‌نخورده بماند.
+class _Banner extends StatelessWidget {
+  final Key bannerKey;
+  final IconData icon;
+  final Color color;
+  final Color background;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+
+  const _Banner({
+    required this.bannerKey,
+    required this.icon,
+    required this.color,
+    required this.background,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      key: bannerKey,
+      color: background,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Row(
+            children: [
+              Icon(icon, color: color),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(title,
+                        style: const TextStyle(fontWeight: FontWeight.bold)),
+                    Text(subtitle,
+                        style: Theme.of(context).textTheme.bodySmall),
+                  ],
+                ),
+              ),
+              const Icon(Icons.chevron_left),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _ReconcileBanner extends StatelessWidget {
   final int count;
   final VoidCallback onTap;
@@ -289,16 +373,33 @@ class _ReconcileBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      key: kReconcileBannerKey,
-      color: const Color(0xFFFFF3CD),
-      child: ListTile(
-        leading: const Icon(Icons.warning_amber_rounded, color: Colors.orange),
-        title: Text('$count مورد احتمال پیامک جاافتاده'),
-        subtitle: const Text('برای بررسی تطبیق مانده ضربه بزنید'),
-        trailing: const Icon(Icons.chevron_left),
-        onTap: onTap,
-      ),
+    return _Banner(
+      bannerKey: kReconcileBannerKey,
+      icon: Icons.warning_amber_rounded,
+      color: Colors.orange,
+      background: const Color(0xFFFFF3CD),
+      title: '$count مورد احتمال پیامک جاافتاده',
+      subtitle: 'برای بررسی تطبیق مانده ضربه بزنید',
+      onTap: onTap,
+    );
+  }
+}
+
+class _CategorizeBanner extends StatelessWidget {
+  final int count;
+  final VoidCallback onTap;
+  const _CategorizeBanner({required this.count, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return _Banner(
+      bannerKey: kCategorizeBannerKey,
+      icon: Icons.label_outline,
+      color: Colors.teal,
+      background: const Color(0xFFE0F2F1),
+      title: '$count تراکنش نیازمند دسته‌بندی',
+      subtitle: 'برای تیک‌زدن دسته‌ها ضربه بزنید',
+      onTap: onTap,
     );
   }
 }

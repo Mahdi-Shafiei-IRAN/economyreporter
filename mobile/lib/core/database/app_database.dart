@@ -6,9 +6,29 @@ library;
 
 import 'package:path/path.dart' as p;
 import 'package:sqflite/sqflite.dart';
+import 'package:uuid/uuid.dart';
 
 const String kDbName = 'economy.db';
-const int kDbVersion = 2;
+const int kDbVersion = 3;
+
+/// دسته‌های پیش‌فرض (قابل ویرایش توسط کاربر بعداً).
+const List<String> kDefaultCategories = [
+  'سبزیجات',
+  'میوه',
+  'گوشت',
+  'مرغ',
+  'نان',
+  'لبنیات',
+  'خواروبار',
+  'حمل‌ونقل',
+  'قبوض',
+  'سلامت',
+  'پوشاک',
+  'سرگرمی',
+  'رستوران',
+  'حقوق و درآمد',
+  'سایر',
+];
 
 /// پایگاه‌داده را باز می‌کند. اگر [path] داده نشود، مسیر پیش‌فرض دستگاه.
 /// برای تست، `inMemoryDatabasePath` پاس داده می‌شود.
@@ -36,6 +56,11 @@ Future<void> migrateSchema(Database db, int oldVersion, int newVersion) async {
   if (oldVersion < 2) {
     // نسخه ۲: افزودن شماره‌ی حساب برای تطبیق مانده‌ی بانک‌های حساب‌محور.
     await db.execute('ALTER TABLE transactions ADD COLUMN account_ref TEXT');
+  }
+  if (oldVersion < 3) {
+    // نسخه ۳: دسته‌بندی (دسته‌ها + تخصیص چندتاییِ مبلغ به دسته‌ها).
+    await _createCategoryTables(db);
+    await _seedCategories(db);
   }
 }
 
@@ -91,4 +116,48 @@ Future<void> createSchema(Database db) async {
       last_error TEXT
     )
   ''');
+
+  await _createCategoryTables(db);
+  await _seedCategories(db);
+}
+
+/// جدول‌های دسته‌بندی: دسته‌ها + تخصیص مبلغ هر تراکنش به چند دسته.
+Future<void> _createCategoryTables(Database db) async {
+  await db.execute('''
+    CREATE TABLE categories (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL UNIQUE,
+      is_system INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL
+    )
+  ''');
+  await db.execute('''
+    CREATE TABLE transaction_categories (
+      id TEXT PRIMARY KEY,
+      transaction_id TEXT NOT NULL,
+      category_id TEXT NOT NULL,
+      amount_rial INTEGER NOT NULL,
+      UNIQUE(transaction_id, category_id)
+    )
+  ''');
+  await db.execute(
+    'CREATE INDEX idx_txcat_tx ON transaction_categories(transaction_id)',
+  );
+  await db.execute(
+    'CREATE INDEX idx_txcat_cat ON transaction_categories(category_id)',
+  );
+}
+
+Future<void> _seedCategories(Database db) async {
+  const uuid = Uuid();
+  final now = DateTime.now().toUtc().toIso8601String();
+  final batch = db.batch();
+  for (final name in kDefaultCategories) {
+    batch.insert(
+      'categories',
+      {'id': uuid.v4(), 'name': name, 'is_system': 1, 'created_at': now},
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+  }
+  await batch.commit(noResult: true);
 }

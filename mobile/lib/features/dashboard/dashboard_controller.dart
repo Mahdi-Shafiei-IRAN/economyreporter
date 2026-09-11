@@ -1,10 +1,11 @@
 /// کنترلر داشبورد: بارگذاری جمع و لیست تراکنش‌ها و افزودن از پیامک.
 library;
 
-import 'package:flutter/foundation.dart';
+import 'package:flutter/foundation.dart' hide Category;
 
 import '../../core/reconcile/reconciliation.dart';
 import '../../core/sms/sms_parser.dart';
+import '../categories/data/category.dart';
 import '../transactions/data/transaction_record.dart';
 import '../transactions/data/transaction_repository.dart';
 
@@ -19,9 +20,12 @@ class DashboardController extends ChangeNotifier {
   List<TransactionRecord> transactions = const [];
   int needsReviewCount = 0;
   List<BalanceGap> balanceGaps = const [];
+  List<TransactionRecord> uncategorized = const [];
 
   List<TransactionRecord> get reviewItems =>
       transactions.where((t) => t.needsReview).toList();
+
+  int get uncategorizedCount => uncategorized.length;
 
   Future<void> load() async {
     loading = true;
@@ -30,8 +34,24 @@ class DashboardController extends ChangeNotifier {
     transactions = await repository.getAll(limit: 200);
     needsReviewCount = await repository.needsReviewCount();
     balanceGaps = const ReconciliationService().findGaps(transactions);
+    uncategorized = await repository.uncategorized(limit: 200);
     loading = false;
     notifyListeners();
+  }
+
+  Future<List<Category>> categories() => repository.categories();
+
+  Future<List<CategoryTotal>> categoryTotals({DateTime? from, DateTime? to}) =>
+      repository.categoryTotals(from: from, to: to);
+
+  Future<void> categorize(
+    String transactionId,
+    List<String> categoryIds, {
+    String? description,
+  }) async {
+    await repository.categorize(transactionId, categoryIds,
+        description: description);
+    await load();
   }
 
   Future<void> updateTransaction(

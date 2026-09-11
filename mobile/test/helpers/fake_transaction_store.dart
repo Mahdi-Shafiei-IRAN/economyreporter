@@ -3,12 +3,23 @@ library;
 
 import 'package:economy/core/sms/models.dart';
 import 'package:economy/core/sms/sms_fingerprint.dart';
+import 'package:economy/features/categories/data/category.dart';
 import 'package:economy/features/transactions/data/transaction_record.dart';
 import 'package:economy/features/transactions/data/transaction_repository.dart';
 
 class FakeTransactionStore implements TransactionStore {
   final List<TransactionRecord> _items = [];
   int _seq = 0;
+
+  final List<Category> _categories = const [
+    Category(id: 'c1', name: 'سبزیجات', isSystem: true),
+    Category(id: 'c2', name: 'میوه', isSystem: true),
+    Category(id: 'c3', name: 'گوشت', isSystem: true),
+    Category(id: 'c4', name: 'سایر', isSystem: true),
+  ];
+
+  // transactionId -> (categoryId -> amount)
+  final Map<String, Map<String, int>> _allocations = {};
 
   /// افزودن همگام برای آماده‌سازی داده‌ی تست (بدون await).
   void seed(ParsedTransaction parsed, {required String sender, DateTime? receivedAt}) {
@@ -104,6 +115,70 @@ class FakeTransactionStore implements TransactionStore {
   @override
   Future<void> deleteTransaction(String id) async {
     _items.removeWhere((t) => t.id == id);
+    _allocations.remove(id);
+  }
+
+  @override
+  Future<List<Category>> categories() async => List.of(_categories);
+
+  @override
+  Future<void> categorize(
+    String transactionId,
+    List<String> categoryIds, {
+    String? description,
+  }) async {
+    final index = _items.indexWhere((t) => t.id == transactionId);
+    final amount = index == -1 ? 0 : (_items[index].amountRial ?? 0);
+    final n = categoryIds.length;
+    _allocations.remove(transactionId);
+    if (n > 0) {
+      final base = amount ~/ n;
+      final remainder = amount - base * n;
+      final map = <String, int>{};
+      for (var i = 0; i < n; i++) {
+        map[categoryIds[i]] = base + (i < remainder ? 1 : 0);
+      }
+      _allocations[transactionId] = map;
+    }
+    if (index != -1) {
+      _items[index] = _items[index].copyWith(
+        needsReview: false,
+        description: description,
+        updatedAt: DateTime.now().toUtc(),
+      );
+    }
+  }
+
+  @override
+  Future<List<CategoryTotal>> categoryTotals({DateTime? from, DateTime? to}) async {
+    final totals = <String, int>{};
+    for (final t in _items) {
+      if (t.kind != 'expense') continue;
+      final alloc = _allocations[t.id];
+      if (alloc == null) continue;
+      alloc.forEach((cid, amt) => totals[cid] = (totals[cid] ?? 0) + amt);
+    }
+    final byId = {for (final c in _categories) c.id: c.name};
+    final list = totals.entries
+        .map((e) => CategoryTotal(
+              categoryId: e.key,
+              name: byId[e.key] ?? e.key,
+              amountRial: e.value,
+            ))
+        .toList()
+      ..sort((a, b) => b.amountRial.compareTo(a.amountRial));
+    return list;
+  }
+
+  @override
+  Future<List<TransactionRecord>> uncategorized({int? limit}) async {
+    final list = _items
+        .where((t) =>
+            t.amountRial != null &&
+            (t.kind == 'income' || t.kind == 'expense') &&
+            !_allocations.containsKey(t.id))
+        .toList();
+    return limit == null ? list : list.take(limit).toList();
   }
 
   @override
