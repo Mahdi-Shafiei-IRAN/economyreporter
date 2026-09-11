@@ -1,5 +1,6 @@
 import 'package:economy/core/database/app_database.dart';
 import 'package:economy/core/sms/sms_importer.dart';
+import 'package:economy/core/sms/sms_parser.dart';
 import 'package:economy/features/transactions/data/transaction_repository.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sqflite/sqflite.dart';
@@ -57,5 +58,20 @@ void main() {
     final saved = (await repo.getAll()).single;
     expect(saved.smsSender, 'BankMellat');
     expect(saved.bankId, 'mellat');
+  });
+
+  test('مجاز کردن فرستنده با بانک: پیامک‌های قبلیِ بی‌بانکِ همان فرستنده بانک می‌گیرند',
+      () async {
+    const parser = SmsParser();
+    await repo.saveParsed(
+      parser.parse(sender: '+98300045', body: 'برداشت مبلغ 80,000 ریال'),
+      sender: '+98300045',
+      receivedAt: DateTime.utc(2026, 9, 1),
+    );
+    expect((await repo.getAll()).single.bankId, isNull);
+
+    await repo.addAllowedSender('0300045', bankId: 'refah');
+
+    expect((await repo.getAll()).single.bankId, 'refah');
   });
 }

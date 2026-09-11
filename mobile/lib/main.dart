@@ -76,12 +76,23 @@ class _Services {
   /// پروفایل/اعضا از سرور → ارسال و دریافت تراکنش‌ها → تازه‌سازی صفحه.
   /// در حالت آفلاین بی‌صدا شکست می‌خورد (چیزی گم نمی‌شود).
   Future<SyncSummary> refreshFromServer({bool force = false}) async {
-    await profile.refresh();
+    if (await profile.refresh() == ProfileStatus.needsRelogin) {
+      await auth.expireSession(kLegacyAccountNotice);
+      return const SyncSummary(synced: 0, failed: 0, error: 'auth');
+    }
     final summary = await sync.sync(force: force);
     await dashboard.load();
     return summary;
   }
 }
+
+/// پیام صفحه‌ی ورود وقتی گوشی هنوز با حسابِ قدیمیِ ایمیلی (مثل «کاربر تست») وارد است.
+const kLegacyAccountNotice = 'ورود حالا با شماره موبایل است. با شماره و رمزی که مدیر '
+    'خانواده در پنل مدیریت برایت ساخته وارد شو.';
+
+/// پیام صفحه‌ی ورود وقتی سرور نشست را نمی‌پذیرد (کاربر حذف/غیرفعال شده).
+const kSessionExpiredNotice =
+    'حسابت روی سرور دیگر فعال نیست یا نشست تمام شده؛ دوباره وارد شو.';
 
 class _Bootstrap extends StatefulWidget {
   const _Bootstrap();
@@ -98,6 +109,8 @@ class _BootstrapState extends State<_Bootstrap> {
     final api = ApiClient(baseUrl: AppConfig.apiBaseUrl, tokenStore: tokenStore);
     final authRepo = AuthRepository(api, tokenStore);
     final auth = AuthController(authRepo);
+    // کاربر در پنل حذف/غیرفعال شد یا نشست باطل است → برگشت به صفحه‌ی ورود.
+    api.onSessionExpired = () => auth.expireSession(kSessionExpiredNotice);
     await auth.bootstrap();
 
     final db = await openAppDatabase();
@@ -216,7 +229,12 @@ class _RootState extends State<_Root> with WidgetsBindingObserver {
   /// گوش‌دادن زنده؛ و اگر اپ از نوتیفیکیشن باز شده، رفتن به دسته‌بندی.
   Future<void> _maybeSetup() async {
     final s = widget.services;
-    if (_setupDone || !s.auth.authenticated) return;
+    if (!s.auth.authenticated) {
+      // خروج (دستی یا اجباری): با ورود بعدی دوباره راه‌اندازی شود.
+      _setupDone = false;
+      return;
+    }
+    if (_setupDone) return;
     _setupDone = true;
 
     s.refreshFromServer().ignore();

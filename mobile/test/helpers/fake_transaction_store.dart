@@ -57,16 +57,10 @@ class FakeTransactionStore implements TransactionStore {
     String? accountRef,
     String? bankId,
   }) {
-    for (final w in _wallets) {
-      if (w.matches(cardLast4: cardLast4, accountRef: accountRef, bankId: bankId)) {
-        return (
-          ownerUserId: w.ownerUserId ?? _me,
-          ownerName: w.ownerName,
-          walletLabel: w.label,
-        );
-      }
-    }
-    return (ownerUserId: _me, ownerName: null, walletLabel: null);
+    final w = walletFor(_wallets,
+        cardLast4: cardLast4, accountRef: accountRef, bankId: bankId);
+    if (w == null) return (ownerUserId: _me, ownerName: null, walletLabel: null);
+    return (ownerUserId: w.ownerUserId ?? _me, ownerName: w.ownerName, walletLabel: w.label);
   }
 
   TxInsertOutcome _put(
@@ -296,6 +290,15 @@ class FakeTransactionStore implements TransactionStore {
     final sender =
         AllowedSender(id: 's${_senderSeq++}', address: address.trim(), bankId: bankId);
     _senders.add(sender);
+    if (bankId != null) {
+      // پیامک‌های قبلیِ بی‌بانکِ همین فرستنده، بانکِ فرستنده را می‌گیرند.
+      for (var i = 0; i < _items.length; i++) {
+        final t = _items[i];
+        if (t.isRemote || t.bankId != null || t.smsSender == null) continue;
+        if (sender.matches(t.smsSender!)) _items[i] = t.copyWith(bankId: bankId);
+      }
+      await reattributeLocal();
+    }
     return sender;
   }
 
@@ -318,6 +321,29 @@ class FakeTransactionStore implements TransactionStore {
         clearWalletLabel: a.walletLabel == null,
       );
     }
+  }
+
+  @override
+  Future<void> switchAccount({
+    required String previousUserId,
+    required String userId,
+    required String userName,
+    Set<String>? memberIds,
+  }) async {
+    _items.removeWhere((t) => t.isRemote);
+    for (var i = 0; i < _wallets.length; i++) {
+      final w = _wallets[i];
+      if (w.ownerUserId == previousUserId) {
+        _wallets[i] = w.copyWith(ownerUserId: userId, ownerName: userName);
+      } else if (memberIds != null &&
+          w.ownerUserId != null &&
+          !{...memberIds, userId}.contains(w.ownerUserId)) {
+        _wallets[i] = w.copyWith(clearOwnerUserId: true);
+      }
+    }
+    settings
+      ..remove(SettingKeys.pullCursor)
+      ..remove(SettingKeys.lastSync);
   }
 
   @override

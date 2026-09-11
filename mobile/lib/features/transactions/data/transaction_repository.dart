@@ -170,6 +170,18 @@ abstract class TransactionStore {
   /// انتساب دوباره‌ی تراکنش‌های همین گوشی به کیف‌ها/کاربر جاری.
   Future<void> reattributeLocal();
 
+  /// ورود با حساب دیگری روی همین گوشی: تراکنش‌های خانواده‌ی قبلی (از گوشی‌های
+  /// دیگر) و cursor دریافت پاک می‌شوند؛ تراکنش‌های پیامکِ همین گوشی با شناسه‌ی تازه
+  /// برای خانواده‌ی جدید صف می‌شوند (سرور شناسه‌ی قبلی را در خانواده‌ی قبلی دارد)؛
+  /// کیف‌های «من» به کاربر جدید می‌رسند و کیفِ عضوی که در خانواده‌ی جدید نیست بی‌حساب
+  /// می‌شود. [memberIds] null یعنی اعضا گرفته نشد (کیف‌های دیگر دست نمی‌خورند).
+  Future<void> switchAccount({
+    required String previousUserId,
+    required String userId,
+    required String userName,
+    Set<String>? memberIds,
+  });
+
   /// تعداد تراکنش‌های منتظر ارسال به سرور.
   Future<int> pendingSyncCount();
 
@@ -192,13 +204,11 @@ _Attribution _attributionFrom(
   String? accountRef,
   String? bankId,
 }) {
-  for (final w in wallets) {
-    if (w.matches(cardLast4: cardLast4, accountRef: accountRef, bankId: bankId)) {
-      // کیفِ بدون حساب کاربری (مثلاً مامانی که اپ ندارد) → صاحبِ ویرایش، همین گوشی است.
-      return _Attribution(w.ownerUserId ?? meUserId, w.ownerName, w.label);
-    }
-  }
-  return _Attribution(meUserId, null, null);
+  final w = walletFor(wallets,
+      cardLast4: cardLast4, accountRef: accountRef, bankId: bankId);
+  if (w == null) return _Attribution(meUserId, null, null);
+  // کیفِ بدون حساب کاربری (مثلاً مامانی که اپ ندارد) → صاحبِ ویرایش، همین گوشی است.
+  return _Attribution(w.ownerUserId ?? meUserId, w.ownerName, w.label);
 }
 
 class TransactionRepository implements TransactionStore {
@@ -543,12 +553,95 @@ class TransactionRepository implements TransactionStore {
     final sender =
         AllowedSender(id: _uuid.v4(), address: address.trim(), bankId: bankId);
     await _db.insert('allowed_senders', {...sender.toMap(), 'created_at': _nowIso()});
+    if (bankId != null) await _backfillBank(sender);
     return sender;
+  }
+
+  /// پیامک‌هایی که قبلاً از همین فرستنده ثبت شده و بانکشان معلوم نبود، بانکِ فرستنده
+  /// را می‌گیرند تا بشود صاحب کارتشان را تعیین کرد.
+  Future<void> _backfillBank(AllowedSender sender) async {
+    final rows = await _db.query(
+      'transactions',
+      columns: ['id', 'sms_sender'],
+      where: "origin = 'local' AND bank_id IS NULL AND sms_sender IS NOT NULL",
+    );
+    final now = _nowIso();
+    var changed = false;
+    for (final r in rows) {
+      if (!sender.matches(r['sms_sender'] as String)) continue;
+      await _db.update(
+        'transactions',
+        {'bank_id': sender.bankId, 'updated_at': now, 'sync_status': 'pending'},
+        where: 'id = ?',
+        whereArgs: [r['id']],
+      );
+      final record = await getById(r['id'] as String);
+      if (record != null) await _enqueueOutbox(record);
+      changed = true;
+    }
+    if (changed) await reattributeLocal();
   }
 
   @override
   Future<void> deleteAllowedSender(String id) async {
     await _db.delete('allowed_senders', where: 'id = ?', whereArgs: [id]);
+  }
+
+  @override
+  Future<void> switchAccount({
+    required String previousUserId,
+    required String userId,
+    required String userName,
+    Set<String>? memberIds,
+  }) async {
+    final now = _nowIso();
+    await _db.transaction((txn) async {
+      // ۱) داده‌ی خانواده‌ی قبلی که از گوشی‌های دیگر (سرور) آمده بود.
+      const remote = "SELECT id FROM transactions WHERE origin = 'remote'";
+      await txn.delete('transaction_categories', where: 'transaction_id IN ($remote)');
+      await txn.delete('outbox', where: 'transaction_id IN ($remote)');
+      await txn.delete('transactions', where: "origin = 'remote'");
+
+      // ۲) کیف‌های «من» مال کاربر جدید؛ کیفِ عضوی که در خانواده‌ی جدید نیست بی‌حساب.
+      await txn.update('wallets', {'owner_user_id': userId, 'owner_name': userName},
+          where: 'owner_user_id = ?', whereArgs: [previousUserId]);
+      if (memberIds != null) {
+        final keep = {...memberIds, userId}.toList();
+        await txn.update(
+          'wallets',
+          {'owner_user_id': null},
+          where: 'owner_user_id IS NOT NULL AND owner_user_id NOT IN '
+              '(${List.filled(keep.length, '?').join(',')})',
+          whereArgs: keep,
+        );
+      }
+
+      // ۳) پیامک‌های همین گوشی: شناسه‌ی تازه (سرور شناسه‌ی قبلی را در خانواده‌ی
+      // قبلی دارد و «تعارض شناسه» می‌داد) + صف ارسال برای خانواده‌ی جدید.
+      final rows = await txn.query('transactions',
+          columns: ['id', 'kind'], where: "origin = 'local' AND deleted_at IS NULL");
+      for (final r in rows) {
+        final oldId = r['id'] as String;
+        final newId = _uuid.v4();
+        await txn.update(
+            'transactions', {'id': newId, 'sync_status': 'pending', 'updated_at': now},
+            where: 'id = ?', whereArgs: [oldId]);
+        await txn.update('transaction_categories', {'transaction_id': newId},
+            where: 'transaction_id = ?', whereArgs: [oldId]);
+        await txn.delete('outbox', where: 'transaction_id = ?', whereArgs: [oldId]);
+        if (r['kind'] != 'unknown') {
+          await txn.insert(
+            'outbox',
+            {'transaction_id': newId, 'payload': '{}', 'status': 'pending', 'retry_count': 0},
+            conflictAlgorithm: ConflictAlgorithm.replace,
+          );
+        }
+      }
+
+      // ۴) cursor دریافت و وضعیت همگام‌سازیِ خانواده‌ی قبلی.
+      await txn.delete('settings',
+          where: 'key IN (?, ?)', whereArgs: [SettingKeys.pullCursor, SettingKeys.lastSync]);
+    });
   }
 
   @override

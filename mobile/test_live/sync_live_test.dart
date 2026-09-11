@@ -55,8 +55,8 @@ void main() {
     // شماره به هر شکلی (+98 / ارقام فارسی) وارد شود، سرور همان کاربر را می‌شناسد.
     final me = await _Phone.login(base!, '+989120000001', 'phone-me');
     final father = await _Phone.login(base, '۰۹۱۲۰۰۰۰۰۰۲', 'phone-father');
-    expect(await me.profile.refresh(), isTrue);
-    expect(await father.profile.refresh(), isTrue);
+    expect(await me.profile.refresh(), ProfileStatus.ok);
+    expect(await father.profile.refresh(), ProfileStatus.ok);
     final fatherId = await father.repo.getSetting(SettingKeys.meUserId);
     final meId = await me.repo.getSetting(SettingKeys.meUserId);
     expect(await me.repo.getSetting(SettingKeys.meName), 'مهدی');
@@ -134,6 +134,47 @@ void main() {
     await father.sync.sync(force: true);
     await me.sync.sync(force: true);
     expect((await me.repo.getAll()).map((t) => t.id), isNot(contains(fathersTx.id)));
+  }, skip: base == null ? 'LIVE_API تنظیم نشده' : false);
+
+  test('همان گوشی با حساب خانواده‌ی دیگر: تراکنش‌های پیامکِ گوشی به خانواده‌ی جدید می‌رود',
+      () async {
+    final tokens = InMemoryTokenStore();
+    final api = ApiClient(baseUrl: base!, tokenStore: tokens);
+    final auth = AuthRepository(api, tokens);
+    final db = await openAppDatabase(path: inMemoryDatabasePath, singleInstance: false);
+    final repo = TransactionRepository(db);
+    final remoteApi = DioRemoteTransactionApi(api.dio);
+    final sync = SyncService(db: db, api: remoteApi, deviceId: 'phone-switch');
+    final profile = ProfileService(DioFamilyApi(api.dio), repo);
+
+    // ۱) حساب قدیمی (مثل «کاربر تست»): پیامک ثبت و به خانواده‌ی قدیمی فرستاده می‌شود.
+    await auth.login(phone: '09120000003', password: 'Live@12345');
+    expect(await profile.refresh(), ProfileStatus.ok);
+    await repo.addAllowedSender('BankMellat', bankId: 'mellat');
+    final now = DateTime.now().toUtc();
+    final n = now.millisecondsSinceEpoch % 900 + 100;
+    final captured = await SmsImporter(repo).importOne(RawSms(
+      sender: 'BankMellat',
+      body: 'خرید مبلغ $n,300 ریال',
+      receivedAt: now,
+    ));
+    expect((await sync.sync(force: true)).synced, 1);
+
+    // ۲) خروج و ورود با حساب واقعی (خانواده‌ی دیگر) روی همان گوشی.
+    await auth.logout();
+    await auth.login(phone: '09120000004', password: 'Live@12345');
+    expect(await profile.refresh(), ProfileStatus.ok);
+    final moved = (await repo.getAll()).single;
+    expect(moved.id, isNot(captured!.id));
+    expect(moved.ownerUserId, await repo.getSetting(SettingKeys.meUserId));
+    expect(await repo.getSetting(SettingKeys.meName), 'جدید');
+
+    // قبلاً این‌جا «تعارض شناسه» می‌گرفت و هیچ‌وقت به خانواده‌ی جدید نمی‌رسید.
+    final push = await sync.sync(force: true);
+    expect(push.failed, 0);
+    expect(push.synced, 1);
+    final page = await remoteApi.pull();
+    expect(page.results.map((r) => r['id']), contains(moved.id));
   }, skip: base == null ? 'LIVE_API تنظیم نشده' : false);
 
   test('سرور در دسترس نیست → تراکنش در صف می‌ماند و پیام روشن است', () async {

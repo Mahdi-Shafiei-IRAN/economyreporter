@@ -71,6 +71,17 @@ class DioFamilyApi implements FamilyApi {
   }
 }
 
+/// نتیجه‌ی گرفتن پروفایل از سرور.
+enum ProfileStatus {
+  ok,
+
+  /// سرور در دسترس نبود؛ مقادیر قبلی می‌مانند.
+  offline,
+
+  /// حسابِ قدیمیِ بی‌شماره (ورود با ایمیل)؛ باید با شماره‌ی موبایل دوباره وارد شد.
+  needsRelogin,
+}
+
 /// پروفایل و اعضا را از سرور می‌گیرد و در تنظیمات محلی نگه می‌دارد (برای آفلاین).
 class ProfileService {
   final FamilyApi api;
@@ -78,24 +89,38 @@ class ProfileService {
 
   ProfileService(this.api, this.store);
 
-  /// در حالت آفلاین بی‌صدا false برمی‌گرداند و مقادیر قبلی می‌مانند.
-  Future<bool> refresh() async {
+  Future<ProfileStatus> refresh() async {
+    final UserProfile me;
     try {
-      final me = await api.me();
-      final previous = await store.getSetting(SettingKeys.meUserId);
-      await store.setSetting(SettingKeys.meUserId, me.id);
-      await store.setSetting(SettingKeys.meName, me.displayName);
-      try {
-        final members = await api.members();
-        await store.setSetting(
-            SettingKeys.familyMembers, FamilyMember.encodeList(members));
-      } catch (_) {
-        // اعضا بعداً دوباره گرفته می‌شوند
-      }
-      if (previous != me.id) await store.reattributeLocal();
-      return true;
+      me = await api.me();
     } catch (_) {
-      return false;
+      return ProfileStatus.offline;
     }
+    if (me.phone.trim().isEmpty) return ProfileStatus.needsRelogin;
+
+    List<FamilyMember>? members;
+    try {
+      members = await api.members();
+    } catch (_) {
+      // اعضا بعداً دوباره گرفته می‌شوند
+    }
+    final previous = await store.getSetting(SettingKeys.meUserId);
+    if (previous != null && previous != me.id) {
+      // حساب دیگری روی همین گوشی وارد شد (مثلاً از «کاربر تست» به حساب واقعی).
+      await store.switchAccount(
+        previousUserId: previous,
+        userId: me.id,
+        userName: me.displayName,
+        memberIds: members?.map((m) => m.id).toSet(),
+      );
+    }
+    await store.setSetting(SettingKeys.meUserId, me.id);
+    await store.setSetting(SettingKeys.meName, me.displayName);
+    if (members != null) {
+      await store.setSetting(
+          SettingKeys.familyMembers, FamilyMember.encodeList(members));
+    }
+    if (previous != me.id) await store.reattributeLocal();
+    return ProfileStatus.ok;
   }
 }

@@ -1,5 +1,8 @@
 /// کارت‌ها و حساب‌های اعضا: هر کارت به صاحبش وصل می‌شود تا تراکنش‌ها زیر نام او
 /// بیایند؛ اگر صاحب در اپ حساب دارد، فقط خودش تراکنش‌های آن کارت را ویرایش می‌کند.
+///
+/// پیامکِ بیشتر بانک‌ها شماره‌ی کارت ندارد (حساب دارد یا هیچ)؛ پس کارت را می‌شود فقط
+/// با بانک هم ثبت کرد تا همه‌ی پیامک‌های بی‌شماره‌ی آن بانک مال همین کارت شود.
 library;
 
 import 'package:flutter/material.dart';
@@ -115,7 +118,8 @@ class WalletsScreen extends StatelessWidget {
               Text(
                 'هر کارت را به صاحبش وصل کن. اگر صاحب کارت در اپ حساب دارد، او را از '
                 'اعضا انتخاب کن تا فقط خودش بتواند تراکنش‌های آن کارت را ویرایش و '
-                'دسته‌بندی کند؛ بقیه فقط می‌بینند.',
+                'دسته‌بندی کند؛ بقیه فقط می‌بینند. اگر پیامک‌های بانک شماره‌ی کارت '
+                'ندارند، کافی است فقط بانک را انتخاب کنی.',
                 style: theme.textTheme.bodySmall
                     ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
               ),
@@ -160,10 +164,13 @@ class _WalletTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final w = wallet;
-    final details = [
-      if (w.bankId != null && w.bankId!.isNotEmpty) bankNameById(w.bankId!),
+    final digits = [
       if (w.cardLast4 != null && w.cardLast4!.isNotEmpty) 'کارت ${toPersianDigits(w.cardLast4!)}',
       if (w.accountRef != null && w.accountRef!.isNotEmpty) 'حساب ${toPersianDigits(w.accountRef!)}',
+    ];
+    final details = [
+      if (w.bankId != null && w.bankId!.isNotEmpty) bankNameById(w.bankId!),
+      if (digits.isEmpty) 'همه‌ی پیامک‌های بی‌شماره‌ی این بانک' else ...digits,
     ].join(' • ');
     return ListTile(
       onTap: onTap,
@@ -206,6 +213,7 @@ class _WalletFormState extends State<_WalletForm> {
     final me = widget.controller.meUserId;
     return widget.controller.members.any((m) => m.id == me) ? me : null;
   }
+
   String? _error;
 
   @override
@@ -232,8 +240,8 @@ class _WalletFormState extends State<_WalletForm> {
       error = 'صاحب کارت را انتخاب یا نامش را وارد کن.';
     } else if (label.isEmpty) {
       error = 'یک برچسب بده (مثلاً «کارت حقوق»).';
-    } else if (card.isEmpty && account.isEmpty) {
-      error = 'یکی از «۴ رقم آخر کارت» یا «شماره حساب» لازم است.';
+    } else if (card.isEmpty && account.isEmpty && _bankId == null) {
+      error = 'بانک را انتخاب کن (یا ۴ رقم آخر کارت / شماره حساب را بنویس).';
     } else if (card.isNotEmpty && !RegExp(r'^\d{4}$').hasMatch(card)) {
       error = 'از شماره کارت فقط ۴ رقم آخر را وارد کن.';
     }
@@ -311,11 +319,20 @@ class _WalletFormState extends State<_WalletForm> {
           const SizedBox(height: 12),
           DropdownButtonFormField<String?>(
             value: _bankId,
-            decoration: const InputDecoration(labelText: 'بانک'),
+            isExpanded: true,
+            decoration: const InputDecoration(
+              labelText: 'بانک',
+              helperText: 'پیامک بیشتر بانک‌ها شماره‌ی کارت ندارد؛ آن‌وقت انتخاب بانک کافی '
+                  'است و همه‌ی پیامک‌های بی‌شماره‌ی این بانک مال همین کارت می‌شود.',
+              helperMaxLines: 3,
+            ),
             items: [
               const DropdownMenuItem<String?>(value: null, child: Text('نامشخص')),
               for (final b in kBankRegistry)
-                DropdownMenuItem<String?>(value: b.id, child: Text(b.name)),
+                DropdownMenuItem<String?>(
+                  value: b.id,
+                  child: Text(b.name, overflow: TextOverflow.ellipsis),
+                ),
             ],
             onChanged: (v) => setState(() => _bankId = v),
           ),
@@ -325,7 +342,10 @@ class _WalletFormState extends State<_WalletForm> {
             controller: _card,
             keyboardType: TextInputType.number,
             maxLength: 4,
-            decoration: const InputDecoration(labelText: '۴ رقم آخر کارت', counterText: ''),
+            decoration: const InputDecoration(
+              labelText: '۴ رقم آخر کارت (اگر در پیامک هست)',
+              counterText: '',
+            ),
           ),
           const SizedBox(height: 12),
           TextField(
@@ -333,7 +353,7 @@ class _WalletFormState extends State<_WalletForm> {
             controller: _account,
             keyboardType: TextInputType.number,
             decoration: const InputDecoration(
-              labelText: 'شماره حساب (برای بانک‌هایی که پیامک را با حساب می‌فرستند)',
+              labelText: 'شماره حساب (اگر در پیامک هست، همان‌طور که آمده)',
             ),
           ),
           if (_error != null) ...[

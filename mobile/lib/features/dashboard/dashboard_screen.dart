@@ -700,7 +700,11 @@ class _PersonSection extends StatelessWidget {
     final fin = FinanceColors.of(context);
     final key = 'c:${group.name}|${card.key}';
     final collapsed = isCollapsed(key);
-    final canRegister = !card.registered && card.items.any((t) => !t.isRemote);
+    // بی‌بانک و بی‌شماره: هیچ کارتی نمی‌تواند با این پیامک‌ها جور شود.
+    final identifiable =
+        card.bankId != null || card.cardLast4 != null || card.accountRef != null;
+    final canRegister =
+        identifiable && !card.registered && card.items.any((t) => !t.isRemote);
     final s = card.summary;
 
     return [
@@ -729,7 +733,11 @@ class _PersonSection extends StatelessWidget {
                             style: theme.textTheme.bodySmall
                                 ?.copyWith(color: scheme.onSurfaceVariant)),
                       if (!card.registered)
-                        Text('هنوز در «کارت‌ها» به کسی وصل نشده',
+                        Text(
+                            identifiable
+                                ? 'هنوز در «کارت‌ها» به کسی وصل نشده'
+                                : 'بانکش معلوم نیست؛ فرستنده‌اش را در «فرستنده‌های '
+                                    'پیامک بانک» با بانکش مجاز کن',
                             style: theme.textTheme.bodySmall
                                 ?.copyWith(color: fin.warning)),
                       if (shortTotals(s.incomeRial, s.expenseRial).isNotEmpty)

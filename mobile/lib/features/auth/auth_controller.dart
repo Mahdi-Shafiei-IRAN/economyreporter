@@ -13,6 +13,9 @@ class AuthController extends ChangeNotifier {
   bool loading = false;
   String? error;
 
+  /// پیامِ خروجِ اجباری روی صفحه‌ی ورود (نشست تمام شده، یا ورود حالا با شماره است).
+  String? notice;
+
   AuthController(this.repository);
 
   Future<void> bootstrap() async {
@@ -27,6 +30,7 @@ class AuthController extends ChangeNotifier {
     try {
       await repository.login(phone: phone, password: password);
       authenticated = true;
+      notice = null;
       return true;
     } on DioException catch (e) {
       error = _messageFor(e);
@@ -40,6 +44,16 @@ class AuthController extends ChangeNotifier {
   Future<void> logout() async {
     await repository.logout();
     authenticated = false;
+    notice = null;
+    notifyListeners();
+  }
+
+  /// خروج اجباری با توضیح؛ مثلاً کاربر در پنل حذف/غیرفعال شد یا حسابِ قدیمیِ ایمیلی است.
+  Future<void> expireSession(String message) async {
+    if (!authenticated) return;
+    await repository.logout();
+    authenticated = false;
+    notice = message;
     notifyListeners();
   }
 

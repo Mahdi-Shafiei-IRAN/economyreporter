@@ -217,6 +217,7 @@ class TransactionRecord {
 
   /// نسخه‌ی جدید با فیلدهای ویرایش‌شده (بقیه ثابت).
   TransactionRecord copyWith({
+    String? bankId,
     String? kind,
     int? amountRial,
     String? counterparty,
@@ -236,7 +237,7 @@ class TransactionRecord {
   }) {
     return TransactionRecord(
       id: id,
-      bankId: bankId,
+      bankId: bankId ?? this.bankId,
       kind: kind ?? this.kind,
       amountRial: amountRial ?? this.amountRial,
       balanceAfterRial: balanceAfterRial,

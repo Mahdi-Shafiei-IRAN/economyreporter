@@ -58,6 +58,21 @@ class _LoginScreenState extends State<LoginScreen> {
                     textAlign: TextAlign.center,
                     style: theme.textTheme.headlineSmall,
                   ),
+                  if (c.notice != null) ...[
+                    const SizedBox(height: 16),
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: theme.colorScheme.secondaryContainer,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Text(
+                        c.notice!,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: theme.colorScheme.onSecondaryContainer),
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 24),
                   TextField(
                     key: kPhoneFieldKey,

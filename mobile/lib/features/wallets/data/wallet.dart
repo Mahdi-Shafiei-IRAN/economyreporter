@@ -23,6 +23,10 @@ class Wallet {
     this.accountRef,
   });
 
+  /// شماره‌ی کارت یا حساب دارد؟ (کیفِ «فقط بانک» برای پیامک‌های بی‌شماره است.)
+  bool get hasDigits =>
+      (cardLast4?.isNotEmpty ?? false) || (accountRef?.isNotEmpty ?? false);
+
   /// آیا این کیف با کارت/حساب یک تراکنش می‌خواند؟
   /// اگر بانک هر دو معلوم باشد باید یکی باشد (دو کارت با ۴ رقم یکسان در دو بانک).
   bool matches({String? cardLast4, String? accountRef, String? bankId}) {
@@ -44,6 +48,15 @@ class Wallet {
     }
     return false;
   }
+
+  /// شماره‌ی کارت/حسابِ این کیف با شماره‌ای که خودِ پیامک دارد تضاد دارد؟
+  bool _conflicts({String? cardLast4, String? accountRef}) =>
+      ((this.cardLast4?.isNotEmpty ?? false) &&
+          (cardLast4?.isNotEmpty ?? false) &&
+          this.cardLast4 != cardLast4) ||
+      ((this.accountRef?.isNotEmpty ?? false) &&
+          (accountRef?.isNotEmpty ?? false) &&
+          this.accountRef != accountRef);
 
   Wallet copyWith({
     String? ownerName,
@@ -83,4 +96,30 @@ class Wallet {
         cardLast4: m['card_last4'] as String?,
         accountRef: m['account_ref'] as String?,
       );
+}
+
+/// کیفِ صاحبِ یک تراکنش. پیامکِ بیشتر بانک‌ها شماره‌ی کارت ندارد (حساب دارد یا هیچ)،
+/// پس به‌ترتیب:
+///  ۱) کارت یا حسابِ همان شماره؛
+///  ۲) کیفِ «فقط بانک»ِ همان بانک (اگر فقط یکی باشد)؛
+///  ۳) تنها کیفِ آن بانک که شماره‌اش با پیامک تضاد ندارد.
+/// اگر چند کیف ممکن بماند null (نامشخص)، تا اشتباهی به کسی نسبت داده نشود.
+Wallet? walletFor(
+  Iterable<Wallet> wallets, {
+  String? cardLast4,
+  String? accountRef,
+  String? bankId,
+}) {
+  for (final w in wallets) {
+    if (w.matches(cardLast4: cardLast4, accountRef: accountRef, bankId: bankId)) return w;
+  }
+  if (bankId == null || bankId.isEmpty) return null;
+  final sameBank = [
+    for (final w in wallets)
+      if (w.bankId == bankId && !w._conflicts(cardLast4: cardLast4, accountRef: accountRef))
+        w,
+  ];
+  final bankOnly = sameBank.where((w) => !w.hasDigits).toList();
+  if (bankOnly.length == 1) return bankOnly.single;
+  return sameBank.length == 1 ? sameBank.single : null;
 }

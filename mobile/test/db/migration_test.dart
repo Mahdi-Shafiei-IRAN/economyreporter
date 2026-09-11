@@ -168,12 +168,14 @@ void main() {
       () async {
     final tmpDir = await Directory.systemTemp.createTemp('econ_mig6');
     final path = '${tmpDir.path}/v5.db';
+    // اسکیمای واقعیِ نسخه‌ی ۵ = اسکیمای فعلی بدون جدول فرستنده‌های مجاز.
     final v5 = await databaseFactory.openDatabase(
       path,
       options: OpenDatabaseOptions(
         version: 5,
         onCreate: (db, _) async {
-          await db.execute('CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT)');
+          await createSchema(db);
+          await db.execute('DROP TABLE allowed_senders');
         },
       ),
     );

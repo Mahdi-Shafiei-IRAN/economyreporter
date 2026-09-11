@@ -76,4 +76,20 @@ void main() {
     expect(ctx.controller.authenticated, isFalse);
     expect(find.text('شماره موبایل یا رمز عبور اشتباه است'), findsOneWidget);
   });
+
+  testWidgets('خروج اجباری (نشست نامعتبر یا حساب قدیمی) با پیام روی صفحه‌ی ورود',
+      (tester) async {
+    final ctx = build();
+    ctx.store.access = 'a';
+    ctx.store.refresh = 'r';
+    await ctx.controller.bootstrap();
+    expect(ctx.controller.authenticated, isTrue);
+
+    await ctx.controller.expireSession('ورود حالا با شماره موبایل است؛ دوباره وارد شو.');
+
+    expect(ctx.controller.authenticated, isFalse);
+    expect(ctx.store.access, isNull);
+    await tester.pumpWidget(wrap(ctx.controller));
+    expect(find.text('ورود حالا با شماره موبایل است؛ دوباره وارد شو.'), findsOneWidget);
+  });
 }

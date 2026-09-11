@@ -39,6 +39,7 @@ class SyncSummary {
   /// پیام قابل‌فهم برای کاربر.
   String get message {
     String fa(int n) => toPersianDigits('$n');
+    if (error == 'auth') return 'باید دوباره وارد شوی.';
     if (offline) {
       return 'سرور در دسترس نبود (کامپیوترِ سرور روشن و روی همان Wi-Fi است؟). '
           '${failed > 0 ? '${fa(failed)} تراکنش در صف ماند و ' : ''}'

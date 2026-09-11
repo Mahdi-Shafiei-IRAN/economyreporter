@@ -126,4 +126,22 @@ void main() {
     expect(w.ownerUserId, 'u-me');
     expect(w.ownerName, 'مهدی');
   });
+
+  testWidgets('کارتِ «فقط بانک» (برای پیامک‌های بی‌شماره) ذخیره می‌شود', (tester) async {
+    await pump(tester);
+    await tester.tap(find.byKey(kWalletAddFabKey));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(kWalletOwnerFieldKey), 'مامان');
+    await tester.enterText(find.byKey(kWalletLabelFieldKey), 'حساب ملت');
+    await tester.tap(find.byType(DropdownButtonFormField<String?>));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('بانک ملت').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(kWalletSaveKey));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(kWalletErrorKey), findsNothing);
+    expect(controller.wallets.single.bankId, 'mellat');
+    expect(controller.wallets.single.cardLast4, isNull);
+  });
 }
