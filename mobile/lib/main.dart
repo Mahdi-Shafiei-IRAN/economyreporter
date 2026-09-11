@@ -12,11 +12,16 @@ import 'core/sync/remote_transaction_api.dart';
 import 'core/sync/sync_service.dart';
 import 'features/auth/auth_controller.dart';
 import 'features/auth/login_screen.dart';
+import 'features/categories/categorize_screen.dart';
 import 'features/dashboard/dashboard_controller.dart';
 import 'features/dashboard/dashboard_screen.dart';
 import 'features/family/family_dashboard_screen.dart';
+import 'features/notifications/notification_service.dart';
 import 'features/sms/sms_inbox_service.dart';
 import 'features/transactions/data/transaction_repository.dart';
+
+/// کلید ناوبری سراسری (برای باز کردن صفحه از نوتیفیکیشن).
+final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -31,6 +36,7 @@ class EconomyApp extends StatelessWidget {
     return MaterialApp(
       title: 'مدیریت مالی خانواده',
       debugShowCheckedModeBanner: false,
+      navigatorKey: navigatorKey,
       theme: ThemeData(colorSchemeSeed: Colors.teal, useMaterial3: true),
       builder: (context, child) => Directionality(
         textDirection: TextDirection.rtl,
@@ -90,6 +96,8 @@ class _BootstrapState extends State<_Bootstrap> {
         dashboard.load(); // تازه‌سازی داشبورد محلی
         sync.sync().ignore(); // ارسال خودکار به سرور (تا داشبورد خانواده هم به‌روز شود)
       },
+      onTransactionCaptured: (tx) =>
+          NotificationService.showTransaction(tx.id, tx.amountRial),
     );
 
     // تلاش اولیه برای همگام‌سازی آنچه هنوز نرفته (در صورت آنلاین‌بودن).
@@ -150,15 +158,37 @@ class _RootState extends State<_Root> {
     super.dispose();
   }
 
-  /// بعد از ورود، یک‌بار مجوز پیامک را می‌گیرد، صندوق را وارد و listener را شروع می‌کند.
+  /// بعد از ورود: نوتیفیکیشن را آماده می‌کند، مجوز پیامک می‌گیرد، صندوق را وارد
+  /// و listener را شروع می‌کند؛ و اگر اپ از نوتیفیکیشن باز شده، به دسته‌بندی می‌رود.
   Future<void> _maybeSetupSms() async {
     if (_smsSetupDone || !widget.services.auth.authenticated) return;
     _smsSetupDone = true;
+
+    await NotificationService.init(onTap: _openCategorize);
+
     final sms = widget.services.smsInbox;
     final granted = await sms.requestPermission();
-    if (!granted) return;
-    await sms.importInbox();
-    sms.startListener();
+    if (granted) {
+      await sms.importInbox();
+      sms.startListener();
+    }
+
+    final launchPayload = await NotificationService.launchPayload();
+    if (launchPayload != null) _openCategorize(launchPayload);
+  }
+
+  /// باز کردن صفحه‌ی دسته‌بندی برای تراکنشِ نوتیفیکیشن.
+  Future<void> _openCategorize(String txId) async {
+    final record = await widget.services.dashboard.transactionById(txId);
+    if (record == null) return;
+    navigatorKey.currentState?.push(
+      MaterialPageRoute(
+        builder: (_) => CategorizeScreen(
+          controller: widget.services.dashboard,
+          record: record,
+        ),
+      ),
+    );
   }
 
   @override

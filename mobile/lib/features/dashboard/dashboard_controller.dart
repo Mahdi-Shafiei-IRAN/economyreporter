@@ -39,6 +39,9 @@ class DashboardController extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<TransactionRecord?> transactionById(String id) =>
+      repository.getById(id);
+
   Future<List<Category>> categories() => repository.categories();
 
   Future<List<CategoryTotal>> categoryTotals({DateTime? from, DateTime? to}) =>

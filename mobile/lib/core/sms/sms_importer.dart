@@ -26,6 +26,13 @@ class ImportResult {
   });
 }
 
+/// خلاصه‌ی یک تراکنشِ تازه‌ساخته‌شده (برای نوتیفیکیشن).
+class ImportedTx {
+  final String id;
+  final int amountRial;
+  const ImportedTx({required this.id, required this.amountRial});
+}
+
 class SmsImporter {
   final TransactionStore store;
   final SmsParser parser;
@@ -33,17 +40,19 @@ class SmsImporter {
 
   const SmsImporter(this.store, {this.parser = const SmsParser(), this.deviceId});
 
-  /// یک پیامک را در صورت تراکنش‌بودن ذخیره می‌کند. برمی‌گرداند: ذخیره شد یا نه.
-  Future<bool> importOne(RawSms sms) async {
+  /// یک پیامک را در صورت تراکنش‌بودن ذخیره می‌کند.
+  /// اگر تراکنشِ جدید ساخته شد، خلاصه‌اش را برمی‌گرداند؛ وگرنه null.
+  Future<ImportedTx?> importOne(RawSms sms) async {
     final parsed = parser.parse(sender: sms.sender, body: sms.body);
-    if (!parsed.looksLikeTransaction) return false; // OTP یا غیرتراکنش
+    if (!parsed.looksLikeTransaction) return null; // OTP یا غیرتراکنش
     final outcome = await store.saveParsed(
       parsed,
       sender: sms.sender,
       deviceId: deviceId,
       receivedAt: sms.receivedAt,
     );
-    return outcome.isCreated;
+    if (!outcome.isCreated) return null; // تکراری
+    return ImportedTx(id: outcome.id, amountRial: parsed.amountRial ?? 0);
   }
 
   /// فهرستی از پیامک‌ها را وارد می‌کند و آمار می‌دهد.

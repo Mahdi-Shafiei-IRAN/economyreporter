@@ -119,6 +119,14 @@ class FakeTransactionStore implements TransactionStore {
   }
 
   @override
+  Future<TransactionRecord?> getById(String id) async {
+    for (final t in _items) {
+      if (t.id == id) return t;
+    }
+    return null;
+  }
+
+  @override
   Future<List<Category>> categories() async => List.of(_categories);
 
   @override

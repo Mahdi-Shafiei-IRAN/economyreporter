@@ -8,6 +8,7 @@ import 'package:another_telephony/telephony.dart';
 
 import '../../core/database/app_database.dart';
 import '../../core/sms/sms_importer.dart';
+import '../notifications/notification_service.dart';
 import '../transactions/data/transaction_repository.dart';
 
 class SmsInboxService {
@@ -17,7 +18,14 @@ class SmsInboxService {
   /// وقتی تراکنش جدیدی وارد شد صدا زده می‌شود (برای تازه‌سازی داشبورد).
   final void Function()? onChanged;
 
-  SmsInboxService({required this.importer, this.onChanged});
+  /// وقتی یک تراکنشِ جدید (زنده) گرفته شد — برای نوتیفیکیشن.
+  final void Function(ImportedTx)? onTransactionCaptured;
+
+  SmsInboxService({
+    required this.importer,
+    this.onChanged,
+    this.onTransactionCaptured,
+  });
 
   /// درخواست مجوز خواندن/دریافت پیامک.
   Future<bool> requestPermission() async {
@@ -41,8 +49,11 @@ class SmsInboxService {
   void startListener() {
     _telephony.listenIncomingSms(
       onNewMessage: (SmsMessage message) async {
-        final created = await importer.importOne(_toRaw(message));
-        if (created) onChanged?.call();
+        final imported = await importer.importOne(_toRaw(message));
+        if (imported != null) {
+          onChanged?.call();
+          onTransactionCaptured?.call(imported);
+        }
       },
       onBackgroundMessage: backgroundSmsHandler,
       listenInBackground: true,
@@ -65,11 +76,15 @@ Future<void> backgroundSmsHandler(SmsMessage message) async {
   final db = await openAppDatabase();
   try {
     final importer = SmsImporter(TransactionRepository(db));
-    await importer.importOne(RawSms(
+    final imported = await importer.importOne(RawSms(
       sender: message.address ?? '',
       body: message.body ?? '',
       receivedAt: DateTime.now(),
     ));
+    if (imported != null) {
+      await NotificationService.showFromBackground(
+          imported.id, imported.amountRial);
+    }
   } finally {
     await db.close();
   }

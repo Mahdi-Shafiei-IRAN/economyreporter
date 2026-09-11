@@ -3,6 +3,8 @@
     <!-- خواندن خودکار پیامک بانکی -->
     <uses-permission android:name="android.permission.RECEIVE_SMS"/>
     <uses-permission android:name="android.permission.READ_SMS"/>
+    <!-- نوتیفیکیشن دسته‌بندی -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <application
         android:label="مالی خانواده"
         android:name="${applicationName}"

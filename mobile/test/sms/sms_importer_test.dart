@@ -40,8 +40,8 @@ void main() {
       body: 'برداشت مبلغ 500,000 ریال از کارت 1234',
       receivedAt: at,
     );
-    expect(await importer.importOne(sms), isTrue);
-    expect(await importer.importOne(sms), isFalse); // تکراری
+    expect(await importer.importOne(sms), isNotNull);
+    expect(await importer.importOne(sms), isNull); // تکراری
     expect(await store.getAll().then((l) => l.length), 1);
   });
 }

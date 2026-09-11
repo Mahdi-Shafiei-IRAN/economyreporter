@@ -67,6 +67,7 @@ abstract class TransactionStore {
   });
   Future<List<CategoryTotal>> categoryTotals({DateTime? from, DateTime? to});
   Future<List<TransactionRecord>> uncategorized({int? limit});
+  Future<TransactionRecord?> getById(String id);
 }
 
 class TransactionRepository implements TransactionStore {
@@ -222,6 +223,13 @@ class TransactionRepository implements TransactionStore {
     await _db.delete('transaction_categories',
         where: 'transaction_id = ?', whereArgs: [id]);
     await _db.delete('transactions', where: 'id = ?', whereArgs: [id]);
+  }
+
+  @override
+  Future<TransactionRecord?> getById(String id) async {
+    final rows = await _db
+        .query('transactions', where: 'id = ?', whereArgs: [id], limit: 1);
+    return rows.isEmpty ? null : TransactionRecord.fromMap(rows.first);
   }
 
   @override
