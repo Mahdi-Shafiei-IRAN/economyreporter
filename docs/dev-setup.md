@@ -86,6 +86,11 @@ python -m venv .venv
 .venv\Scripts\python.exe manage.py createsuperuser
 ```
 
+(شماره موبایل و رمز مدیر را می‌پرسد.) **پنل مدیریت** فارسی: `http://127.0.0.1:8000/admin/` —
+ساخت خانواده و کاربرها (شماره موبایل + نام + رمز + خانواده)، تغییر رمز، غیرفعال/حذف
+کاربر، دیدن تراکنش‌ها و عمل «نامعتبر کن». ثبت‌نام عمومی در API وجود ندارد. راهنمای
+قدم‌به‌قدم: `docs/run-on-phone.md` بخش ۳.
+
 برای اینکه گوشی روی شبکه‌ی محلی به بک‌اند وصل شود، روی همه‌ی اینترفیس‌ها گوش بده (بخش‌های ۲ و ۳ بالا برای IP و فایروال):
 
 ```bash
@@ -94,11 +99,10 @@ python -m venv .venv
 
 آدرس پایه‌ی API: `http://<IP کامپیوتر>:8000/api/v1/`
 
-endpointهای آماده‌ی این فاز:
+endpointهای آماده:
 
 ```text
-POST /api/v1/auth/register/     ثبت‌نام (email, full_name, password)
-POST /api/v1/auth/login/        ورود → access + refresh (JWT)
+POST /api/v1/auth/login/        ورود (phone, password) → access + refresh (JWT)
 POST /api/v1/auth/refresh/      تازه‌سازی access
 GET  /api/v1/auth/me/           کاربر جاری (نیازمند توکن)
 GET/POST /api/v1/family/        لیست/ساخت خانواده
@@ -140,9 +144,10 @@ DB_PORT=5432
 وقتی سرور خریدی (پیشنهاد: ابر ایرانی مثل آروان/لیارا/پارس‌پک، چون AWS/GCP از ایران بلاک‌اند):
 
 1. `config/settings/production.py`: `DEBUG=False`، `ALLOWED_HOSTS=["yourdomain.ir"]`، اطلاعات DB واقعی، `SECRET_KEY` از env.
-2. Postgres روی سرور، مهاجرت داده در صورت نیاز.
-3. **HTTPS** با Nginx یا Caddy + دامنه‌ی `.ir` (Caddy گواهی را خودکار می‌گیرد).
-4. فایل `network_security_config` توسعه را از اپ بردار؛ آدرس پایه‌ی اپ می‌شود `https://yourdomain.ir/api/v1/`.
-5. `USE_TZ = True` و ذخیره‌ی همه‌چیز به UTC از همان ابتدا رعایت شده باشد.
+2. Postgres روی سرور، مهاجرت داده در صورت نیاز؛ بعد `migrate` و `createsuperuser` (حساب مدیر پنل، با شماره موبایل).
+3. `python manage.py collectstatic` و سرو کردن `/static/` با Nginx/Caddy — با `DEBUG=False` خود جنگو فایل‌های ظاهر پنل ادمین را سرو نمی‌کند.
+4. **HTTPS** با Nginx یا Caddy + دامنه‌ی `.ir` (Caddy گواهی را خودکار می‌گیرد).
+5. فایل `network_security_config` توسعه را از اپ بردار؛ آدرس پایه‌ی اپ می‌شود `https://yourdomain.ir/api/v1/`.
+6. `USE_TZ = True` و ذخیره‌ی همه‌چیز به UTC از همان ابتدا رعایت شده باشد.
 
 > چون همه‌چیز از روز اول Offline-First است، تغییر آدرس سرور فقط یک تنظیم در اپ است؛ داده‌ی روی گوشی‌ها دست‌نخورده می‌ماند و در اولین Sync به سرور جدید می‌رود.

@@ -5,3 +5,4 @@ class FamiliesConfig(AppConfig):
     default_auto_field = "django.db.models.BigAutoField"
     name = "apps.families"
     label = "families"
+    verbose_name = "خانواده‌ها"

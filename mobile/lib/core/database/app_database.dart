@@ -9,7 +9,7 @@ import 'package:sqflite/sqflite.dart';
 import 'package:uuid/uuid.dart';
 
 const String kDbName = 'economy.db';
-const int kDbVersion = 5;
+const int kDbVersion = 6;
 
 /// دسته‌های پیش‌فرض (قابل ویرایش توسط کاربر بعداً).
 const List<String> kDefaultCategories = [
@@ -80,23 +80,31 @@ Future<void> migrateSchema(Database db, int oldVersion, int newVersion) async {
     await db.execute('ALTER TABLE wallets ADD COLUMN owner_user_id TEXT');
     await _createV5Indexes(db);
     await _createSettingsTable(db);
-    final columns = (await db.rawQuery('PRAGMA table_info(transactions)'))
-        .map((r) => r['name'] as String)
-        .toSet();
-    if (!columns.contains('needs_review')) return;
-    // «بانک ناشناخته» دیگر دلیل بازبینی نیست؛ فقط مبلغ/نوعِ نامشخص.
-    await db.execute('''
-      UPDATE transactions SET needs_review = 0
-      WHERE needs_review = 1 AND amount_rial IS NOT NULL AND kind != 'unknown'
-    ''');
-    await db.execute('''
-      UPDATE transactions SET review_reason =
-        CASE WHEN amount_rial IS NULL AND kind = 'unknown' THEN 'amount,kind'
-             WHEN amount_rial IS NULL THEN 'amount'
-             ELSE 'kind' END
-      WHERE needs_review = 1
-    ''');
+    await _dropUnknownBankReviews(db);
   }
+  if (oldVersion < 6) {
+    // نسخه ۶: فرستنده‌های مجاز پیامک (فقط پیامک این‌ها خودکار ثبت می‌شود).
+    await _createAllowedSendersTable(db);
+  }
+}
+
+/// «بانک ناشناخته» دیگر دلیل بازبینی نیست؛ فقط مبلغ/نوعِ نامشخص (مهاجرت نسخه ۵).
+Future<void> _dropUnknownBankReviews(Database db) async {
+  final columns = (await db.rawQuery('PRAGMA table_info(transactions)'))
+      .map((r) => r['name'] as String)
+      .toSet();
+  if (!columns.contains('needs_review')) return;
+  await db.execute('''
+    UPDATE transactions SET needs_review = 0
+    WHERE needs_review = 1 AND amount_rial IS NOT NULL AND kind != 'unknown'
+  ''');
+  await db.execute('''
+    UPDATE transactions SET review_reason =
+      CASE WHEN amount_rial IS NULL AND kind = 'unknown' THEN 'amount,kind'
+           WHEN amount_rial IS NULL THEN 'amount'
+           ELSE 'kind' END
+    WHERE needs_review = 1
+  ''');
 }
 
 /// ستون‌های افزوده‌ی نسخه‌ی ۵ به جدول تراکنش‌ها.
@@ -180,6 +188,7 @@ Future<void> createSchema(Database db) async {
   await _createWalletsTable(db);
   await db.execute('ALTER TABLE wallets ADD COLUMN owner_user_id TEXT');
   await _createSettingsTable(db);
+  await _createAllowedSendersTable(db);
 }
 
 Future<void> _createV5Indexes(Database db) async {
@@ -195,6 +204,18 @@ Future<void> _createSettingsTable(Database db) async {
     CREATE TABLE settings (
       key TEXT PRIMARY KEY,
       value TEXT
+    )
+  ''');
+}
+
+/// فرستنده‌های مجاز پیامک بانکی (سرشماره یا نام) که خود کاربر تعیین می‌کند.
+Future<void> _createAllowedSendersTable(Database db) async {
+  await db.execute('''
+    CREATE TABLE allowed_senders (
+      id TEXT PRIMARY KEY,
+      address TEXT NOT NULL,
+      bank_id TEXT,
+      created_at TEXT NOT NULL
     )
   ''');
 }

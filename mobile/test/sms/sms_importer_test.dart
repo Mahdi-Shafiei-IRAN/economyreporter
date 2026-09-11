@@ -9,12 +9,18 @@ void main() {
   late FakeTransactionStore store;
   late SmsImporter importer;
 
-  setUp(() {
+  Future<void> allowBanks() async {
+    await store.addAllowedSender('BankMellat');
+    await store.addAllowedSender('ملی');
+  }
+
+  setUp(() async {
     store = FakeTransactionStore();
     importer = SmsImporter(store);
+    await allowBanks();
   });
 
-  test('فقط تراکنش‌های واقعی وارد می‌شوند؛ OTP و نامرتبط رد می‌شوند', () async {
+  test('فقط تراکنش‌های واقعیِ فرستنده‌های مجاز وارد می‌شوند', () async {
     final messages = [
       const RawSms(
         sender: 'BankMellat',
@@ -22,17 +28,49 @@ void main() {
       ),
       const RawSms(sender: 'BankMellat', body: 'رمز پویا: 84512 اعتبار 60 ثانیه'),
       const RawSms(sender: 'Ad', body: 'فروش ویژه تخفیف!'),
-      const RawSms(
-        sender: 'ملی',
-        body: 'واریز مبلغ 10,000,000 ریال به حساب شما',
-      ),
+      // مبلغ دارد ولی فرستنده بانک نیست — قبلاً اشتباهی هزینه ثبت می‌شد
+      const RawSms(sender: 'Digikala', body: 'خرید مبلغ 990,000 ریال با کد تخفیف'),
+      const RawSms(sender: 'ملی', body: 'واریز مبلغ 10,000,000 ریال به حساب شما'),
     ];
 
     final result = await importer.importAll(messages);
 
-    expect(result.created, 2); // فقط دو تراکنش واقعی
-    expect(result.skipped, 2); // OTP + تبلیغ
+    expect(result.created, 2);
+    expect(result.skipped, 1); // OTP از فرستنده‌ی مجاز
+    expect(result.notAllowed, 2); // تبلیغ + فروشگاهِ مبلغ‌دار
     expect(await store.getAll().then((l) => l.length), 2);
+  });
+
+  test('تا فرستنده‌ای مجاز نشده هیچ پیامکی ثبت نمی‌شود', () async {
+    store = FakeTransactionStore();
+    importer = SmsImporter(store);
+
+    final result = await importer.importAll(const [
+      RawSms(sender: 'BankMellat', body: 'برداشت مبلغ 2,500,000 ریال از کارت 1234'),
+    ]);
+    expect(result.created, 0);
+    expect(result.notAllowed, 1);
+    expect(
+      await importer.importOne(
+          const RawSms(sender: 'BankMellat', body: 'خرید مبلغ 80,000 ریال از کارت 1234')),
+      isNull,
+    );
+    expect(await store.getAll(), isEmpty);
+  });
+
+  test('سرشماره‌ی عددی با هر شکلِ نوشتن؛ بانک از خودِ فرستنده‌ی مجاز', () async {
+    await store.addAllowedSender('+98200012345', bankId: 'tejarat');
+
+    final imported = await importer.importOne(RawSms(
+      sender: '0200012345',
+      body: 'برداشت مبلغ 500,000 ریال از حساب 1234567',
+      receivedAt: DateTime.utc(2026, 9, 1),
+    ));
+
+    expect(imported, isNotNull);
+    final saved = await store.getById(imported!.id);
+    expect(saved!.bankId, 'tejarat');
+    expect(saved.smsSender, '0200012345');
   });
 
   test('پیامک تکراری دوباره ذخیره نمی‌شود', () async {
@@ -57,6 +95,7 @@ void main() {
     test('تراکنش‌های قبل از «شروع دسته‌بندی» نوتیفیکیشن ندارند', () async {
       store = FakeTransactionStore(categorizeFrom: DateTime.utc(2026, 9, 22, 20, 30));
       importer = SmsImporter(store);
+      await allowBanks();
 
       final before = await importer.importOne(sms(DateTime.utc(2026, 9, 10)));
       final after = await importer.importOne(sms(DateTime.utc(2026, 9, 25)));

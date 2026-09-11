@@ -20,12 +20,12 @@ class AuthController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<bool> login(String email, String password) async {
+  Future<bool> login(String phone, String password) async {
     loading = true;
     error = null;
     notifyListeners();
     try {
-      await repository.login(email: email, password: password);
+      await repository.login(phone: phone, password: password);
       authenticated = true;
       return true;
     } on DioException catch (e) {
@@ -45,8 +45,9 @@ class AuthController extends ChangeNotifier {
 
   String _messageFor(DioException e) {
     final code = e.response?.statusCode;
-    if (code == 401) return 'ایمیل یا رمز عبور اشتباه است';
-    if (code == 400) return 'اطلاعات واردشده معتبر نیست';
+    if (code == 401) return 'شماره موبایل یا رمز عبور اشتباه است';
+    if (code == 400) return 'شماره موبایل و رمز را کامل وارد کن';
+    if (code == 429) return 'تلاش زیاد بود؛ یک دقیقه صبر کن و دوباره بزن';
     return 'خطا در اتصال به سرور';
   }
 }

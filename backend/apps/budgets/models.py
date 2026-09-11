@@ -5,23 +5,31 @@ from django.db import models
 
 class Budget(models.Model):
     class Period(models.TextChoices):
-        MONTHLY = "monthly", "Monthly"
-        WEEKLY = "weekly", "Weekly"
+        MONTHLY = "monthly", "ماهانه"
+        WEEKLY = "weekly", "هفتگی"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     family = models.ForeignKey(
-        "families.FamilyGroup", on_delete=models.CASCADE, related_name="budgets"
+        "families.FamilyGroup",
+        on_delete=models.CASCADE,
+        related_name="budgets",
+        verbose_name="خانواده",
     )
     category = models.ForeignKey(
-        "categories.Category", on_delete=models.CASCADE, related_name="budgets"
+        "categories.Category",
+        on_delete=models.CASCADE,
+        related_name="budgets",
+        verbose_name="دسته",
     )
     period = models.CharField(
-        max_length=10, choices=Period.choices, default=Period.MONTHLY
+        "دوره", max_length=10, choices=Period.choices, default=Period.MONTHLY
     )
-    limit_rial = models.BigIntegerField()
+    limit_rial = models.BigIntegerField("سقف (ریال)")
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
+        verbose_name = "بودجه"
+        verbose_name_plural = "بودجه‌ها"
         constraints = [
             models.UniqueConstraint(
                 fields=["family", "category", "period"],

@@ -8,9 +8,12 @@ import 'package:flutter/foundation.dart' hide Category;
 
 import '../../core/family/family_api.dart';
 import '../../core/reconcile/reconciliation.dart';
+import '../../core/sms/sms_importer.dart';
 import '../../core/sms/sms_parser.dart';
 import '../../core/sync/sync_service.dart';
 import '../categories/data/category.dart';
+import '../senders/data/allowed_sender.dart';
+import '../senders/data/sender_candidates.dart';
 import '../transactions/data/period.dart';
 import '../transactions/data/transaction_record.dart';
 import '../transactions/data/transaction_repository.dart';
@@ -27,6 +30,13 @@ class DashboardController extends ChangeNotifier {
 
   /// بعد از هر تغییر محلی صدا زده می‌شود (مثلاً برای همگام‌سازی خودکار).
   VoidCallback? onLocalChange;
+
+  /// خواندن صندوق پیامک گوشی (برای پیشنهاد فرستنده‌های بانک).
+  Future<List<RawSms>> Function()? readInbox;
+
+  /// بعد از مجاز کردن فرستنده‌ی تازه: خواندن دوباره‌ی صندوق، تا پیامک‌های قبلیِ
+  /// همان فرستنده هم ثبت شوند.
+  Future<void> Function()? onSendersChanged;
 
   DashboardController(
     this.repository, {
@@ -46,7 +56,7 @@ class DashboardController extends ChangeNotifier {
   TxSort sort = TxSort.newest;
   KindFilter kind = KindFilter.all;
 
-  /// فیلتر شخص (فقط در نمای «همه»).
+  /// شخص انتخاب‌شده (در هر دو نما)؛ جمعِ بالای صفحه هم فقط مال همین شخص است.
   String? person;
   String search = '';
   HomeView view = HomeView.people;
@@ -57,12 +67,16 @@ class DashboardController extends ChangeNotifier {
   List<TransactionRecord> uncategorized = const [];
   List<BalanceGap> balanceGaps = const [];
   List<Wallet> wallets = const [];
+  List<AllowedSender> allowedSenders = const [];
   List<FamilyMember> members = const [];
   String? meUserId;
   String? meName;
   DateTime? categorizeFrom;
   SyncStatusInfo syncStatus = const SyncStatusInfo();
   Map<String, TransactionRecord> _byId = const {};
+
+  /// نمایش متن پیامک اصلی روی ردیف تراکنش‌ها.
+  bool showSmsText = true;
 
   /// شناسه‌ی تراکنش‌های انتخاب‌شده (انتخاب چندتایی).
   final Set<String> selected = {};
@@ -74,7 +88,7 @@ class DashboardController extends ChangeNotifier {
         periodItems,
         sort: sort,
         kind: kind,
-        person: view == HomeView.all ? person : null,
+        person: person,
         search: search,
       );
 
@@ -88,14 +102,15 @@ class DashboardController extends ChangeNotifier {
   int get uncategorizedCount => uncategorized.length;
   bool get selectionMode => selected.isNotEmpty;
 
-  bool get hasActiveFilters =>
-      kind != KindFilter.all ||
-      (view == HomeView.all && person != null) ||
-      search.trim().isNotEmpty;
+  /// فیلترهای برگه‌ی «فیلتر» (شخص جداگانه بالای صفحه انتخاب می‌شود).
+  bool get hasActiveFilters => kind != KindFilter.all || search.trim().isNotEmpty;
 
-  /// افرادی که در این بازه تراکنش دارند (برای فیلتر).
+  /// تا فرستنده‌ی مجازی تعیین نشود، هیچ پیامکی خودکار ثبت نمی‌شود.
+  bool get needsSenderSetup => allowedSenders.isEmpty;
+
+  /// همه‌ی افرادی که تراکنش دارند (برای انتخاب شخص؛ «نامشخص» آخر).
   List<String> get people {
-    final names = {for (final t in periodItems) personOf(t)}.toList()
+    final names = {for (final t in _byId.values) personOf(t)}.toList()
       ..sort((a, b) {
         if (a == kUnknownPerson) return 1;
         if (b == kUnknownPerson) return -1;
@@ -119,6 +134,7 @@ class DashboardController extends ChangeNotifier {
     members = FamilyMember.decodeList(
         await repository.getSetting(SettingKeys.familyMembers));
     categorizeFrom = await repository.categorizeFrom();
+    showSmsText = await repository.getSetting(SettingKeys.showSmsText) != '0';
 
     final all = await repository.getAll();
     _byId = {for (final t in all) t.id: t};
@@ -128,6 +144,7 @@ class DashboardController extends ChangeNotifier {
     reviewItems = all.where((t) => t.needsReview && canEdit(t)).toList();
     uncategorized = await repository.uncategorized(limit: 500);
     wallets = await repository.wallets();
+    allowedSenders = await repository.allowedSenders();
     balanceGaps = const ReconciliationService()
         .findGaps(all, dismissed: await _dismissedGaps());
     syncStatus = await SyncStatusInfo.load(repository);
@@ -197,6 +214,12 @@ class DashboardController extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> setShowSmsText(bool value) async {
+    showSmsText = value;
+    notifyListeners();
+    await repository.setSetting(SettingKeys.showSmsText, value ? '1' : '0');
+  }
+
   // ---------------------------------------------------------------------------
   // مالکیت: فقط صاحب کارت ویرایش/دسته‌بندی می‌کند؛ بقیه فقط می‌بینند.
   // ---------------------------------------------------------------------------
@@ -256,6 +279,19 @@ class DashboardController extends ChangeNotifier {
       await repository.deleteTransaction(id);
     }
     await _changed();
+  }
+
+  /// حذف (نامعتبر) گروهی؛ فقط تراکنش‌هایی که اجازه‌اش را داری. تعداد حذف‌شده.
+  Future<int> invalidateMany(Iterable<TransactionRecord> records) async {
+    var n = 0;
+    for (final t in records) {
+      if (t.isDeleted || !canEdit(t)) continue;
+      await repository.deleteTransaction(t.id);
+      selected.remove(t.id);
+      n++;
+    }
+    if (n > 0) await _changed();
+    return n;
   }
 
   Future<void> categorizeMany(
@@ -318,7 +354,8 @@ class DashboardController extends ChangeNotifier {
     await _changed();
   }
 
-  /// یک پیامک را پارس و ذخیره می‌کند (افزودن دستی).
+  /// یک پیامک را پارس و ذخیره می‌کند (افزودن دستی؛ فهرست فرستنده‌های مجاز
+  /// عمداً اعمال نمی‌شود چون خود کاربر پیامک را آورده).
   Future<TxInsertOutcome> addFromSms({
     required String sender,
     required String body,
@@ -350,6 +387,42 @@ class DashboardController extends ChangeNotifier {
   Future<void> deleteWallet(String id) async {
     await repository.deleteWallet(id);
     await _changed();
+  }
+
+  // ---------------------------------------------------------------------------
+  // فرستنده‌های مجاز پیامک
+  // ---------------------------------------------------------------------------
+
+  /// فرستنده‌هایی که پیامکِ مبلغ‌دار داده‌اند ولی هنوز مجاز نیستند (صندوق گوشی +
+  /// تراکنش‌های قبلاً ثبت‌شده).
+  Future<List<SenderCandidate>> senderCandidates() async {
+    var inbox = const <RawSms>[];
+    try {
+      inbox = await readInbox?.call() ?? const [];
+    } catch (_) {
+      // بدون مجوز پیامک، فقط از تراکنش‌های ثبت‌شده پیشنهاد می‌دهیم.
+    }
+    return findSenderCandidates(
+      inbox: inbox,
+      stored: _byId.values,
+      allowed: allowedSenders,
+      parser: parser,
+    );
+  }
+
+  Future<void> addAllowedSender(String address, {String? bankId}) async {
+    await repository.addAllowedSender(address, bankId: bankId);
+    try {
+      await onSendersChanged?.call();
+    } catch (_) {
+      // خواندن صندوق نشد؛ پیامک‌های بعدیِ این فرستنده به‌هرحال ثبت می‌شوند.
+    }
+    await load();
+  }
+
+  Future<void> removeAllowedSender(String id) async {
+    await repository.deleteAllowedSender(id);
+    await load();
   }
 
   // ---------------------------------------------------------------------------

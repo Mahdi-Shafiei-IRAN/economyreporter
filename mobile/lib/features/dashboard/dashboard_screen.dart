@@ -11,6 +11,7 @@ import '../categories/categorize_screen.dart';
 import '../reports/report_screen.dart';
 import '../review/reconciliation_screen.dart';
 import '../review/review_screen.dart';
+import '../senders/senders_screen.dart';
 import '../settings/settings_screen.dart';
 import '../transactions/data/transaction_record.dart';
 import '../transactions/data/tx_query.dart';
@@ -350,6 +351,7 @@ class _TransactionsTabState extends State<_TransactionsTab> {
                           ),
                         ),
                       ),
+                      SliverToBoxAdapter(child: _PersonChips(controller: c)),
                       SliverPadding(
                         padding: const EdgeInsets.symmetric(horizontal: 16),
                         sliver: SliverToBoxAdapter(
@@ -358,6 +360,7 @@ class _TransactionsTabState extends State<_TransactionsTab> {
                             period: c.period,
                             count: c.visible.length,
                             filtered: c.hasActiveFilters,
+                            scope: c.person == null ? null : _personLabel(c.person!),
                           ),
                         ),
                       ),
@@ -424,26 +427,34 @@ class _TransactionsTabState extends State<_TransactionsTab> {
             key: kEmptyStateKey,
             icon: Icons.inbox_outlined,
             title: 'در ${c.period.title} تراکنشی نیست',
-            message: 'پیامک‌های بانکی به‌محض رسیدن خودکار این‌جا ثبت می‌شوند. '
-                'برای دیدن ماه‌های قبل از فلش بالای صفحه استفاده کن.',
+            message: c.needsSenderSetup
+                ? 'هنوز فرستنده‌ی پیامک بانکی مشخص نشده؛ با تراشه‌ی «فرستنده‌های بانک» '
+                    'بالای صفحه مشخص کن تا پیامک‌های بانک ثبت شوند.'
+                : 'پیامک‌های بانکی به‌محض رسیدن خودکار این‌جا ثبت می‌شوند. '
+                    'برای دیدن ماه‌های قبل از فلش بالای صفحه استفاده کن.',
           ),
         ),
       ];
     }
     if (c.visible.isEmpty) {
+      final onlyPerson = c.person != null && !c.hasActiveFilters;
       return [
         SliverFillRemaining(
           hasScrollBody: false,
           child: _EmptyState(
             key: kEmptyStateKey,
-            icon: Icons.filter_alt_off_outlined,
-            title: 'با این فیلترها چیزی پیدا نشد',
+            icon: onlyPerson
+                ? Icons.person_search_outlined
+                : Icons.filter_alt_off_outlined,
+            title: onlyPerson
+                ? 'برای ${_personLabel(c.person!)} در ${c.period.title} تراکنشی نیست'
+                : 'با این فیلترها چیزی پیدا نشد',
             action: TextButton(
               onPressed: () {
                 _searchCtrl.clear();
                 c.clearFilters();
               },
-              child: const Text('پاک کردن فیلترها'),
+              child: Text(onlyPerson ? 'نمایش همه' : 'پاک کردن فیلترها'),
             ),
           ),
         ),
@@ -461,6 +472,7 @@ class _TransactionsTabState extends State<_TransactionsTab> {
             key: ValueKey('tx-${items[i].id}'),
             record: items[i],
             showOwner: showOwner,
+            showSms: _c.showSmsText,
             canEdit: _c.canEdit(items[i]),
             selected: _c.isSelected(items[i].id),
             selectionMode: _c.selectionMode,
@@ -759,6 +771,8 @@ class _PersonSection extends StatelessWidget {
   }
 }
 
+const kSendersChipKey = Key('senders-chip');
+
 class _AttentionStrip extends StatelessWidget {
   final DashboardController controller;
   final void Function(Widget page) push;
@@ -776,6 +790,14 @@ class _AttentionStrip extends StatelessWidget {
     final fin = FinanceColors.of(context);
     final pending = c.syncStatus.pendingCount;
     final chips = <Widget>[
+      if (c.needsSenderSetup)
+        ActionChip(
+          key: kSendersChipKey,
+          avatar: Icon(Icons.mark_email_unread_outlined,
+              color: fin.warning, size: 18),
+          label: const Text('فرستنده‌های بانک را مشخص کن'),
+          onPressed: () => push(SendersScreen(controller: c)),
+        ),
       if (c.needsReviewCount > 0)
         ActionChip(
           key: kReviewChipKey,
@@ -807,17 +829,10 @@ class _AttentionStrip extends StatelessWidget {
         ),
     ];
     if (chips.isEmpty) return const SizedBox(height: 8);
-    return SizedBox(
-      height: 60,
-      child: ListView(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-        children: [
-          for (final chip in chips)
-            Padding(
-                padding: const EdgeInsetsDirectional.only(end: 8), child: chip),
-        ],
-      ),
+    // Wrap (نه فهرست افقی): همه‌ی تراشه‌ها دیده شوند، حتی وقتی چندتا هستند.
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      child: Wrap(spacing: 8, runSpacing: 8, children: chips),
     );
   }
 }
@@ -884,6 +899,55 @@ class _Toolbar extends StatelessWidget {
   }
 }
 
+const kPersonChipsKey = Key('person-chips');
+
+/// نام نمایشی شخص («نامشخص» = کارت‌های بی‌صاحب).
+String _personLabel(String person) =>
+    person == kUnknownPerson ? 'کارت‌های بی‌صاحب' : person;
+
+/// انتخاب شخص بالای صفحه: خالص/درآمد/هزینه‌ی بالا و فهرست فقط مال همان شخص می‌شود.
+class _PersonChips extends StatelessWidget {
+  final DashboardController controller;
+
+  const _PersonChips({required this.controller});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = controller;
+    final people = c.people;
+    if (people.length < 2 && c.person == null) return const SizedBox(height: 4);
+    return SizedBox(
+      height: 48,
+      child: ListView(
+        key: kPersonChipsKey,
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.fromLTRB(16, 2, 16, 6),
+        children: [
+          Padding(
+            padding: const EdgeInsetsDirectional.only(end: 8),
+            child: ChoiceChip(
+              key: const ValueKey('person-chip-all'),
+              label: const Text('همه'),
+              selected: c.person == null,
+              onSelected: (_) => c.setPerson(null),
+            ),
+          ),
+          for (final p in people)
+            Padding(
+              padding: const EdgeInsetsDirectional.only(end: 8),
+              child: ChoiceChip(
+                key: ValueKey('person-chip-$p'),
+                label: Text(p == kUnknownPerson ? 'بی‌صاحب' : p),
+                selected: c.person == p,
+                onSelected: (_) => c.setPerson(c.person == p ? null : p),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
 class _ActiveFilters extends StatelessWidget {
   final DashboardController controller;
 
@@ -902,10 +966,6 @@ class _ActiveFilters extends StatelessWidget {
             InputChip(
                 label: Text(c.kind.label),
                 onDeleted: () => c.setKind(KindFilter.all)),
-          if (c.view == HomeView.all && c.person != null)
-            InputChip(
-                label: Text('شخص: ${c.person}'),
-                onDeleted: () => c.setPerson(null)),
           if (c.search.trim().isNotEmpty)
             InputChip(
                 label: Text('«${c.search.trim()}»'),
@@ -950,34 +1010,13 @@ class _FilterSheet extends StatelessWidget {
                     ),
                 ],
               ),
-              const SizedBox(height: 20),
-              Text('شخص', style: theme.textTheme.titleSmall),
-              const SizedBox(height: 8),
-              if (c.view == HomeView.people)
-                Text(
-                  'در نمای «افراد و کارت‌ها» هر شخص جدا نشان داده می‌شود؛ '
-                  'فیلتر شخص برای نمای «همه با هم» است.',
-                  style: theme.textTheme.bodySmall
-                      ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-                )
-              else
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    ChoiceChip(
-                      label: const Text('همه'),
-                      selected: c.person == null,
-                      onSelected: (_) => c.setPerson(null),
-                    ),
-                    for (final p in c.people)
-                      ChoiceChip(
-                        label: Text(p),
-                        selected: c.person == p,
-                        onSelected: (_) => c.setPerson(p),
-                      ),
-                  ],
-                ),
+              const SizedBox(height: 12),
+              Text(
+                'برای دیدن فقط یک نفر (و جمعِ فقط او) از تراشه‌های نام بالای صفحه '
+                'استفاده کن.',
+                style: theme.textTheme.bodySmall
+                    ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+              ),
               const SizedBox(height: 24),
               Row(
                 children: [

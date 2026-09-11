@@ -13,7 +13,7 @@ User = get_user_model()
 
 class AccountModelTests(TestCase):
     def setUp(self):
-        self.user = User.objects.create_user(email="a@x.com", password="StrongPass123")
+        self.user = User.objects.create_user(phone="09120000010", password="StrongPass123")
         self.family = FamilyGroup.objects.create(name="خانواده")
 
     def _account(self):
@@ -44,7 +44,7 @@ class AccountModelTests(TestCase):
 
 class AccountApiTests(ApiTestCase):
     def setUp(self):
-        self.user = self.create_user("owner@x.com")
+        self.user = self.create_user("09120000001")
         self.family = self.create_family_with(self.user)
         self.auth(self.user)
 
@@ -60,7 +60,7 @@ class AccountApiTests(ApiTestCase):
 
     def test_list_scoped_to_family(self):
         BankAccount.objects.create(family=self.family, owner=self.user, bank_name="ملت")
-        outsider = self.create_user("out@x.com")
+        outsider = self.create_user("09120000002")
         self.create_family_with(outsider, name="دیگر")
         self.auth(outsider)
         resp = self.client.get(reverse("account-list"))
@@ -71,7 +71,7 @@ class AccountApiTests(ApiTestCase):
         acc = BankAccount.objects.create(
             family=self.family, owner=self.user, bank_name="ملت"
         )
-        outsider = self.create_user("out@x.com")
+        outsider = self.create_user("09120000002")
         self.create_family_with(outsider, name="دیگر")
         self.auth(outsider)
         resp = self.client.get(reverse("account-detail", args=[acc.id]))
@@ -80,7 +80,7 @@ class AccountApiTests(ApiTestCase):
 
 class CardApiTests(ApiTestCase):
     def setUp(self):
-        self.user = self.create_user("owner@x.com")
+        self.user = self.create_user("09120000001")
         self.family = self.create_family_with(self.user)
         self.auth(self.user)
         self.account = BankAccount.objects.create(
@@ -97,7 +97,7 @@ class CardApiTests(ApiTestCase):
         self.assertEqual(resp.data["card_last4"], "1234")
 
     def test_cannot_attach_card_to_other_family_account(self):
-        other_user = self.create_user("x2@x.com")
+        other_user = self.create_user("09120000003")
         other_fam = self.create_family_with(other_user, name="دیگر")
         other_acc = BankAccount.objects.create(
             family=other_fam, owner=other_user, bank_name="ملی"

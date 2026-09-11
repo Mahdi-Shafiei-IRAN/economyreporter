@@ -107,11 +107,17 @@ backend/
 ### User (سفارشی)
 ```python
 class User(AbstractUser):
+    username = None
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    email = models.EmailField(unique=True)
+    phone = models.CharField(max_length=11, unique=True)  # 09xxxxxxxxx — شناسه‌ی ورود
+    full_name = models.CharField(max_length=150, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    USERNAME_FIELD = "phone"
 ```
+ورود با **شماره موبایل + رمز**؛ هر شکلِ شماره (`+98…`، ارقام فارسی، بدون صفر) به `09…`
+استاندارد می‌شود. کاربر را فقط مدیر در **پنل ادمین** (`/admin/`، فارسی) می‌سازد و به
+خانواده وصل می‌کند؛ ثبت‌نام عمومی نداریم.
 
 ### FamilyGroup و FamilyMembership
 ```python
@@ -333,7 +339,8 @@ POST /sync → احراز هویت → بررسی مالکیت خانواده �
 
 ```http
 # Auth (JWT: access + refresh)
-POST /auth/register/   POST /auth/login/   POST /auth/refresh/   POST /auth/logout/   GET /auth/me/
+POST /auth/login/  (phone + password)   POST /auth/refresh/   GET /auth/me/
+# ثبت‌نام عمومی نیست؛ کاربر و خانواده در پنل ادمین (/admin/) ساخته می‌شوند.
 
 # Family (سقف ۳ عضو، server-side)
 GET/POST /family/     GET /family/members/     POST /family/members/invite/     DELETE /family/members/{id}/

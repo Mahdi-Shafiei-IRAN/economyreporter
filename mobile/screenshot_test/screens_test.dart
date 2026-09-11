@@ -7,13 +7,19 @@ library;
 import 'dart:io';
 import 'dart:ui' as ui;
 
+import 'package:economy/core/auth/auth_repository.dart';
 import 'package:economy/core/family/family_api.dart';
+import 'package:economy/core/network/api_client.dart';
+import 'package:economy/core/sms/sms_importer.dart';
 import 'package:economy/core/sms/sms_parser.dart';
 import 'package:economy/core/theme/app_theme.dart';
+import 'package:economy/features/auth/auth_controller.dart';
+import 'package:economy/features/auth/login_screen.dart';
 import 'package:economy/features/dashboard/dashboard_controller.dart';
 import 'package:economy/features/dashboard/dashboard_screen.dart';
 import 'package:economy/features/review/reconciliation_screen.dart';
 import 'package:economy/features/review/review_screen.dart';
+import 'package:economy/features/senders/senders_screen.dart';
 import 'package:economy/features/transactions/data/transaction_record.dart';
 import 'package:economy/features/transactions/data/transaction_repository.dart';
 import 'package:economy/features/wallets/data/wallet.dart';
@@ -24,6 +30,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import '../test/helpers/fake_transaction_store.dart';
+import '../test/helpers/in_memory_token_store.dart';
 
 const _shotKey = Key('shot');
 final _outDir = Platform.environment['SHOTS_OUT'] ?? 'build/screenshots';
@@ -55,6 +62,14 @@ Future<FakeTransactionStore> _sampleStore() async {
       id: '', ownerName: 'مامان', label: 'کارت خانه', bankId: 'saman', cardLast4: '5678'));
   await store.addWallet(const Wallet(
       id: '', ownerName: 'مهدی', ownerUserId: 'u-me', label: 'کارت دانشجویی', bankId: 'blu', cardLast4: '9012'));
+  for (final (sender, bank) in const [
+    ('Mellat', 'mellat'),
+    ('Saman', 'saman'),
+    ('Pasargad', 'pasargad'),
+    ('Blu', 'blu'),
+  ]) {
+    await store.addAllowedSender(sender, bankId: bank);
+  }
 
   void sms(String sender, String body, DateTime at) =>
       store.seed(parser.parse(sender: sender, body: body), sender: sender, receivedAt: at);
@@ -75,6 +90,9 @@ Future<FakeTransactionStore> _sampleStore() async {
       DateTime.utc(2026, 9, 11, 6, 35));
   sms('Saman', 'سامان\nخرید ناموفق از کارت 5678\nمبلغ 1,200,000 ریال\nرمز نامعتبر\n1405/06/20 08:10',
       DateTime.utc(2026, 9, 11, 4, 40));
+  // پیش از تعیین فرستنده‌ها، پیامک فروشگاه اشتباهی هزینه ثبت شده بود.
+  sms('Digikala', 'دیجی‌کالا\nخرید شما به مبلغ 1,290,000 ریال ثبت شد\nکد تخفیف: DK20',
+      DateTime.utc(2026, 9, 9, 16, 20));
 
   // تراکنشی که روی گوشی بابا ثبت شده (از سرور آمده) — برای من فقط دیدنی.
   store.addRecord(TransactionRecord(
@@ -179,6 +197,8 @@ void main() {
 
     await tester.longPress(find.text('داروخانه'));
     await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('نانوایی و میوه'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('نانوایی و میوه'));
     await _shot(tester, '04_home_selection_light');
   });
@@ -187,13 +207,16 @@ void main() {
     _phone(tester, height: 1500);
     await tester.pumpWidget(_app(DashboardScreen(controller: await controller())));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('نانوایی و میوه'));
-    await _shot(tester, '05_details_own_light');
+    // اول تراکنشِ بابا (بالای فهرست)، بعد تراکنشِ خودم (پایین‌تر؛ با اسکرول).
+    await tester.tap(find.text('تعمیرگاه'));
+    await _shot(tester, '06_details_readonly_light');
 
     await tester.tapAt(const Offset(200, 40)); // بستن برگه
     await tester.pumpAndSettle();
-    await tester.tap(find.text('تعمیرگاه'));
-    await _shot(tester, '06_details_readonly_light');
+    await tester.ensureVisible(find.text('نانوایی و میوه'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('نانوایی و میوه'));
+    await _shot(tester, '05_details_own_light');
   });
 
   testWidgets('review', (tester) async {
@@ -249,5 +272,42 @@ void main() {
     _phone(tester, height: 1000);
     await tester.pumpWidget(_app(WalletsScreen(controller: await controller())));
     await _shot(tester, '11_wallets_light');
+  });
+
+  testWidgets('home person filter', (tester) async {
+    _phone(tester);
+    await tester.pumpWidget(_app(DashboardScreen(controller: await controller())));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('person-chip-بابا')));
+    await _shot(tester, '12_home_person_light');
+  });
+
+  testWidgets('senders', (tester) async {
+    _phone(tester, height: 1800);
+    final c = await controller();
+    c.readInbox = () async => [
+          RawSms(
+            sender: 'Digikala',
+            body: 'دیجی‌کالا\nخرید شما به مبلغ 1,290,000 ریال ثبت شد\nکد تخفیف: DK20',
+            receivedAt: _now,
+          ),
+          RawSms(
+            sender: '+98300045',
+            body: 'پرداخت قبض موبایل به مبلغ 350,000 ریال انجام شد',
+            receivedAt: _now,
+          ),
+        ];
+    await tester.pumpWidget(_app(SendersScreen(controller: c)));
+    await _shot(tester, '13_senders_light');
+  });
+
+  testWidgets('login', (tester) async {
+    _phone(tester, height: 900);
+    final tokens = InMemoryTokenStore();
+    final auth = AuthController(AuthRepository(
+        ApiClient(baseUrl: 'http://127.0.0.1:9/api/v1', tokenStore: tokens), tokens));
+    await tester.pumpWidget(_app(LoginScreen(controller: auth)));
+    await tester.enterText(find.byKey(kPhoneFieldKey), '09121234567');
+    await _shot(tester, '14_login_light');
   });
 }

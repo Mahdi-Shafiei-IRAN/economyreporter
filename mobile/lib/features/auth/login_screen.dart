@@ -1,11 +1,11 @@
-/// صفحه‌ی ورود.
+/// صفحه‌ی ورود با شماره موبایل و رمز (هر دو را مدیر در پنل ادمین تعیین می‌کند).
 library;
 
 import 'package:flutter/material.dart';
 
 import 'auth_controller.dart';
 
-const kEmailFieldKey = Key('login-email');
+const kPhoneFieldKey = Key('login-phone');
 const kPasswordFieldKey = Key('login-password');
 const kLoginButtonKey = Key('login-button');
 const kLoginErrorKey = Key('login-error');
@@ -20,25 +20,26 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  final _email = TextEditingController();
+  final _phone = TextEditingController();
   final _password = TextEditingController();
 
   @override
   void dispose() {
-    _email.dispose();
+    _phone.dispose();
     _password.dispose();
     super.dispose();
   }
 
   Future<void> _submit() async {
-    final email = _email.text.trim();
+    final phone = _phone.text.trim();
     final password = _password.text;
-    if (email.isEmpty || password.isEmpty) return;
-    await widget.controller.login(email, password);
+    if (phone.isEmpty || password.isEmpty) return;
+    await widget.controller.login(phone, password);
   }
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return Scaffold(
       appBar: AppBar(title: const Text('ورود')),
       body: Center(
@@ -55,15 +56,19 @@ class _LoginScreenState extends State<LoginScreen> {
                   Text(
                     'مدیریت مالی خانواده',
                     textAlign: TextAlign.center,
-                    style: Theme.of(context).textTheme.headlineSmall,
+                    style: theme.textTheme.headlineSmall,
                   ),
                   const SizedBox(height: 24),
                   TextField(
-                    key: kEmailFieldKey,
-                    controller: _email,
-                    keyboardType: TextInputType.emailAddress,
+                    key: kPhoneFieldKey,
+                    controller: _phone,
+                    keyboardType: TextInputType.phone,
+                    textInputAction: TextInputAction.next,
+                    textDirection: TextDirection.ltr,
+                    autofillHints: const [AutofillHints.telephoneNumber],
                     decoration: const InputDecoration(
-                      labelText: 'ایمیل',
+                      labelText: 'شماره موبایل',
+                      hintText: '09121234567',
                       border: OutlineInputBorder(),
                     ),
                   ),
@@ -72,17 +77,25 @@ class _LoginScreenState extends State<LoginScreen> {
                     key: kPasswordFieldKey,
                     controller: _password,
                     obscureText: true,
+                    onSubmitted: (_) => _submit(),
                     decoration: const InputDecoration(
                       labelText: 'رمز عبور',
                       border: OutlineInputBorder(),
                     ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'شماره و رمز را مدیر خانواده در پنل مدیریت برایت ساخته است.',
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.bodySmall
+                        ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
                   ),
                   if (c.error != null) ...[
                     const SizedBox(height: 12),
                     Text(
                       c.error!,
                       key: kLoginErrorKey,
-                      style: const TextStyle(color: Colors.red),
+                      style: TextStyle(color: theme.colorScheme.error),
                       textAlign: TextAlign.center,
                     ),
                   ],

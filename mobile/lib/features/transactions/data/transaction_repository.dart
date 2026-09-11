@@ -12,6 +12,7 @@ import '../../../core/sms/jalali.dart';
 import '../../../core/sms/models.dart';
 import '../../../core/sms/sms_fingerprint.dart';
 import '../../categories/data/category.dart';
+import '../../senders/data/allowed_sender.dart';
 import '../../wallets/data/wallet.dart';
 import 'transaction_record.dart';
 
@@ -73,6 +74,9 @@ class SettingKeys {
 
   /// شناسه‌ی ثابت این گوشی (برای sync).
   static const deviceId = 'device_id';
+
+  /// نمایش متن پیامک روی ردیف تراکنش‌ها ('0' = خاموش).
+  static const showSmsText = 'show_sms_text';
 }
 
 /// پنجره‌ی ضدتکرارِ محتوایی: دریافت زنده و خواندن صندوقِ همان پیامک
@@ -155,6 +159,13 @@ abstract class TransactionStore {
   Future<void> addWallet(Wallet wallet);
   Future<void> updateWallet(Wallet wallet);
   Future<void> deleteWallet(String id);
+
+  // --- فرستنده‌های مجاز پیامک (فقط پیامک این‌ها خودکار ثبت می‌شود) ---
+  Future<List<AllowedSender>> allowedSenders();
+
+  /// اگر همین فرستنده (با هر شکلِ نوشتن) از قبل باشد، همان برمی‌گردد.
+  Future<AllowedSender> addAllowedSender(String address, {String? bankId});
+  Future<void> deleteAllowedSender(String id);
 
   /// انتساب دوباره‌ی تراکنش‌های همین گوشی به کیف‌ها/کاربر جاری.
   Future<void> reattributeLocal();
@@ -517,6 +528,27 @@ class TransactionRepository implements TransactionStore {
   Future<void> deleteWallet(String id) async {
     await _db.delete('wallets', where: 'id = ?', whereArgs: [id]);
     await reattributeLocal();
+  }
+
+  @override
+  Future<List<AllowedSender>> allowedSenders() async {
+    final rows = await _db.query('allowed_senders', orderBy: 'created_at');
+    return rows.map(AllowedSender.fromMap).toList();
+  }
+
+  @override
+  Future<AllowedSender> addAllowedSender(String address, {String? bankId}) async {
+    final existing = findAllowedSender(await allowedSenders(), address);
+    if (existing != null) return existing;
+    final sender =
+        AllowedSender(id: _uuid.v4(), address: address.trim(), bankId: bankId);
+    await _db.insert('allowed_senders', {...sender.toMap(), 'created_at': _nowIso()});
+    return sender;
+  }
+
+  @override
+  Future<void> deleteAllowedSender(String id) async {
+    await _db.delete('allowed_senders', where: 'id = ?', whereArgs: [id]);
   }
 
   @override

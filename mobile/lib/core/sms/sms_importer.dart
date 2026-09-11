@@ -1,7 +1,11 @@
 /// وارد کردن پیامک‌ها به‌صورت تراکنش. لایه‌ی خالص و تست‌پذیر؛
 /// خواندن واقعی پیامک از سیستم‌عامل در features/sms انجام می‌شود.
+///
+/// ترتیب (قاعده‌ی پروژه): اول فرستنده — فقط سرشماره/نامی که کاربر مجاز کرده —
+/// بعد پارس متن. پیامکِ هر فرستنده‌ی دیگری حتی اگر مبلغ داشته باشد ثبت نمی‌شود.
 library;
 
+import '../../features/senders/data/allowed_sender.dart';
 import '../../features/transactions/data/transaction_repository.dart';
 import 'sms_parser.dart';
 
@@ -17,12 +21,14 @@ class RawSms {
 class ImportResult {
   final int created;
   final int duplicates;
-  final int skipped; // OTP، یادآوری یا غیرتراکنش
+  final int skipped; // OTP، یادآوری یا غیرتراکنش (از فرستنده‌ی مجاز)
+  final int notAllowed; // فرستنده جزو فرستنده‌های مجاز نیست
 
   const ImportResult({
     required this.created,
     required this.duplicates,
     required this.skipped,
+    this.notAllowed = 0,
   });
 }
 
@@ -49,10 +55,13 @@ class SmsImporter {
 
   const SmsImporter(this.store, {this.parser = const SmsParser(), this.deviceId});
 
-  /// یک پیامک را در صورت تراکنش‌بودن ذخیره می‌کند.
+  /// یک پیامک را اگر از فرستنده‌ی مجاز و تراکنش باشد ذخیره می‌کند.
   /// اگر تراکنشِ جدید ساخته شد، خلاصه‌اش را برمی‌گرداند؛ وگرنه null.
   Future<ImportedTx?> importOne(RawSms sms) async {
-    final parsed = parser.parse(sender: sms.sender, body: sms.body);
+    final sender = findAllowedSender(await store.allowedSenders(), sms.sender);
+    if (sender == null) return null; // فرستنده‌ی مجاز نیست
+    final parsed =
+        parser.parse(sender: sms.sender, body: sms.body, bankId: sender.bankId);
     if (!parsed.looksLikeTransaction) return null; // OTP یا غیرتراکنش
     final outcome = await store.saveParsed(
       parsed,
@@ -79,11 +88,19 @@ class SmsImporter {
 
   /// فهرستی از پیامک‌ها را وارد می‌کند و آمار می‌دهد.
   Future<ImportResult> importAll(List<RawSms> messages) async {
+    final allowed = await store.allowedSenders();
     var created = 0;
     var duplicates = 0;
     var skipped = 0;
+    var notAllowed = 0;
     for (final sms in messages) {
-      final parsed = parser.parse(sender: sms.sender, body: sms.body);
+      final sender = findAllowedSender(allowed, sms.sender);
+      if (sender == null) {
+        notAllowed++;
+        continue;
+      }
+      final parsed =
+          parser.parse(sender: sms.sender, body: sms.body, bankId: sender.bankId);
       if (!parsed.looksLikeTransaction) {
         skipped++;
         continue;
@@ -100,6 +117,11 @@ class SmsImporter {
         duplicates++;
       }
     }
-    return ImportResult(created: created, duplicates: duplicates, skipped: skipped);
+    return ImportResult(
+      created: created,
+      duplicates: duplicates,
+      skipped: skipped,
+      notAllowed: notAllowed,
+    );
   }
 }

@@ -104,4 +104,26 @@ void main() {
     expect(controller.wallets.single.label, 'کارت خرید');
     expect(find.text('کارت خرید'), findsOneWidget);
   });
+
+  testWidgets('کارت تازه پیش‌فرض مال خود کاربر است', (tester) async {
+    store.settings[SettingKeys.meUserId] = 'u-me';
+    store.settings[SettingKeys.familyMembers] = FamilyMember.encodeList(const [
+      FamilyMember(id: 'u-me', name: 'مهدی'),
+      FamilyMember(id: 'u-father', name: 'بابا'),
+    ]);
+    await controller.load();
+    await pump(tester);
+
+    await tester.tap(find.byKey(kWalletAddFabKey));
+    await tester.pumpAndSettle();
+    expect(find.byKey(kWalletOwnerFieldKey), findsNothing); // «من» انتخاب است
+    await tester.enterText(find.byKey(kWalletLabelFieldKey), 'کارت من');
+    await tester.enterText(find.byKey(kWalletCardFieldKey), '4321');
+    await tester.tap(find.byKey(kWalletSaveKey));
+    await tester.pumpAndSettle();
+
+    final w = controller.wallets.single;
+    expect(w.ownerUserId, 'u-me');
+    expect(w.ownerName, 'مهدی');
+  });
 }

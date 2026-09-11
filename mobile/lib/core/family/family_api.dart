@@ -66,11 +66,8 @@ class DioFamilyApi implements FamilyApi {
   }
 
   static FamilyMember _memberFromUser(Map<String, dynamic> user) {
-    final name = (user['full_name'] as String?)?.trim();
-    return FamilyMember(
-      id: user['id'].toString(),
-      name: (name == null || name.isEmpty) ? user['email'].toString() : name,
-    );
+    final profile = UserProfile.fromJson(user);
+    return FamilyMember(id: profile.id, name: profile.displayName);
   }
 }
 
@@ -85,12 +82,9 @@ class ProfileService {
   Future<bool> refresh() async {
     try {
       final me = await api.me();
-      final name = (me.fullName == null || me.fullName!.trim().isEmpty)
-          ? me.email
-          : me.fullName!.trim();
       final previous = await store.getSetting(SettingKeys.meUserId);
       await store.setSetting(SettingKeys.meUserId, me.id);
-      await store.setSetting(SettingKeys.meName, name);
+      await store.setSetting(SettingKeys.meName, me.displayName);
       try {
         final members = await api.members();
         await store.setSetting(

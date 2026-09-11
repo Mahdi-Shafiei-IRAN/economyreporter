@@ -23,16 +23,16 @@ void main() {
 
   Widget wrap(AuthController c) => MaterialApp(home: LoginScreen(controller: c));
 
-  testWidgets('ورود موفق وضعیت را authenticated می‌کند', (tester) async {
+  testWidgets('ورود با شماره موبایل و رمز وضعیت را authenticated می‌کند', (tester) async {
     final ctx = build();
     ctx.adapter.onPost(
       '/auth/login/',
       (server) => server.reply(200, {'access': 'a', 'refresh': 'r'}),
-      data: {'email': 'a@x.com', 'password': 'secret'},
+      data: {'phone': '09121234567', 'password': 'secret'},
     );
 
     await tester.pumpWidget(wrap(ctx.controller));
-    await tester.enterText(find.byKey(kEmailFieldKey), 'a@x.com');
+    await tester.enterText(find.byKey(kPhoneFieldKey), '09121234567');
     await tester.enterText(find.byKey(kPasswordFieldKey), 'secret');
     await tester.tap(find.byKey(kLoginButtonKey));
     await tester.pumpAndSettle();
@@ -42,21 +42,38 @@ void main() {
     expect(find.byKey(kLoginErrorKey), findsNothing);
   });
 
+  testWidgets('شماره با ارقام فارسی هم پذیرفته می‌شود', (tester) async {
+    final ctx = build();
+    ctx.adapter.onPost(
+      '/auth/login/',
+      (server) => server.reply(200, {'access': 'a', 'refresh': 'r'}),
+      data: {'phone': '09121234567', 'password': 'secret'},
+    );
+
+    await tester.pumpWidget(wrap(ctx.controller));
+    await tester.enterText(find.byKey(kPhoneFieldKey), ' ۰۹۱۲۱۲۳۴۵۶۷ ');
+    await tester.enterText(find.byKey(kPasswordFieldKey), 'secret');
+    await tester.tap(find.byKey(kLoginButtonKey));
+    await tester.pumpAndSettle();
+
+    expect(ctx.controller.authenticated, isTrue);
+  });
+
   testWidgets('ورود ناموفق پیام خطا نشان می‌دهد', (tester) async {
     final ctx = build();
     ctx.adapter.onPost(
       '/auth/login/',
       (server) => server.reply(401, {'detail': 'no'}),
-      data: {'email': 'a@x.com', 'password': 'wrong'},
+      data: {'phone': '09121234567', 'password': 'wrong'},
     );
 
     await tester.pumpWidget(wrap(ctx.controller));
-    await tester.enterText(find.byKey(kEmailFieldKey), 'a@x.com');
+    await tester.enterText(find.byKey(kPhoneFieldKey), '09121234567');
     await tester.enterText(find.byKey(kPasswordFieldKey), 'wrong');
     await tester.tap(find.byKey(kLoginButtonKey));
     await tester.pumpAndSettle();
 
     expect(ctx.controller.authenticated, isFalse);
-    expect(find.byKey(kLoginErrorKey), findsOneWidget);
+    expect(find.text('شماره موبایل یا رمز عبور اشتباه است'), findsOneWidget);
   });
 }

@@ -17,7 +17,7 @@ User = get_user_model()
 
 class TransactionModelTests(TestCase):
     def setUp(self):
-        self.user = User.objects.create_user(email="a@x.com", password="StrongPass123")
+        self.user = User.objects.create_user(phone="09120000010", password="StrongPass123")
         self.family = FamilyGroup.objects.create(name="خانواده")
         self.account = BankAccount.objects.create(
             family=self.family, owner=self.user, bank_name="بانک ملت", bank_id="mellat"
@@ -69,7 +69,7 @@ class TransactionModelTests(TestCase):
 
 class TransactionApiTests(ApiTestCase):
     def setUp(self):
-        self.user = self.create_user("owner@x.com")
+        self.user = self.create_user("09120000001")
         self.family = self.create_family_with(self.user)
         self.auth(self.user)
 
@@ -89,7 +89,7 @@ class TransactionApiTests(ApiTestCase):
         Transaction.objects.create(
             family=self.family, owner=self.user, kind="expense", amount_rial=1000
         )
-        outsider = self.create_user("out@x.com")
+        outsider = self.create_user("09120000002")
         self.create_family_with(outsider, name="دیگر")
         self.auth(outsider)
         resp = self.client.get(reverse("transaction-list"))
@@ -110,7 +110,7 @@ class TransactionApiTests(ApiTestCase):
 
 class SyncApiTests(ApiTestCase):
     def setUp(self):
-        self.user = self.create_user("owner@x.com")
+        self.user = self.create_user("09120000001")
         self.family = self.create_family_with(self.user)
         self.auth(self.user)
         self.url = reverse("sync-transactions")
@@ -165,7 +165,7 @@ class SyncApiTests(ApiTestCase):
 
 class DashboardApiTests(ApiTestCase):
     def setUp(self):
-        self.user = self.create_user("owner@x.com", full_name="علی")
+        self.user = self.create_user("09120000001", full_name="علی")
         self.family = self.create_family_with(self.user)
         self.auth(self.user)
 
@@ -209,15 +209,15 @@ class SyncOwnershipTests(ApiTestCase):
     """مالکیت کارت، ویرایش فقط توسط صاحب، و دریافت تغییرات (pull)."""
 
     def setUp(self):
-        self.me = self.create_user("me@x.com", full_name="مهدی")
+        self.me = self.create_user("09120000011", full_name="مهدی")
         self.family = self.create_family_with(self.me)
-        self.father = self.create_user("father@x.com", full_name="بابا")
-        self.mother = self.create_user("mother@x.com", full_name="مامان")
+        self.father = self.create_user("09120000012", full_name="بابا")
+        self.mother = self.create_user("09120000013", full_name="مامان")
         for u in (self.father, self.mother):
             FamilyMembership.objects.create(
                 family=self.family, user=u, role=FamilyMembership.Role.MEMBER
             )
-        self.outsider = self.create_user("out@x.com")
+        self.outsider = self.create_user("09120000002")
         self.url = reverse("sync-transactions")
 
     def _push(self, user, *items):
@@ -349,6 +349,28 @@ class SyncOwnershipTests(ApiTestCase):
         rest = self.client.get(self.url, {"since": page["cursor"], "limit": 2}).data
         self.assertEqual(len(rest["results"]), 1)
         self.assertFalse(rest["has_more"])
+
+    def test_pull_does_not_lose_rows_with_equal_updated_at(self):
+        # عملیات گروهی (مثلاً «نامعتبر کن» در پنل) به چند ردیف یک updated_at می‌دهد؛
+        # مرز صفحه نباید ردیف‌های هم‌زمان را جا بیندازد.
+        items = [self._item() for _ in range(5)]
+        self._push(self.me, *items)
+        Transaction.objects.update(updated_at=Transaction.objects.first().updated_at)
+        seen, cursor = [], None
+        for _ in range(10):
+            params = {"limit": 2, **({"since": cursor} if cursor else {})}
+            page = self.client.get(self.url, params).data
+            seen += [r["id"] for r in page["results"]]
+            cursor = page["cursor"]
+            if not page["has_more"]:
+                break
+        self.assertEqual(sorted(seen), sorted(i["id"] for i in items))
+
+    def test_pull_accepts_old_time_only_cursor(self):
+        a = self._item()
+        self._push(self.me, a)
+        resp = self.client.get(self.url, {"since": "2000-01-01T00:00:00Z"})
+        self.assertEqual([r["id"] for r in resp.data["results"]], [a["id"]])
 
     def test_pull_is_isolated_between_families(self):
         self._push(self.me, self._item())

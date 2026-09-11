@@ -4,7 +4,7 @@
 /// می‌شود (اپ باز، پس‌زمینه یا بسته؛ گیرنده در AndroidManifest)، پس پاک‌شدن
 /// پیامک از صندوق اثری روی اپ ندارد. (۲) وارد کردن صندوق هنگام باز شدن اپ،
 /// برای پیامک‌هایی که وقتی گوشی خاموش بود رسیده‌اند.
-/// پارس/ذخیره در SmsImporter (تست‌شده).
+/// در هر دو مسیر فقط پیامکِ فرستنده‌های مجاز ثبت می‌شود (SmsImporter، تست‌شده).
 library;
 
 import 'package:another_telephony/telephony.dart';
@@ -36,14 +36,19 @@ class SmsInboxService {
     return granted ?? false;
   }
 
-  /// وارد کردن پیامک‌های اخیر صندوق ورودی (هنگام باز شدن اپ). تعداد تراکنش جدید.
-  Future<int> importInbox({int limit = 300}) async {
+  /// پیامک‌های اخیر صندوق ورودی (جدیدترین اول). چیزی ذخیره نمی‌کند؛ برای
+  /// پیشنهاد فرستنده‌های بانک هم استفاده می‌شود.
+  Future<List<RawSms>> readInbox({int limit = 300}) async {
     final messages = await _telephony.getInboxSms(
       columns: [SmsColumn.ADDRESS, SmsColumn.BODY, SmsColumn.DATE],
       sortOrder: [OrderBy(SmsColumn.DATE, sort: Sort.DESC)],
     );
-    final raws = messages.take(limit).map(_toRaw).toList();
-    final result = await importer.importAll(raws);
+    return messages.take(limit).map(_toRaw).toList();
+  }
+
+  /// وارد کردن پیامک‌های اخیر صندوق ورودی (هنگام باز شدن اپ). تعداد تراکنش جدید.
+  Future<int> importInbox({int limit = 300}) async {
+    final result = await importer.importAll(await readInbox(limit: limit));
     if (result.created > 0) onChanged?.call();
     return result.created;
   }

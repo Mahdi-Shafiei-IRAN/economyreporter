@@ -5,6 +5,7 @@ library;
 import 'package:economy/core/sms/models.dart';
 import 'package:economy/core/sms/sms_fingerprint.dart';
 import 'package:economy/features/categories/data/category.dart';
+import 'package:economy/features/senders/data/allowed_sender.dart';
 import 'package:economy/features/transactions/data/transaction_record.dart';
 import 'package:economy/features/transactions/data/transaction_repository.dart';
 import 'package:economy/features/wallets/data/wallet.dart';
@@ -26,6 +27,9 @@ class FakeTransactionStore implements TransactionStore {
 
   final List<Wallet> _wallets = [];
   int _walletSeq = 0;
+
+  final List<AllowedSender> _senders = [];
+  int _senderSeq = 0;
 
   final Map<String, String> settings = {};
 
@@ -281,6 +285,23 @@ class FakeTransactionStore implements TransactionStore {
     _wallets.removeWhere((w) => w.id == id);
     await reattributeLocal();
   }
+
+  @override
+  Future<List<AllowedSender>> allowedSenders() async => List.of(_senders);
+
+  @override
+  Future<AllowedSender> addAllowedSender(String address, {String? bankId}) async {
+    final existing = findAllowedSender(_senders, address);
+    if (existing != null) return existing;
+    final sender =
+        AllowedSender(id: 's${_senderSeq++}', address: address.trim(), bankId: bankId);
+    _senders.add(sender);
+    return sender;
+  }
+
+  @override
+  Future<void> deleteAllowedSender(String id) async =>
+      _senders.removeWhere((s) => s.id == id);
 
   @override
   Future<void> reattributeLocal() async {

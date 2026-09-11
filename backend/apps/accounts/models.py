@@ -7,23 +7,31 @@ from django.db import models
 class BankAccount(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     family = models.ForeignKey(
-        "families.FamilyGroup", on_delete=models.CASCADE, related_name="accounts"
+        "families.FamilyGroup",
+        on_delete=models.CASCADE,
+        related_name="accounts",
+        verbose_name="خانواده",
     )
     owner = models.ForeignKey(
-        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="accounts"
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="accounts",
+        verbose_name="صاحب",
     )
-    bank_name = models.CharField(max_length=100)
+    bank_name = models.CharField("بانک", max_length=100)
     # شناسه‌ی بانک هم‌راستا با رجیستری پارسر موبایل (mellat, melli, ...)؛ برای
     # اتصال خودکار تراکنش پارس‌شده به حساب.
-    bank_id = models.CharField(max_length=50, blank=True)
-    account_number_masked = models.CharField(max_length=32, blank=True)
-    account_type = models.CharField(max_length=30, default="checking")
-    currency = models.CharField(max_length=3, default="IRR")
-    is_active = models.BooleanField(default=True)
+    bank_id = models.CharField("شناسه‌ی بانک", max_length=50, blank=True)
+    account_number_masked = models.CharField("شماره حساب (ماسک‌شده)", max_length=32, blank=True)
+    account_type = models.CharField("نوع حساب", max_length=30, default="checking")
+    currency = models.CharField("ارز", max_length=3, default="IRR")
+    is_active = models.BooleanField("فعال", default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
+        verbose_name = "حساب بانکی"
+        verbose_name_plural = "حساب‌های بانکی"
         indexes = [models.Index(fields=["family", "owner"])]
 
     def __str__(self):
@@ -33,13 +41,15 @@ class BankAccount(models.Model):
 class Card(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     account = models.ForeignKey(
-        BankAccount, on_delete=models.CASCADE, related_name="cards"
+        BankAccount, on_delete=models.CASCADE, related_name="cards", verbose_name="حساب"
     )
-    card_last4 = models.CharField(max_length=4)  # فقط ۴ رقم آخر — هرگز PAN کامل
-    card_label = models.CharField(max_length=100, blank=True)
+    card_last4 = models.CharField("۴ رقم آخر کارت", max_length=4)  # هرگز PAN کامل
+    card_label = models.CharField("برچسب", max_length=100, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
+        verbose_name = "کارت"
+        verbose_name_plural = "کارت‌ها"
         constraints = [
             models.UniqueConstraint(
                 fields=["account", "card_last4"], name="unique_card_per_account"

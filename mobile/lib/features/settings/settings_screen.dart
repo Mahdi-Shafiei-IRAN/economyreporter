@@ -11,10 +11,13 @@ import '../categories/categorize_list_screen.dart';
 import '../dashboard/dashboard_controller.dart';
 import '../review/reconciliation_screen.dart';
 import '../review/review_screen.dart';
+import '../senders/senders_screen.dart';
 import '../transactions/data/period.dart';
 import '../wallets/wallets_screen.dart';
 
 const kSettingsWalletsKey = Key('settings-wallets');
+const kSettingsSendersKey = Key('settings-senders');
+const kShowSmsToggleKey = Key('settings-show-sms');
 const kSettingsReviewKey = Key('settings-review');
 const kSettingsReconcileKey = Key('settings-reconcile');
 const kSettingsCategorizeKey = Key('settings-categorize');
@@ -125,6 +128,28 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       'مشخص می‌کند هر تراکنش مال کیست'),
                   trailing: const Icon(Icons.chevron_left_rounded),
                   onTap: () => _push(WalletsScreen(controller: c)),
+                ),
+              ]),
+              _Group(title: 'پیامک‌ها', children: [
+                ListTile(
+                  key: kSettingsSendersKey,
+                  leading: Icon(Icons.mark_email_read_outlined,
+                      color: c.needsSenderSetup ? scheme.error : null),
+                  title: const Text('فرستنده‌های پیامک بانک'),
+                  subtitle: Text(c.needsSenderSetup
+                      ? 'هیچ فرستنده‌ای مجاز نشده؛ فعلاً هیچ پیامکی خودکار ثبت نمی‌شود'
+                      : '${_fa(c.allowedSenders.length)} فرستنده — فقط پیامک این‌ها ثبت می‌شود'),
+                  trailing: const Icon(Icons.chevron_left_rounded),
+                  onTap: () => _push(SendersScreen(controller: c)),
+                ),
+                const Divider(indent: 56),
+                SwitchListTile(
+                  key: kShowSmsToggleKey,
+                  secondary: const Icon(Icons.sms_outlined),
+                  title: const Text('نمایش متن پیامک روی تراکنش‌ها'),
+                  subtitle: const Text('تا پیامکی که اشتباهی ثبت شده زود پیدا شود'),
+                  value: c.showSmsText,
+                  onChanged: c.setShowSmsText,
                 ),
               ]),
               _Group(title: 'نیاز به توجه', children: [

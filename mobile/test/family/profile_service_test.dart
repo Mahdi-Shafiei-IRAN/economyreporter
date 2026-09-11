@@ -8,12 +8,13 @@ import '../helpers/fake_transaction_store.dart';
 
 class _FakeFamilyApi implements FamilyApi {
   bool offline;
-  _FakeFamilyApi({this.offline = false});
+  String? fullName;
+  _FakeFamilyApi({this.offline = false, this.fullName = 'مهدی'});
 
   @override
   Future<UserProfile> me() async {
     if (offline) throw Exception('offline');
-    return const UserProfile(id: 'u-me', email: 'me@x.com', fullName: 'مهدی');
+    return UserProfile(id: 'u-me', phone: '09120000001', fullName: fullName);
   }
 
   @override
@@ -42,6 +43,12 @@ void main() {
         FamilyMember.decodeList(await store.getSetting(SettingKeys.familyMembers));
     expect(members.map((m) => m.name), ['مهدی', 'بابا']);
     expect((await store.getAll()).single.ownerUserId, 'u-me');
+  });
+
+  test('کاربرِ بی‌نام با شماره‌اش نشان داده می‌شود', () async {
+    final store = FakeTransactionStore();
+    await ProfileService(_FakeFamilyApi(fullName: ''), store).refresh();
+    expect(await store.getSetting(SettingKeys.meName), '09120000001');
   });
 
   test('آفلاین: false و مقادیر قبلی دست‌نخورده', () async {

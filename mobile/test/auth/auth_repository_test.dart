@@ -22,48 +22,36 @@ void main() {
     repo = AuthRepository(api, store);
   });
 
-  test('login توکن‌ها را ذخیره می‌کند', () async {
+  test('login با شماره موبایل توکن‌ها را ذخیره می‌کند', () async {
     adapter.onPost(
       '/auth/login/',
       (server) => server.reply(200, {'access': 'a', 'refresh': 'r'}),
-      data: {'email': 'a@x.com', 'password': 'p'},
+      data: {'phone': '09121234567', 'password': 'p'},
     );
-    await repo.login(email: 'a@x.com', password: 'p');
+    await repo.login(phone: '09121234567', password: 'p');
     expect(store.access, 'a');
     expect(store.refresh, 'r');
   });
 
-  test('me پروفایل را برمی‌گرداند', () async {
+  test('me پروفایل را (با شماره) برمی‌گرداند', () async {
     store.access = 'a';
     adapter.onGet(
       '/auth/me/',
       (server) => server.reply(200, {
         'id': 'u1',
-        'email': 'a@x.com',
+        'phone': '09121234567',
         'full_name': 'علی',
       }),
     );
     final user = await repo.me();
-    expect(user.email, 'a@x.com');
+    expect(user.phone, '09121234567');
     expect(user.fullName, 'علی');
+    expect(user.displayName, 'علی');
   });
 
-  test('register پروفایل را برمی‌گرداند', () async {
-    adapter.onPost(
-      '/auth/register/',
-      (server) => server.reply(201, {
-        'id': 'u1',
-        'email': 'a@x.com',
-        'full_name': 'علی',
-      }),
-      data: {'email': 'a@x.com', 'password': 'StrongPass123', 'full_name': 'علی'},
-    );
-    final user = await repo.register(
-      email: 'a@x.com',
-      password: 'StrongPass123',
-      fullName: 'علی',
-    );
-    expect(user.email, 'a@x.com');
+  test('بدون نام، نام نمایشی همان شماره است', () {
+    const user = UserProfile(id: 'u1', phone: '09121234567', fullName: ' ');
+    expect(user.displayName, '09121234567');
   });
 
   test('پاسخ 401 باعث تلاش برای تازه‌سازی توکن می‌شود', () async {

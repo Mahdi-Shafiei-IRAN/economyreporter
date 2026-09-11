@@ -103,6 +103,15 @@ class Pill extends StatelessWidget {
   }
 }
 
+/// پیش‌نمایش یک‌تکه‌ی پیامک اصلی: «فرستنده: متن» (null اگر متن روی این گوشی نیست).
+String? smsPreviewOf(TransactionRecord t) {
+  final body = t.smsBody?.trim();
+  if (body == null || body.isEmpty) return null;
+  final text = body.replaceAll(RegExp(r'\s+'), ' ');
+  final sender = t.smsSender?.trim();
+  return (sender == null || sender.isEmpty) ? text : '$sender: $text';
+}
+
 /// ردیف یک تراکنش.
 class TransactionTile extends StatelessWidget {
   final TransactionRecord record;
@@ -112,6 +121,9 @@ class TransactionTile extends StatelessWidget {
   final bool canEdit;
   final bool selected;
   final bool selectionMode;
+
+  /// متن پیامک اصلی زیر ردیف (تا پیامکی که اشتباهی ثبت شده معلوم باشد).
+  final bool showSms;
 
   /// «بدون دسته» فقط برای تراکنش‌های بعد از شروع دسته‌بندی نشان داده می‌شود.
   final DateTime? categorizeFrom;
@@ -125,6 +137,7 @@ class TransactionTile extends StatelessWidget {
     this.canEdit = true,
     this.selected = false,
     this.selectionMode = false,
+    this.showSms = false,
     this.categorizeFrom,
     this.onTap,
     this.onLongPress,
@@ -240,6 +253,41 @@ class TransactionTile extends StatelessWidget {
                       const SizedBox(height: 6),
                       Wrap(spacing: 4, runSpacing: 4, children: pills),
                     ],
+                    if ((showSms ? smsPreviewOf(t) : null) case final sms?) ...[
+                      const SizedBox(height: 6),
+                      Container(
+                        key: ValueKey('sms-preview-${t.id}'),
+                        padding:
+                            const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: scheme.surfaceContainerHigh.withOpacity(0.7),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Padding(
+                              padding: const EdgeInsets.only(top: 2),
+                              child: Icon(Icons.sms_outlined,
+                                  size: 14, color: scheme.onSurfaceVariant),
+                            ),
+                            const SizedBox(width: 6),
+                            Expanded(
+                              child: Text(
+                                sms,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: scheme.onSurfaceVariant,
+                                  fontSize: 12,
+                                  height: 1.4,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -298,6 +346,7 @@ class SectionHeader extends StatelessWidget {
     return Padding(
       padding: padding,
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Expanded(
             child: Text(
@@ -308,12 +357,18 @@ class SectionHeader extends StatelessWidget {
               ),
             ),
           ),
-          if (trailing != null)
-            Text(
-              trailing!,
-              style: theme.textTheme.labelMedium
-                  ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+          if (trailing != null) ...[
+            const SizedBox(width: 8),
+            // جمع‌های بزرگ در صفحه‌ی باریک به خط بعد می‌روند، نه بیرون از صفحه.
+            Flexible(
+              child: Text(
+                trailing!,
+                textAlign: TextAlign.end,
+                style: theme.textTheme.labelMedium
+                    ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+              ),
             ),
+          ],
         ],
       ),
     );

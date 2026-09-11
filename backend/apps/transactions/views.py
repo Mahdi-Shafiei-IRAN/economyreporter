@@ -1,9 +1,10 @@
+import uuid
 from collections import defaultdict
 from datetime import datetime, time
 from datetime import timezone as dt_timezone
 
 from django.db import IntegrityError, transaction as db_transaction
-from django.db.models import Sum
+from django.db.models import Q, Sum
 from django.db.models.functions import Coalesce
 from django.utils import timezone as dj_timezone
 from django.utils.dateparse import parse_date, parse_datetime
@@ -118,6 +119,29 @@ class TransactionViewSet(viewsets.ModelViewSet):
         instance.save(update_fields=["is_deleted", "updated_at"])
 
 
+def _cursor_of(tx):
+    """«زمان|شناسه»، تا ردیف‌های با updated_at برابر (مثلاً یک عملیات گروهی در پنل)
+    در مرز صفحه جا نیفتند."""
+    return f"{_iso_z(tx.updated_at)}|{tx.id}"
+
+
+def _after_cursor(qs, cursor):
+    """ردیف‌های بعد از cursor به ترتیب (updated_at, id). cursor قدیمیِ فقط‌زمان هم پذیرفته می‌شود."""
+    if not cursor:
+        return qs
+    stamp, _, last_id = str(cursor).partition("|")
+    since = _parse_dt(stamp)
+    if since is None:
+        return qs
+    try:
+        last_id = uuid.UUID(last_id) if last_id else None
+    except ValueError:
+        last_id = None
+    if last_id is None:
+        return qs.filter(updated_at__gt=since)
+    return qs.filter(Q(updated_at__gt=since) | Q(updated_at=since, id__gt=last_id))
+
+
 class SyncView(APIView):
     """
     POST: آپلود دسته‌ای و idempotent تراکنش‌ها از دستگاه (ساخت یا به‌روزرسانی).
@@ -126,28 +150,25 @@ class SyncView(APIView):
 
     def get(self, request):
         family = resolve_family(request.user, request.query_params.get("family"))
-        since = _parse_dt(request.query_params.get("since"))
+        since = request.query_params.get("since") or None
         try:
             limit = int(request.query_params.get("limit", PULL_DEFAULT_LIMIT))
         except ValueError:
             limit = PULL_DEFAULT_LIMIT
         limit = max(1, min(limit, PULL_MAX_LIMIT))
 
-        qs = (
+        qs = _after_cursor(
             Transaction.objects.filter(family=family)
             .select_related("owner")
-            .order_by("updated_at", "id")
+            .order_by("updated_at", "id"),
+            since,
         )
-        if since:
-            qs = qs.filter(updated_at__gt=since)
         rows = list(qs[: limit + 1])
         has_more = len(rows) > limit
         rows = rows[:limit]
 
-        if rows:
-            cursor = _iso_z(rows[-1].updated_at)
-        else:
-            cursor = _iso_z(since) if since else None
+        # بدون تغییر تازه، همان cursor قبلی برمی‌گردد.
+        cursor = _cursor_of(rows[-1]) if rows else since
         return Response(
             {
                 "results": TransactionSerializer(rows, many=True).data,
@@ -296,11 +317,11 @@ class DashboardSummaryView(APIView):
         members = [
             {
                 "id": str(row["owner"]),
-                "name": row["person_name"] or row["owner__full_name"] or row["owner__email"],
+                "name": row["person_name"] or row["owner__full_name"] or row["owner__phone"],
                 "expenses": row["amount"] or 0,
             }
             for row in expenses.values(
-                "owner", "person_name", "owner__full_name", "owner__email"
+                "owner", "person_name", "owner__full_name", "owner__phone"
             )
             .annotate(amount=Sum("amount_rial"))
             .order_by("-amount")

@@ -1,5 +1,5 @@
-/// برگه‌ی جزئیات یک تراکنش: همه‌ی اطلاعات + متن پیامک؛ ویرایش/دسته‌بندی/نامعتبر
-/// فقط برای صاحب کارت، بقیه فقط می‌بینند.
+/// برگه‌ی جزئیات یک تراکنش: متن پیامک اصلی (تا پیامکِ اشتباهی ثبت‌شده معلوم باشد)
+/// و همه‌ی اطلاعات؛ ویرایش/دسته‌بندی/حذف فقط برای صاحب کارت، بقیه فقط می‌بینند.
 library;
 
 import 'package:flutter/material.dart';
@@ -19,6 +19,7 @@ const kDetailsCategorizeKey = Key('details-categorize');
 const kDetailsEditKey = Key('details-edit');
 const kDetailsDeleteKey = Key('details-delete');
 const kDetailsReadOnlyKey = Key('details-readonly');
+const kDetailsSmsKey = Key('details-sms');
 const kConfirmInvalidKey = Key('confirm-invalid');
 
 Future<void> showTransactionDetails(
@@ -44,19 +45,19 @@ Future<void> showTransactionDetails(
   );
 }
 
-/// تأیید «نامعتبر است» (حذف نرم) با توضیح اینکه برای چیست.
+/// تأیید حذف (حذف نرم = «نامعتبر») با توضیح اینکه برای چیست.
 Future<bool> confirmInvalidate(BuildContext context, {int count = 1}) async {
   final many = count > 1;
   final result = await showDialog<bool>(
     context: context,
     builder: (context) => AlertDialog(
-      icon: const Icon(Icons.block_rounded),
+      icon: const Icon(Icons.delete_outline_rounded),
       title: Text(many
-          ? '${toPersianDigits('$count')} تراکنش نامعتبر علامت بخورد؟'
-          : 'این تراکنش نامعتبر علامت بخورد؟'),
+          ? '${toPersianDigits('$count')} تراکنش حذف شود؟'
+          : 'این تراکنش حذف شود؟'),
       content: const Text(
-        'برای تراکنشی که واقعاً انجام نشده (ناموفق/لغوشده) یا پیامک رمزی که '
-        'اشتباهی مبلغ ثبت کرده.\n\n'
+        'برای پیامکی که اشتباهی تراکنش حساب شده (تبلیغ، فروشگاه، پیامک رمز) یا '
+        'تراکنشی که واقعاً انجام نشده (ناموفق/لغوشده).\n\n'
         'از فهرست و جمع‌ها حذف می‌شود، روی گوشی بقیه‌ی اعضا هم حذف می‌شود و '
         'با خواندن دوباره‌ی پیامک‌ها برنمی‌گردد.',
       ),
@@ -72,7 +73,7 @@ Future<bool> confirmInvalidate(BuildContext context, {int count = 1}) async {
             foregroundColor: Theme.of(context).colorScheme.onError,
           ),
           onPressed: () => Navigator.of(context).pop(true),
-          child: const Text('بله، نامعتبر است'),
+          child: const Text('بله، حذف شود'),
         ),
       ],
     ),
@@ -165,6 +166,7 @@ class _DetailsBody extends StatelessWidget {
               ),
             ],
             const SizedBox(height: 16),
+            _SmsCard(record: t),
             Card(
               child: Column(
                 children: [
@@ -219,28 +221,6 @@ class _DetailsBody extends StatelessWidget {
                 ],
               ),
             ),
-            if (t.smsBody != null && t.smsBody!.trim().isNotEmpty) ...[
-              const SizedBox(height: 12),
-              Card(
-                clipBehavior: Clip.antiAlias,
-                child: ExpansionTile(
-                  leading: const Icon(Icons.sms_outlined),
-                  title: const Text('متن پیامک اصلی'),
-                  subtitle: Text(
-                    'فقط روی همین گوشی نگه داشته می‌شود',
-                    style: theme.textTheme.bodySmall,
-                  ),
-                  shape: const Border(),
-                  childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                  children: [
-                    Align(
-                      alignment: AlignmentDirectional.centerStart,
-                      child: SelectableText(t.smsBody!.trim()),
-                    ),
-                  ],
-                ),
-              ),
-            ],
             const SizedBox(height: 20),
             if (canEdit)
               Wrap(
@@ -265,8 +245,8 @@ class _DetailsBody extends StatelessWidget {
                     key: kDetailsDeleteKey,
                     style: TextButton.styleFrom(foregroundColor: scheme.error),
                     onPressed: () => _invalidate(context, t),
-                    icon: const Icon(Icons.block_rounded),
-                    label: const Text('نامعتبر است'),
+                    icon: const Icon(Icons.delete_outline_rounded),
+                    label: const Text('حذف (اشتباه/نامعتبر)'),
                   ),
                 ],
               )
@@ -285,6 +265,85 @@ class _DetailsBody extends StatelessWidget {
           ],
         );
       },
+    );
+  }
+}
+
+/// متن کامل پیامک اصلی (فقط روی گوشی‌ای که پیامک را گرفته؛ هرگز به سرور نمی‌رود).
+class _SmsCard extends StatelessWidget {
+  final TransactionRecord record;
+
+  const _SmsCard({required this.record});
+
+  @override
+  Widget build(BuildContext context) {
+    final t = record;
+    final theme = Theme.of(context);
+    final muted = theme.textTheme.bodySmall
+        ?.copyWith(color: theme.colorScheme.onSurfaceVariant);
+    final body = t.smsBody?.trim();
+    if (body == null || body.isEmpty) {
+      if (!t.isRemote && t.source != 'sms') return const SizedBox.shrink();
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(4, 0, 4, 12),
+        child: Text(
+          t.isRemote
+              ? 'متن پیامک فقط روی گوشی‌ای است که پیامک به آن رسیده.'
+              : 'متن این پیامک ذخیره نشده است.',
+          style: muted,
+        ),
+      );
+    }
+    final sender = t.smsSender?.trim();
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Card(
+        key: kDetailsSmsKey,
+        margin: EdgeInsets.zero,
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  Icon(Icons.sms_outlined,
+                      size: 20, color: theme.colorScheme.onSurfaceVariant),
+                  const SizedBox(width: 8),
+                  Text('متن پیامک',
+                      style: theme.textTheme.titleSmall
+                          ?.copyWith(fontWeight: FontWeight.w700)),
+                  const SizedBox(width: 12),
+                  if (sender != null && sender.isNotEmpty)
+                    Expanded(
+                      child: Text(
+                        sender,
+                        textDirection: TextDirection.ltr,
+                        textAlign: TextAlign.end,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.labelMedium?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant),
+                      ),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              SelectableText(body,
+                  style: theme.textTheme.bodyMedium?.copyWith(height: 1.6)),
+              const SizedBox(height: 8),
+              Text(
+                [
+                  if (t.smsReceivedAt != null)
+                    'رسیده: ${formatJalaliDateTime(t.smsReceivedAt!)}',
+                  'فقط روی همین گوشی نگه داشته می‌شود',
+                ].join(' • '),
+                style: muted,
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

@@ -32,7 +32,7 @@ class CategoryModelTests(TestCase):
 
 class CategoryApiTests(ApiTestCase):
     def setUp(self):
-        self.user = self.create_user("owner@x.com")
+        self.user = self.create_user("09120000001")
         self.family = self.create_family_with(self.user)
         self.auth(self.user)
 
@@ -47,7 +47,7 @@ class CategoryApiTests(ApiTestCase):
 
     def test_list_scoped_to_family(self):
         Category.objects.create(family=self.family, name="خوراک")
-        outsider = self.create_user("out@x.com")
+        outsider = self.create_user("09120000002")
         self.create_family_with(outsider, name="دیگر")
         self.auth(outsider)
         resp = self.client.get(reverse("category-list"))

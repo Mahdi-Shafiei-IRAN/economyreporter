@@ -33,4 +33,4 @@ class FamilyGroupSerializer(serializers.ModelSerializer):
 
 
 class InviteSerializer(serializers.Serializer):
-    email = serializers.EmailField()
+    phone = serializers.CharField(max_length=20)

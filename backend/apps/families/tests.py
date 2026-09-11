@@ -13,14 +13,14 @@ PWD = "StrongPass123"
 class FamilyTests(APITestCase):
     def setUp(self):
         cache.clear()  # سطل throttle auth را بین تست‌ها ایزوله کن
-        self.owner = User.objects.create_user(email="owner@x.com", password=PWD)
-        self.member = User.objects.create_user(email="member@x.com", password=PWD)
-        self.outsider = User.objects.create_user(email="out@x.com", password=PWD)
+        self.owner = User.objects.create_user(phone="09120000001", password=PWD)
+        self.member = User.objects.create_user(phone="09120000003", password=PWD)
+        self.outsider = User.objects.create_user(phone="09120000002", password=PWD)
 
     def auth(self, user):
         login = self.client.post(
             reverse("auth-login"),
-            {"email": user.email, "password": PWD},
+            {"phone": user.phone, "password": PWD},
             format="json",
         )
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {login.data['access']}")
@@ -31,9 +31,9 @@ class FamilyTests(APITestCase):
             reverse("family-list-create"), {"name": name}, format="json"
         )
 
-    def invite(self, family_id, email):
+    def invite(self, family_id, phone):
         return self.client.post(
-            reverse("family-invite", args=[family_id]), {"email": email}, format="json"
+            reverse("family-invite", args=[family_id]), {"phone": phone}, format="json"
         )
 
     def test_create_family_makes_owner(self):
@@ -54,36 +54,36 @@ class FamilyTests(APITestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(len(resp.data), 0)
 
-    def test_owner_can_invite_existing_user(self):
+    def test_owner_can_invite_existing_user_by_any_phone_format(self):
         fid = self.create_family(self.owner).data["id"]
         self.auth(self.owner)
-        resp = self.invite(fid, "member@x.com")
+        resp = self.invite(fid, "+98 912 000 0003")
         self.assertEqual(resp.status_code, 201)
         self.assertEqual(resp.data["role"], "member")
-        self.assertEqual(resp.data["user"]["email"], "member@x.com")
+        self.assertEqual(resp.data["user"]["phone"], "09120000003")
 
-    def test_invite_nonexistent_email_fails(self):
+    def test_invite_unknown_phone_fails(self):
         fid = self.create_family(self.owner).data["id"]
         self.auth(self.owner)
-        resp = self.invite(fid, "ghost@x.com")
+        resp = self.invite(fid, "09129999999")
         self.assertEqual(resp.status_code, 400)
 
     def test_invite_beyond_max_fails(self):
         fid = self.create_family(self.owner).data["id"]
-        User.objects.create_user(email="u2@x.com", password=PWD)
-        User.objects.create_user(email="u3@x.com", password=PWD)
+        User.objects.create_user(phone="09120000004", password=PWD)
+        User.objects.create_user(phone="09120000005", password=PWD)
         self.auth(self.owner)
-        self.invite(fid, "member@x.com")  # 2
-        self.invite(fid, "u2@x.com")  # 3 (سقف)
-        resp = self.invite(fid, "u3@x.com")  # 4 → رد
+        self.invite(fid, "09120000003")  # 2
+        self.invite(fid, "09120000004")  # 3 (سقف)
+        resp = self.invite(fid, "09120000005")  # 4 → رد
         self.assertEqual(resp.status_code, 400)
 
     def test_non_owner_cannot_invite(self):
         fid = self.create_family(self.owner).data["id"]
         self.auth(self.owner)
-        self.invite(fid, "member@x.com")
+        self.invite(fid, "09120000003")
         self.auth(self.member)
-        resp = self.invite(fid, "out@x.com")
+        resp = self.invite(fid, "09120000002")
         self.assertEqual(resp.status_code, 403)
 
     def test_outsider_cannot_view_members(self):
@@ -95,7 +95,7 @@ class FamilyTests(APITestCase):
     def test_owner_can_remove_member(self):
         fid = self.create_family(self.owner).data["id"]
         self.auth(self.owner)
-        mid = self.invite(fid, "member@x.com").data["id"]
+        mid = self.invite(fid, "09120000003").data["id"]
         resp = self.client.delete(reverse("family-membership-detail", args=[fid, mid]))
         self.assertEqual(resp.status_code, 204)
         self.assertFalse(FamilyMembership.objects.filter(id=mid).exists())

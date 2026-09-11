@@ -62,11 +62,27 @@ void main() {
   testWidgets('همگام‌سازی دستی نتیجه را نشان می‌دهد', (tester) async {
     await pump(tester, onSync: () async => 'همگام‌سازی انجام شد: ۲ ارسال، ۰ دریافت');
 
+    await tester.ensureVisible(find.byKey(kSyncNowKey));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(kSyncNowKey));
     await tester.pumpAndSettle();
     expect(find.text('همگام‌سازی انجام شد: ۲ ارسال، ۰ دریافت'), findsOneWidget);
 
     await tester.pump(const Duration(seconds: 5));
     await tester.pumpAndSettle();
+  });
+
+  testWidgets('فرستنده‌های پیامک بانک و نمایش متن پیامک', (tester) async {
+    await pump(tester);
+    expect(find.textContaining('هیچ فرستنده‌ای مجاز نشده'), findsOneWidget);
+
+    await tester.tap(find.byKey(kShowSmsToggleKey));
+    await tester.pumpAndSettle();
+    expect(controller.showSmsText, isFalse);
+    expect(store.settings[SettingKeys.showSmsText], '0');
+
+    await tester.tap(find.byKey(kSettingsSendersKey));
+    await tester.pumpAndSettle();
+    expect(find.text('فقط پیامک بانک‌ها ثبت شود'), findsOneWidget);
   });
 }

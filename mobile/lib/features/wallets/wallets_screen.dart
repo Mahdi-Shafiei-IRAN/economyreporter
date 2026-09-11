@@ -197,8 +197,15 @@ class _WalletFormState extends State<_WalletForm> {
   late final _account = TextEditingController(text: widget.initial.accountRef ?? '');
   late String? _bankId = widget.initial.bankId;
 
-  /// عضوِ انتخاب‌شده؛ null یعنی «شخص دیگر (بدون حساب در اپ)».
-  late String? _memberId = widget.initial.ownerUserId;
+  /// عضوِ انتخاب‌شده؛ null یعنی «شخص دیگر (بدون حساب در اپ)». کارت تازه پیش‌فرض
+  /// مال خود کاربر است (هر کس کارت‌های خودش را تعریف می‌کند).
+  late String? _memberId =
+      widget.initial.ownerUserId ?? (widget.isNew ? _meAsMember : null);
+
+  String? get _meAsMember {
+    final me = widget.controller.meUserId;
+    return widget.controller.members.any((m) => m.id == me) ? me : null;
+  }
   String? _error;
 
   @override

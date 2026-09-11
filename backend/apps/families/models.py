@@ -1,14 +1,19 @@
 import uuid
 
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.db import models
 
 
 class FamilyGroup(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    name = models.CharField(max_length=150)
-    created_at = models.DateTimeField(auto_now_add=True)
+    name = models.CharField("نام خانواده", max_length=150)
+    created_at = models.DateTimeField("زمان ساخت", auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "خانواده"
+        verbose_name_plural = "خانواده‌ها"
 
     def __str__(self):
         return self.name
@@ -16,22 +21,30 @@ class FamilyGroup(models.Model):
 
 class FamilyMembership(models.Model):
     class Role(models.TextChoices):
-        OWNER = "owner", "Owner"
-        MEMBER = "member", "Member"
+        OWNER = "owner", "مدیر خانواده"
+        MEMBER = "member", "عضو"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     family = models.ForeignKey(
-        FamilyGroup, on_delete=models.CASCADE, related_name="memberships"
+        FamilyGroup,
+        on_delete=models.CASCADE,
+        related_name="memberships",
+        verbose_name="خانواده",
     )
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
         related_name="family_memberships",
+        verbose_name="کاربر",
     )
-    role = models.CharField(max_length=20, choices=Role.choices, default=Role.MEMBER)
-    joined_at = models.DateTimeField(auto_now_add=True)
+    role = models.CharField(
+        "نقش", max_length=20, choices=Role.choices, default=Role.MEMBER
+    )
+    joined_at = models.DateTimeField("زمان عضویت", auto_now_add=True)
 
     class Meta:
+        verbose_name = "عضو خانواده"
+        verbose_name_plural = "اعضای خانواده"
         constraints = [
             models.UniqueConstraint(
                 fields=["family", "user"], name="unique_family_member"
@@ -40,3 +53,13 @@ class FamilyMembership(models.Model):
 
     def __str__(self):
         return f"{self.user} @ {self.family} ({self.role})"
+
+    def clean(self):
+        # سقف اعضا (در پنل ادمین هم رعایت شود، نه فقط در API).
+        super().clean()
+        if not self.family_id:
+            return
+        limit = settings.FAMILY_MAX_MEMBERS
+        others = FamilyMembership.objects.filter(family_id=self.family_id).exclude(pk=self.pk)
+        if others.count() >= limit:
+            raise ValidationError(f"این خانواده پر است (حداکثر {limit} نفر).")

@@ -82,10 +82,18 @@ class SmsParser {
   static final _merchantRe = RegExp(
       r'(?:پذیرنده|فروشگاه)\s*:?\s*(.+?)(?:\s+مانده|\s+تاریخ|\s+\d{2,4}/|$)');
 
-  ParsedTransaction parse({required String sender, required String body}) {
-    // قدم ۱: تشخیص بانک — اول از فرستنده، اگر نشد از داخل متن (بعضی بانک‌ها
-    // نامشان را در متن پیامک می‌آورند).
-    final bank = detectBank(sender) ?? detectBank(body);
+  /// [bankId]: بانکی که کاربر برای این فرستنده تعیین کرده (فرستنده‌های مجاز).
+  ParsedTransaction parse({
+    required String sender,
+    required String body,
+    String? bankId,
+  }) {
+    // قدم ۱: تشخیص بانک از فرستنده — اول بانکی که کاربر برای این سرشماره تعیین
+    // کرده، بعد از نام فرستنده، و اگر نشد از داخل متن (بعضی بانک‌ها نامشان را در
+    // متن پیامک می‌آورند).
+    final bank = (bankId == null ? null : bankById(bankId)) ??
+        detectBank(sender) ??
+        detectBank(body);
 
     final normalized = normalizeForParsing(body);
     final compacted = compact(normalized);

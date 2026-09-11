@@ -163,4 +163,61 @@ void main() {
     await v5.close();
     await tmpDir.delete(recursive: true);
   });
+
+  test('ارتقای نسخه ۵ → ۶: جدول فرستنده‌های مجاز ساخته می‌شود و داده حفظ می‌شود',
+      () async {
+    final tmpDir = await Directory.systemTemp.createTemp('econ_mig6');
+    final path = '${tmpDir.path}/v5.db';
+    final v5 = await databaseFactory.openDatabase(
+      path,
+      options: OpenDatabaseOptions(
+        version: 5,
+        onCreate: (db, _) async {
+          await db.execute('CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT)');
+        },
+      ),
+    );
+    await v5.insert('settings', {'key': 'me_user_id', 'value': 'u1'});
+    await v5.close();
+
+    final v6 = await openAppDatabase(path: path);
+    final repo = TransactionRepository(v6);
+    expect(await repo.getSetting('me_user_id'), 'u1');
+    expect(await repo.allowedSenders(), isEmpty);
+    await repo.addAllowedSender('BankMellat', bankId: 'mellat');
+    expect((await repo.allowedSenders()).single.bankId, 'mellat');
+
+    await v6.close();
+    await tmpDir.delete(recursive: true);
+  });
+
+  test('از نسخه ۱ تا آخر: مهاجرت ۵ مهاجرت‌های بعدی را جا نمی‌اندازد', () async {
+    final tmpDir = await Directory.systemTemp.createTemp('econ_mig_all');
+    final path = '${tmpDir.path}/v1.db';
+    final v1 = await databaseFactory.openDatabase(
+      path,
+      options: OpenDatabaseOptions(
+        version: 1,
+        onCreate: (db, _) async {
+          // بدون needs_review — همان حالتی که مهاجرت ۵ زودتر برمی‌گشت
+          await db.execute('''
+            CREATE TABLE transactions (
+              id TEXT PRIMARY KEY, kind TEXT NOT NULL, amount_rial INTEGER,
+              created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+            )
+          ''');
+        },
+      ),
+    );
+    await v1.close();
+
+    final db = await openAppDatabase(path: path);
+    final tables = (await db.rawQuery("SELECT name FROM sqlite_master WHERE type='table'"))
+        .map((r) => r['name'] as String)
+        .toSet();
+    expect(tables, containsAll(['allowed_senders', 'settings', 'wallets', 'categories']));
+
+    await db.close();
+    await tmpDir.delete(recursive: true);
+  });
 }

@@ -1,7 +1,8 @@
 /// تست زنده‌ی همگام‌سازی با سرور واقعی Django (HTTP واقعی + JWT)، با دو «گوشی»:
 /// من و بابا. جزو تست‌های عادی نیست.
 ///
-/// اجرا (سرور آزمایشی با دیتابیس جدا و دو کاربر me@live.test / father@live.test):
+/// اجرا: یک سرور آزمایشی با دیتابیس جدا، و دو کاربر در یک خانواده با رمز Live@12345:
+/// 09120000001 («مهدی») و 09120000002 («بابا») — روش ساختنشان در docs/run-on-phone.md.
 ///   LIVE_API=http://127.0.0.1:8001/api/v1 flutter test test_live
 library;
 
@@ -30,10 +31,10 @@ class _Phone {
 
   _Phone(this.repo, this.sync, this.profile, this.importer);
 
-  static Future<_Phone> login(String base, String email, String deviceId) async {
+  static Future<_Phone> login(String base, String phone, String deviceId) async {
     final tokens = InMemoryTokenStore();
     final api = ApiClient(baseUrl: base, tokenStore: tokens);
-    await AuthRepository(api, tokens).login(email: email, password: 'Live@12345');
+    await AuthRepository(api, tokens).login(phone: phone, password: 'Live@12345');
     // هر «گوشی» دیتابیس جدای خودش را دارد.
     final db = await openAppDatabase(path: inMemoryDatabasePath, singleInstance: false);
     final repo = TransactionRepository(db);
@@ -51,12 +52,14 @@ void main() {
   setUpAll(initSqfliteFfiForTests);
 
   test('دو گوشی: ارسال بدون خطا، دریافت، صاحب کارت، ویرایش فقط توسط صاحب', () async {
-    final me = await _Phone.login(base!, 'me@live.test', 'phone-me');
-    final father = await _Phone.login(base, 'father@live.test', 'phone-father');
+    // شماره به هر شکلی (+98 / ارقام فارسی) وارد شود، سرور همان کاربر را می‌شناسد.
+    final me = await _Phone.login(base!, '+989120000001', 'phone-me');
+    final father = await _Phone.login(base, '۰۹۱۲۰۰۰۰۰۰۲', 'phone-father');
     expect(await me.profile.refresh(), isTrue);
     expect(await father.profile.refresh(), isTrue);
     final fatherId = await father.repo.getSetting(SettingKeys.meUserId);
     final meId = await me.repo.getSetting(SettingKeys.meUserId);
+    expect(await me.repo.getSetting(SettingKeys.meName), 'مهدی');
 
     // روی گوشی من: کارت 1234 مال باباست (عضو اپ).
     await me.repo.addWallet(Wallet(
@@ -66,6 +69,8 @@ void main() {
       label: 'کارت حقوق',
       cardLast4: '1234',
     ));
+    // فقط پیامک فرستنده‌های مجاز ثبت می‌شود.
+    await me.repo.addAllowedSender('BankMellat', bankId: 'mellat');
 
     // پیامک‌های بدون «طرف حساب» (همان حالتی که قبلاً ۱۰۷ خطای sync می‌داد).
     // مبلغ و زمان در هر اجرا یکتاست تا دیتابیسِ سرورِ آزمایشی تکراری نبیند.
@@ -81,8 +86,15 @@ void main() {
       body: 'خرید مبلغ $n,500 ریال از کارت 9999',
       receivedAt: now,
     ));
+    // پیامکِ مبلغ‌دارِ فروشگاه (فرستنده‌ی غیرمجاز) ثبت نمی‌شود.
+    final ad = await me.importer.importOne(RawSms(
+      sender: 'Digikala',
+      body: 'خرید مبلغ $n,900 ریال با کد تخفیف',
+      receivedAt: now,
+    ));
     expect(a, isNotNull);
     expect(b, isNotNull);
+    expect(ad, isNull);
 
     final push = await me.sync.sync(force: true);
     expect(push.error, isNull);
@@ -127,6 +139,7 @@ void main() {
   test('سرور در دسترس نیست → تراکنش در صف می‌ماند و پیام روشن است', () async {
     final db = await openAppDatabase(path: inMemoryDatabasePath, singleInstance: false);
     final repo = TransactionRepository(db);
+    await repo.addAllowedSender('BankMellat');
     final api = ApiClient(baseUrl: 'http://127.0.0.1:9/api/v1', tokenStore: InMemoryTokenStore());
     final sync = SyncService(db: db, api: DioRemoteTransactionApi(api.dio), deviceId: 'x');
     await SmsImporter(repo).importOne(const RawSms(

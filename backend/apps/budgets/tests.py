@@ -49,7 +49,7 @@ class BudgetModelTests(TestCase):
 
 class BudgetApiTests(ApiTestCase):
     def setUp(self):
-        self.user = self.create_user("owner@x.com")
+        self.user = self.create_user("09120000001")
         self.family = self.create_family_with(self.user)
         self.auth(self.user)
         self.category = Category.objects.create(family=self.family, name="خوراک")
@@ -64,7 +64,7 @@ class BudgetApiTests(ApiTestCase):
         self.assertEqual(str(resp.data["family"]), str(self.family.id))
 
     def test_cannot_use_other_family_category(self):
-        other_user = self.create_user("out@x.com")
+        other_user = self.create_user("09120000002")
         other_fam = self.create_family_with(other_user, name="دیگر")
         other_cat = Category.objects.create(family=other_fam, name="حمل‌ونقل")
         resp = self.client.post(

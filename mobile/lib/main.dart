@@ -134,6 +134,12 @@ class _BootstrapState extends State<_Bootstrap> {
       },
     );
 
+    // پیشنهاد فرستنده‌های بانک از صندوق گوشی؛ و بعد از مجاز کردن یک فرستنده،
+    // خواندن دوباره‌ی صندوق تا پیامک‌های قبلیِ همان فرستنده هم ثبت شوند.
+    dashboard
+      ..readInbox = smsInbox.readInbox
+      ..onSendersChanged = smsInbox.importInbox;
+
     return _Services(
       auth: auth,
       dashboard: dashboard,

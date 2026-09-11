@@ -12,6 +12,7 @@ const kIncomeValueKey = Key('summary-income');
 const kExpenseValueKey = Key('summary-expense');
 const kBalanceValueKey = Key('summary-balance');
 const kRangeLabelKey = Key('summary-range');
+const kSummaryTitleKey = Key('summary-title');
 
 class SummaryCard extends StatelessWidget {
   final FinanceSummary summary;
@@ -19,13 +20,22 @@ class SummaryCard extends StatelessWidget {
   final int count;
   final bool filtered;
 
+  /// شخصِ انتخاب‌شده (جمع فقط مال اوست)؛ null یعنی همه.
+  final String? scope;
+
   const SummaryCard({
     super.key,
     required this.summary,
     required this.period,
     required this.count,
     this.filtered = false,
+    this.scope,
   });
+
+  String get _title {
+    if (scope != null) return 'خالص $scope • ${period.title}';
+    return period.isAll ? 'خالص (درآمد − هزینه)' : 'خالص ${period.title}';
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -49,7 +59,8 @@ class SummaryCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            period.isAll ? 'خالص (درآمد − هزینه)' : 'خالص ${period.title}',
+            _title,
+            key: kSummaryTitleKey,
             style: theme.textTheme.labelLarge?.copyWith(color: muted),
           ),
           const SizedBox(height: 4),

@@ -6,6 +6,8 @@ from rest_framework.exceptions import NotFound, PermissionDenied, ValidationErro
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.users.phone import normalize_phone
+
 from .models import FamilyGroup, FamilyMembership
 from .permissions import is_member, is_owner
 from .serializers import (
@@ -65,16 +67,16 @@ class FamilyInviteView(APIView):
 
         serializer = InviteSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        email = serializer.validated_data["email"]
+        phone = normalize_phone(serializer.validated_data["phone"])
 
         if family.memberships.count() >= settings.FAMILY_MAX_MEMBERS:
             raise ValidationError(
                 f"سقف اعضای خانواده {settings.FAMILY_MAX_MEMBERS} نفر است"
             )
 
-        target = User.objects.filter(email__iexact=email).first()
+        target = User.objects.filter(phone=phone).first()
         if target is None:
-            raise ValidationError("کاربری با این ایمیل یافت نشد؛ اول باید ثبت‌نام کند")
+            raise ValidationError("کاربری با این شماره یافت نشد؛ اول مدیر باید او را در پنل بسازد")
         if is_member(target, family):
             raise ValidationError("این کاربر از قبل عضو خانواده است")
 
