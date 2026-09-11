@@ -8,7 +8,7 @@ from django.urls import reverse
 from apps.accounts.models import BankAccount, Card
 from apps.categories.models import Category
 from apps.common.testutils import ApiTestCase
-from apps.families.models import FamilyGroup
+from apps.families.models import FamilyGroup, FamilyMembership
 
 from .models import Transaction
 
@@ -187,3 +187,187 @@ class DashboardApiTests(ApiTestCase):
         # تفکیک عضو و دسته موجود است
         self.assertEqual(resp.data["members"][0]["expenses"], 3_000_000)
         self.assertTrue(any(c["amount"] == 3_000_000 for c in resp.data["categories"]))
+
+    def test_summary_excludes_deleted_and_uses_allocations(self):
+        tx = self._tx("expense", 1_000_000)
+        tx.allocations = [
+            {"name": "میوه", "amount_rial": 600_000},
+            {"name": "نان", "amount_rial": 400_000},
+        ]
+        tx.save()
+        deleted = self._tx("expense", 9_000_000)
+        deleted.is_deleted = True
+        deleted.save()
+
+        resp = self.client.get(reverse("dashboard-summary"))
+        self.assertEqual(resp.data["family"]["expenses"], 1_000_000)
+        by_name = {c["name"]: c["amount"] for c in resp.data["categories"]}
+        self.assertEqual(by_name, {"میوه": 600_000, "نان": 400_000})
+
+
+class SyncOwnershipTests(ApiTestCase):
+    """مالکیت کارت، ویرایش فقط توسط صاحب، و دریافت تغییرات (pull)."""
+
+    def setUp(self):
+        self.me = self.create_user("me@x.com", full_name="مهدی")
+        self.family = self.create_family_with(self.me)
+        self.father = self.create_user("father@x.com", full_name="بابا")
+        self.mother = self.create_user("mother@x.com", full_name="مامان")
+        for u in (self.father, self.mother):
+            FamilyMembership.objects.create(
+                family=self.family, user=u, role=FamilyMembership.Role.MEMBER
+            )
+        self.outsider = self.create_user("out@x.com")
+        self.url = reverse("sync-transactions")
+
+    def _push(self, user, *items):
+        self.auth(user)
+        resp = self.client.post(self.url, {"transactions": list(items)}, format="json")
+        self.assertEqual(resp.status_code, 200)
+        return resp.data["results"]
+
+    def _item(self, **extra):
+        data = {
+            "id": str(uuid.uuid4()),
+            "kind": "expense",
+            "amount_rial": 1000,
+            "client_updated_at": "2026-09-10T10:00:00Z",
+        }
+        data.update(extra)
+        return data
+
+    def test_null_text_fields_are_accepted(self):
+        # همان payloadی که گوشی می‌فرستاد و قبلاً «may not be null» می‌گرفت
+        item = self._item(counterparty=None, raw_amount=None, description=None)
+        results = self._push(self.me, item)
+        self.assertEqual(results[0]["status"], "created")
+        tx = Transaction.objects.get(id=item["id"])
+        self.assertEqual(tx.counterparty, "")
+        self.assertEqual(tx.raw_amount, "")
+
+    def test_owner_member_sets_owner_and_capturer(self):
+        item = self._item(
+            owner_member=str(self.father.id), person_name="بابا", wallet_label="کارت حقوق",
+            card_last4="1234",
+        )
+        self._push(self.me, item)
+        tx = Transaction.objects.get(id=item["id"])
+        self.assertEqual(tx.owner, self.father)
+        self.assertEqual(tx.captured_by, self.me)
+        self.assertEqual(tx.card_last4, "1234")
+
+    def test_owner_member_outside_family_falls_back_to_capturer(self):
+        item = self._item(owner_member=str(self.outsider.id))
+        self._push(self.me, item)
+        self.assertEqual(Transaction.objects.get(id=item["id"]).owner, self.me)
+
+    def test_newer_client_version_updates_and_same_version_is_idempotent(self):
+        item = self._item(description="")
+        self._push(self.me, item)
+
+        newer = dict(item, description="نان", client_updated_at="2026-09-10T11:00:00Z")
+        self.assertEqual(self._push(self.me, newer)[0]["status"], "updated")
+        self.assertEqual(Transaction.objects.get(id=item["id"]).description, "نان")
+
+        # همان نسخه دوباره → تغییری نمی‌کند
+        self.assertEqual(self._push(self.me, newer)[0]["status"], "already_exists")
+        # نسخه‌ی قدیمی‌تر → نادیده
+        older = dict(item, description="قدیمی", client_updated_at="2026-09-10T10:30:00Z")
+        self.assertEqual(self._push(self.me, older)[0]["status"], "already_exists")
+        self.assertEqual(Transaction.objects.get(id=item["id"]).description, "نان")
+
+    def test_capturer_changes_attribution_but_only_owner_changes_content(self):
+        item = self._item(owner_member=str(self.father.id), person_name="بابا")
+        self._push(self.me, item)
+
+        # گوشی دریافت‌کننده (من) محتوا را عوض می‌کند → نادیده؛ انتساب → اعمال
+        mine = dict(
+            item, description="دست من", wallet_label="کارت جدید",
+            client_updated_at="2026-09-10T11:00:00Z",
+        )
+        self.assertEqual(self._push(self.me, mine)[0]["status"], "updated")
+        tx = Transaction.objects.get(id=item["id"])
+        self.assertEqual(tx.description, "")
+        self.assertEqual(tx.wallet_label, "کارت جدید")
+
+        # صاحب کارت (بابا) دسته‌بندی و توضیح می‌دهد → اعمال
+        fathers = dict(
+            item, description="خرید میوه",
+            allocations=[{"name": "میوه", "amount_rial": 1000}],
+            client_updated_at="2026-09-10T12:00:00Z",
+        )
+        self.assertEqual(self._push(self.father, fathers)[0]["status"], "updated")
+        tx.refresh_from_db()
+        self.assertEqual(tx.description, "خرید میوه")
+        self.assertEqual(tx.allocations, [{"name": "میوه", "amount_rial": 1000}])
+
+    def test_other_member_cannot_edit(self):
+        item = self._item(owner_member=str(self.father.id))
+        self._push(self.me, item)
+        hers = dict(item, description="نه", client_updated_at="2026-09-10T11:00:00Z")
+        self.assertEqual(self._push(self.mother, hers)[0]["status"], "forbidden")
+        self.assertEqual(Transaction.objects.get(id=item["id"]).description, "")
+
+    def test_owner_can_soft_delete_and_it_is_pulled(self):
+        item = self._item(owner_member=str(self.father.id))
+        self._push(self.me, item)
+        gone = dict(item, is_deleted=True, client_updated_at="2026-09-10T11:00:00Z")
+        self.assertEqual(self._push(self.father, gone)[0]["status"], "updated")
+
+        self.auth(self.mother)
+        resp = self.client.get(self.url)
+        row = next(r for r in resp.data["results"] if r["id"] == item["id"])
+        self.assertTrue(row["is_deleted"])
+
+    def test_pull_returns_changes_since_cursor(self):
+        a, b = self._item(), self._item(owner_member=str(self.father.id), person_name="بابا")
+        self._push(self.me, a, b)
+
+        self.auth(self.mother)
+        first = self.client.get(self.url).data
+        self.assertEqual({r["id"] for r in first["results"]}, {a["id"], b["id"]})
+        names = {r["id"]: r["owner_name"] for r in first["results"]}
+        self.assertEqual(names[b["id"]], "بابا")
+        self.assertEqual(names[a["id"]], "مهدی")
+        self.assertFalse(first["has_more"])
+
+        # بدون تغییر → چیزی برنمی‌گردد
+        empty = self.client.get(self.url, {"since": first["cursor"]}).data
+        self.assertEqual(empty["results"], [])
+
+        # یک تغییر → فقط همان
+        self._push(self.me, dict(a, description="x", client_updated_at="2026-09-10T11:00:00Z"))
+        self.auth(self.mother)
+        delta = self.client.get(self.url, {"since": first["cursor"]}).data
+        self.assertEqual([r["id"] for r in delta["results"]], [a["id"]])
+
+    def test_pull_paginates_with_has_more(self):
+        self._push(self.me, *[self._item() for _ in range(3)])
+        page = self.client.get(self.url, {"limit": 2}).data
+        self.assertEqual(len(page["results"]), 2)
+        self.assertTrue(page["has_more"])
+        rest = self.client.get(self.url, {"since": page["cursor"], "limit": 2}).data
+        self.assertEqual(len(rest["results"]), 1)
+        self.assertFalse(rest["has_more"])
+
+    def test_pull_is_isolated_between_families(self):
+        self._push(self.me, self._item())
+        self.create_family_with(self.outsider)
+        self.auth(self.outsider)
+        self.assertEqual(self.client.get(self.url).data["results"], [])
+
+    def test_rest_update_and_delete_only_by_owner(self):
+        item = self._item(owner_member=str(self.father.id))
+        self._push(self.me, item)
+        detail = reverse("transaction-detail", args=[item["id"]])
+
+        self.auth(self.mother)
+        resp = self.client.patch(detail, {"description": "x"}, format="json")
+        self.assertEqual(resp.status_code, 403)
+
+        self.auth(self.father)
+        resp = self.client.patch(detail, {"description": "ok"}, format="json")
+        self.assertEqual(resp.status_code, 200)
+        resp = self.client.delete(detail)
+        self.assertEqual(resp.status_code, 204)
+        self.assertTrue(Transaction.objects.get(id=item["id"]).is_deleted)

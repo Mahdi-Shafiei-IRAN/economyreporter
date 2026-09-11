@@ -111,7 +111,7 @@ void main() {
   });
 
   group('parse — حالت‌های نیازمند بازبینی', () {
-    test('فرستنده‌ی ناشناخته → مبلغ استخراج می‌شود ولی needsReview', () {
+    test('فرستنده‌ی ناشناخته ولی مبلغ و نوع معلوم → نیازی به بازبینی نیست', () {
       final r = parser.parse(
         sender: 'Digikala',
         body: 'خرید مبلغ 100,000 ریال',
@@ -119,7 +119,46 @@ void main() {
       expect(r.bankId, isNull);
       expect(r.amountRial, 100000);
       expect(r.kind, TxKind.expense);
+      expect(r.needsReview, isFalse);
+      expect(r.reviewReasons, isEmpty);
+    });
+
+    test('تراکنش ناموفق → بازبینی با دلیل failed', () {
+      final r = parser.parse(
+        sender: 'BankMellat',
+        body: 'خرید ناموفق مبلغ 500,000 ریال از کارت 1234 - موجودی کافی نیست',
+      );
+      expect(r.amountRial, 500000);
       expect(r.needsReview, isTrue);
+      expect(r.reviewReasons, [ReviewReason.failed]);
+      expect(r.looksLikeTransaction, isTrue); // وارد می‌شود ولی در صف بازبینی
+    });
+
+    test('رمز با مبلغ («رمز: 123456 مبلغ ...») تراکنش حساب نمی‌شود', () {
+      final r = parser.parse(
+        sender: 'BankMellat',
+        body: 'رمز: 482913\nمبلغ: 1,200,000 ریال\nپذیرنده: فروشگاه نمونه',
+      );
+      expect(r.isOtp, isTrue);
+      expect(r.looksLikeTransaction, isFalse);
+    });
+
+    test('کد پیگیری در پیامک واقعی باعث تشخیص OTP نمی‌شود', () {
+      final r = parser.parse(
+        sender: 'BankMellat',
+        body: 'خرید مبلغ 90,000 ریال از کارت 1234 کد پیگیری 123456',
+      );
+      expect(r.isOtp, isFalse);
+      expect(r.looksLikeTransaction, isTrue);
+    });
+
+    test('یادآوری سررسید قسط تراکنش نیست', () {
+      final r = parser.parse(
+        sender: 'BankMellat',
+        body: 'یادآوری: سررسید قسط وام شما مبلغ 5,000,000 ریال فردا است',
+      );
+      expect(r.isReminder, isTrue);
+      expect(r.looksLikeTransaction, isFalse);
     });
 
     test('پیامک نامرتبط → مبلغ null و نوع unknown', () {

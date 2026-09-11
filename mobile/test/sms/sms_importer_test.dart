@@ -1,4 +1,6 @@
 import 'package:economy/core/sms/sms_importer.dart';
+import 'package:economy/features/transactions/data/transaction_repository.dart';
+import 'package:economy/features/wallets/data/wallet.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import '../helpers/fake_transaction_store.dart';
@@ -43,5 +45,40 @@ void main() {
     expect(await importer.importOne(sms), isNotNull);
     expect(await importer.importOne(sms), isNull); // تکراری
     expect(await store.getAll().then((l) => l.length), 1);
+  });
+
+  group('نوتیفیکیشن دسته‌بندی', () {
+    RawSms sms(DateTime at, {String card = '1234'}) => RawSms(
+          sender: 'BankMellat',
+          body: 'خرید مبلغ 80,000 ریال از کارت $card',
+          receivedAt: at,
+        );
+
+    test('تراکنش‌های قبل از «شروع دسته‌بندی» نوتیفیکیشن ندارند', () async {
+      store = FakeTransactionStore(categorizeFrom: DateTime.utc(2026, 9, 22, 20, 30));
+      importer = SmsImporter(store);
+
+      final before = await importer.importOne(sms(DateTime.utc(2026, 9, 10)));
+      final after = await importer.importOne(sms(DateTime.utc(2026, 9, 25)));
+      expect(before!.promptCategorize, isFalse);
+      expect(after!.promptCategorize, isTrue);
+    });
+
+    test('تراکنش کارتِ عضو دیگر روی گوشی من نوتیفیکیشن ندارد', () async {
+      store.settings[SettingKeys.meUserId] = 'u-me';
+      await store.addWallet(const Wallet(
+        id: '',
+        ownerName: 'بابا',
+        ownerUserId: 'u-father',
+        label: 'کارت حقوق',
+        cardLast4: '1234',
+      ));
+
+      final fathers = await importer.importOne(sms(DateTime.utc(2026, 9, 25)));
+      final mine = await importer.importOne(
+          sms(DateTime.utc(2026, 9, 25, 1), card: '9999'));
+      expect(fathers!.promptCategorize, isFalse);
+      expect(mine!.promptCategorize, isTrue);
+    });
   });
 }

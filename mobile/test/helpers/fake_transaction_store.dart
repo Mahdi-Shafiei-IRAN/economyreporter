@@ -1,4 +1,5 @@
 /// مخزن جعلی in-memory برای تست‌های ویجت (بدون I/O بومی، سازگار با FakeAsync).
+/// همان قاعده‌های TransactionRepository را (ساده‌شده) پیاده می‌کند.
 library;
 
 import 'package:economy/core/sms/models.dart';
@@ -11,6 +12,7 @@ import 'package:economy/features/wallets/data/wallet.dart';
 class FakeTransactionStore implements TransactionStore {
   final List<TransactionRecord> _items = [];
   int _seq = 0;
+  final DateTime Function() clock;
 
   final List<Category> _categories = const [
     Category(id: 'c1', name: 'سبزیجات', isSystem: true),
@@ -25,6 +27,17 @@ class FakeTransactionStore implements TransactionStore {
   final List<Wallet> _wallets = [];
   int _walletSeq = 0;
 
+  final Map<String, String> settings = {};
+
+  /// پیش‌فرض تست‌ها: شروع دسته‌بندی در گذشته (همه‌چیز قابل دسته‌بندی).
+  FakeTransactionStore({DateTime Function()? clock, DateTime? categorizeFrom})
+      : clock = clock ?? DateTime.now {
+    settings[SettingKeys.categorizeFrom] =
+        (categorizeFrom ?? DateTime.utc(2000)).toIso8601String();
+  }
+
+  String? get _me => settings[SettingKeys.meUserId];
+
   /// افزودن همگام برای آماده‌سازی داده‌ی تست (بدون await).
   void seed(ParsedTransaction parsed, {required String sender, DateTime? receivedAt}) {
     _put(parsed, sender: sender, receivedAt: receivedAt);
@@ -33,26 +46,95 @@ class FakeTransactionStore implements TransactionStore {
   /// افزودن مستقیم یک رکورد ساخته‌شده (برای تست‌هایی که به فیلدهای دقیق نیاز دارند).
   void addRecord(TransactionRecord record) => _items.add(record);
 
+  int get _nextSeq => _seq++;
+
+  ({String? ownerUserId, String? ownerName, String? walletLabel}) _attribution({
+    String? cardLast4,
+    String? accountRef,
+    String? bankId,
+  }) {
+    for (final w in _wallets) {
+      if (w.matches(cardLast4: cardLast4, accountRef: accountRef, bankId: bankId)) {
+        return (
+          ownerUserId: w.ownerUserId ?? _me,
+          ownerName: w.ownerName,
+          walletLabel: w.label,
+        );
+      }
+    }
+    return (ownerUserId: _me, ownerName: null, walletLabel: null);
+  }
+
   TxInsertOutcome _put(
     ParsedTransaction parsed, {
     required String sender,
     DateTime? receivedAt,
   }) {
-    final hash = parsed.rawBody.trim().isEmpty
-        ? null
-        : smsFingerprint(sender: sender, body: parsed.rawBody, receivedAt: receivedAt);
-    if (hash != null) {
-      for (final item in _items) {
-        if (item.sourceMessageHash == hash) {
-          return TxInsertOutcome(TxInsertStatus.duplicate, item.id);
-        }
+    final hasBody = parsed.rawBody.trim().isNotEmpty;
+    final hash = hasBody
+        ? smsFingerprint(sender: sender, body: parsed.rawBody, receivedAt: receivedAt)
+        : null;
+    final content = hasBody ? smsContentHash(sender: sender, body: parsed.rawBody) : null;
+    for (final item in _items) {
+      if (hash != null && item.sourceMessageHash == hash) {
+        return TxInsertOutcome(TxInsertStatus.duplicate, item.id);
+      }
+      if (content != null &&
+          receivedAt != null &&
+          item.smsContentHash == content &&
+          item.smsReceivedAt != null &&
+          item.smsReceivedAt!.difference(receivedAt.toUtc()).abs() <=
+              kContentDedupWindow) {
+        return TxInsertOutcome(TxInsertStatus.duplicate, item.id);
       }
     }
-    final now = DateTime.now().toUtc();
-    final id = 'fake-${_seq++}';
-    _items.add(TransactionRecord.fromParsed(parsed,
-        id: id, now: now, sourceMessageHash: hash));
+    final a = _attribution(
+      cardLast4: parsed.cardLast4,
+      accountRef: parsed.accountRef,
+      bankId: parsed.bankId,
+    );
+    final now = clock().toUtc();
+    final id = 'fake-$_nextSeq';
+    _items.add(TransactionRecord.fromParsed(
+      parsed,
+      id: id,
+      now: now,
+      sourceMessageHash: hash,
+      smsReceivedAt: receivedAt,
+      smsContentHash: content,
+      ownerUserId: a.ownerUserId,
+      ownerName: a.ownerName,
+      walletLabel: a.walletLabel,
+    ));
     return TxInsertOutcome(TxInsertStatus.created, id);
+  }
+
+  TransactionRecord _withAlloc(TransactionRecord t) {
+    final alloc = _allocations[t.id];
+    if (alloc == null) return t;
+    final names = {for (final c in _categories) c.id: c.name};
+    return t.copyWith(allocations: [
+      for (final e in alloc.entries) Allocation(names[e.key] ?? e.key, e.value),
+    ]);
+  }
+
+  bool _inRange(TransactionRecord t, DateTime? from, DateTime? to) {
+    final at = t.effectiveTime.toUtc();
+    if (from != null && at.isBefore(from.toUtc())) return false;
+    if (to != null && !at.isBefore(to.toUtc())) return false;
+    return true;
+  }
+
+  List<TransactionRecord> _sortedLive() {
+    final indexed = [
+      for (var i = 0; i < _items.length; i++)
+        if (!_items[i].isDeleted) (i, _items[i]),
+    ];
+    indexed.sort((a, b) {
+      final c = b.$2.effectiveTime.compareTo(a.$2.effectiveTime);
+      return c != 0 ? c : b.$1.compareTo(a.$1); // جدیدترِ ثبت‌شده اول
+    });
+    return [for (final e in indexed) _withAlloc(e.$2)];
   }
 
   @override
@@ -66,13 +148,48 @@ class FakeTransactionStore implements TransactionStore {
   }
 
   @override
+  Future<String> addManual({
+    required String kind,
+    required int amountRial,
+    required DateTime at,
+    String? description,
+    String? bankId,
+    String? cardLast4,
+    String? accountRef,
+  }) async {
+    final now = clock().toUtc();
+    final a = _attribution(cardLast4: cardLast4, accountRef: accountRef, bankId: bankId);
+    final id = 'manual-$_nextSeq';
+    _items.add(TransactionRecord(
+      id: id,
+      kind: kind,
+      amountRial: amountRial,
+      transactionDate: at.toUtc(),
+      clientCreatedAt: now,
+      createdAt: now,
+      updatedAt: now,
+      source: 'manual',
+      description: description,
+      bankId: bankId,
+      cardLast4: cardLast4,
+      accountRef: accountRef,
+      ownerUserId: a.ownerUserId,
+      ownerName: a.ownerName,
+      walletLabel: a.walletLabel,
+    ));
+    return id;
+  }
+
+  @override
   Future<List<TransactionRecord>> getAll({
     int? limit,
     String? kind,
     bool? needsReview,
     String? search,
+    DateTime? from,
+    DateTime? to,
   }) async {
-    var items = [..._items];
+    var items = _sortedLive().where((t) => _inRange(t, from, to)).toList();
     if (kind != null) items = items.where((t) => t.kind == kind).toList();
     if (needsReview != null) {
       items = items.where((t) => t.needsReview == needsReview).toList();
@@ -83,17 +200,22 @@ class FakeTransactionStore implements TransactionStore {
           .where((t) =>
               (t.counterparty?.contains(q) ?? false) ||
               (t.description?.contains(q) ?? false) ||
-              (t.bankId?.contains(q) ?? false))
+              (t.bankId?.contains(q) ?? false) ||
+              (t.ownerName?.contains(q) ?? false))
           .toList();
     }
-    items.sort((a, b) => (b.clientCreatedAt ?? b.createdAt)
-        .compareTo(a.clientCreatedAt ?? a.createdAt));
     return limit == null ? items : items.take(limit).toList();
   }
 
   @override
-  Future<int> needsReviewCount() async =>
-      _items.where((t) => t.needsReview).length;
+  Future<int> needsReviewCount() async => _items
+      .where((t) =>
+          t.needsReview &&
+          !t.isDeleted &&
+          (_me == null || t.ownerUserId == null || t.ownerUserId == _me))
+      .length;
+
+  int _indexOf(String id) => _items.indexWhere((t) => t.id == id);
 
   @override
   Future<void> updateTransaction(
@@ -104,7 +226,7 @@ class FakeTransactionStore implements TransactionStore {
     String? description,
     bool? needsReview,
   }) async {
-    final index = _items.indexWhere((t) => t.id == id);
+    final index = _indexOf(id);
     if (index == -1) return;
     _items[index] = _items[index].copyWith(
       kind: kind,
@@ -112,22 +234,22 @@ class FakeTransactionStore implements TransactionStore {
       counterparty: counterparty,
       description: description,
       needsReview: needsReview,
-      updatedAt: DateTime.now().toUtc(),
+      reviewReasons: needsReview == false ? const [] : null,
+      updatedAt: clock().toUtc(),
     );
   }
 
   @override
   Future<void> deleteTransaction(String id) async {
-    _items.removeWhere((t) => t.id == id);
-    _allocations.remove(id);
+    final index = _indexOf(id);
+    if (index == -1) return;
+    _items[index] = _items[index].copyWith(deletedAt: clock().toUtc());
   }
 
   @override
   Future<TransactionRecord?> getById(String id) async {
-    for (final t in _items) {
-      if (t.id == id) return t;
-    }
-    return null;
+    final index = _indexOf(id);
+    return index == -1 ? null : _withAlloc(_items[index]);
   }
 
   @override
@@ -138,17 +260,47 @@ class FakeTransactionStore implements TransactionStore {
     _wallets.add(Wallet(
       id: 'w${_walletSeq++}',
       ownerName: wallet.ownerName,
+      ownerUserId: wallet.ownerUserId,
       label: wallet.label,
       bankId: wallet.bankId,
       cardLast4: wallet.cardLast4,
       accountRef: wallet.accountRef,
     ));
+    await reattributeLocal();
+  }
+
+  @override
+  Future<void> updateWallet(Wallet wallet) async {
+    final i = _wallets.indexWhere((w) => w.id == wallet.id);
+    if (i != -1) _wallets[i] = wallet;
+    await reattributeLocal();
   }
 
   @override
   Future<void> deleteWallet(String id) async {
     _wallets.removeWhere((w) => w.id == id);
+    await reattributeLocal();
   }
+
+  @override
+  Future<void> reattributeLocal() async {
+    for (var i = 0; i < _items.length; i++) {
+      final t = _items[i];
+      if (t.isRemote || t.isDeleted) continue;
+      final a = _attribution(
+          cardLast4: t.cardLast4, accountRef: t.accountRef, bankId: t.bankId);
+      _items[i] = t.copyWith(
+        ownerUserId: a.ownerUserId,
+        ownerName: a.ownerName,
+        clearOwnerName: a.ownerName == null,
+        walletLabel: a.walletLabel,
+        clearWalletLabel: a.walletLabel == null,
+      );
+    }
+  }
+
+  @override
+  Future<int> pendingSyncCount() async => 0;
 
   @override
   Future<List<Category>> categories() async => List.of(_categories);
@@ -159,7 +311,7 @@ class FakeTransactionStore implements TransactionStore {
     List<String> categoryIds, {
     String? description,
   }) async {
-    final index = _items.indexWhere((t) => t.id == transactionId);
+    final index = _indexOf(transactionId);
     final amount = index == -1 ? 0 : (_items[index].amountRial ?? 0);
     final n = categoryIds.length;
     _allocations.remove(transactionId);
@@ -175,8 +327,9 @@ class FakeTransactionStore implements TransactionStore {
     if (index != -1) {
       _items[index] = _items[index].copyWith(
         needsReview: false,
+        reviewReasons: const [],
         description: description,
-        updatedAt: DateTime.now().toUtc(),
+        updatedAt: clock().toUtc(),
       );
     }
   }
@@ -185,7 +338,7 @@ class FakeTransactionStore implements TransactionStore {
   Future<List<CategoryTotal>> categoryTotals({DateTime? from, DateTime? to}) async {
     final totals = <String, int>{};
     for (final t in _items) {
-      if (t.kind != 'expense') continue;
+      if (t.kind != 'expense' || t.isDeleted || !_inRange(t, from, to)) continue;
       final alloc = _allocations[t.id];
       if (alloc == null) continue;
       alloc.forEach((cid, amt) => totals[cid] = (totals[cid] ?? 0) + amt);
@@ -203,29 +356,38 @@ class FakeTransactionStore implements TransactionStore {
   }
 
   @override
+  Future<DateTime> categorizeFrom() async =>
+      DateTime.parse(settings[SettingKeys.categorizeFrom]!);
+
+  @override
   Future<List<TransactionRecord>> uncategorized({int? limit}) async {
-    final list = _items
+    final from = await categorizeFrom();
+    final list = _sortedLive()
         .where((t) =>
             t.amountRial != null &&
             (t.kind == 'income' || t.kind == 'expense') &&
-            !_allocations.containsKey(t.id))
+            !t.needsReview &&
+            (_me == null || t.ownerUserId == null || t.ownerUserId == _me) &&
+            !t.effectiveTime.isBefore(from) &&
+            !_allocations.containsKey(t.id) &&
+            t.allocations.isEmpty)
         .toList();
     return limit == null ? list : list.take(limit).toList();
   }
 
   @override
-  Future<FinanceSummary> summary({DateTime? from, DateTime? to}) async {
-    var income = 0;
-    var expense = 0;
-    for (final t in _items) {
-      final amount = t.amountRial;
-      if (amount == null) continue;
-      if (t.kind == 'income') {
-        income += amount;
-      } else if (t.kind == 'expense') {
-        expense += amount;
-      }
+  Future<FinanceSummary> summary({DateTime? from, DateTime? to}) async =>
+      FinanceSummary.of(_sortedLive().where((t) => _inRange(t, from, to)));
+
+  @override
+  Future<String?> getSetting(String key) async => settings[key];
+
+  @override
+  Future<void> setSetting(String key, String? value) async {
+    if (value == null) {
+      settings.remove(key);
+    } else {
+      settings[key] = value;
     }
-    return FinanceSummary(incomeRial: income, expenseRial: expense);
   }
 }

@@ -13,6 +13,9 @@ class FakeRemoteTransactionApi implements RemoteTransactionApi {
   final List<List<Map<String, dynamic>>> sentBatches = [];
   bool throwNetwork;
   String status;
+  final Map<String, Map<String, dynamic>> resultOverrides = {};
+  final List<PullPage> pages = [];
+  final List<String?> pullSinces = [];
 
   FakeRemoteTransactionApi({this.throwNetwork = false, this.status = 'created'});
 
@@ -24,8 +27,16 @@ class FakeRemoteTransactionApi implements RemoteTransactionApi {
     sentBatches.add(transactions);
     if (throwNetwork) throw Exception('network down');
     return [
-      for (final t in transactions) {'id': t['id'], 'status': status},
+      for (final t in transactions)
+        resultOverrides[t['id']] ?? {'id': t['id'], 'status': status},
     ];
+  }
+
+  @override
+  Future<PullPage> pull({String? since, int limit = 500}) async {
+    pullSinces.add(since);
+    if (throwNetwork) throw Exception('network down');
+    return pages.isEmpty ? PullPage.empty : pages.removeAt(0);
   }
 }
 
@@ -44,6 +55,9 @@ void main() {
   });
 
   tearDown(() async => db.close());
+
+  SyncService serviceWith(RemoteTransactionApi api) =>
+      SyncService(db: db, api: api, deviceId: 'd', clock: () => fixedClock);
 
   Future<int> outboxCount() async =>
       Sqflite.firstIntValue(await db.rawQuery('SELECT COUNT(*) FROM outbox')) ?? 0;
@@ -84,10 +98,7 @@ void main() {
 
   test('created → همه synced و outbox خالی می‌شود', () async {
     await seedTwo();
-    final api = FakeRemoteTransactionApi(status: 'created');
-    final service = SyncService(db: db, api: api, deviceId: 'd', clock: () => fixedClock);
-
-    final summary = await service.sync();
+    final summary = await serviceWith(FakeRemoteTransactionApi()).sync();
 
     expect(summary.synced, 2);
     expect(summary.failed, 0);
@@ -98,17 +109,15 @@ void main() {
   test('already_exists هم synced محسوب می‌شود', () async {
     await seedTwo();
     final api = FakeRemoteTransactionApi(status: 'already_exists');
-    final service = SyncService(db: db, api: api, deviceId: 'd', clock: () => fixedClock);
-
-    final summary = await service.sync();
+    final summary = await serviceWith(api).sync();
     expect(summary.synced, 2);
     expect(await outboxCount(), 0);
   });
 
   test('sync دوباره چیزی نمی‌فرستد (idempotent — «۲ نه ۴»)', () async {
     await seedTwo();
-    final api = FakeRemoteTransactionApi(status: 'created');
-    final service = SyncService(db: db, api: api, deviceId: 'd', clock: () => fixedClock);
+    final api = FakeRemoteTransactionApi();
+    final service = serviceWith(api);
 
     await service.sync();
     await service.sync(); // بار دوم نباید چیزی بفرستد
@@ -120,7 +129,7 @@ void main() {
   test('خطای شبکه → آیتم‌ها گم نمی‌شوند و با backoff زمان‌بندی می‌شوند', () async {
     await seedTwo();
     final api = FakeRemoteTransactionApi(throwNetwork: true);
-    final service = SyncService(db: db, api: api, deviceId: 'd', clock: () => fixedClock);
+    final service = serviceWith(api);
 
     final summary = await service.sync();
 
@@ -137,10 +146,7 @@ void main() {
 
   test('error سرور → آیتم برای retry می‌ماند و تراکنش failed می‌شود', () async {
     await seedTwo();
-    final api = FakeRemoteTransactionApi(status: 'error');
-    final service = SyncService(db: db, api: api, deviceId: 'd', clock: () => fixedClock);
-
-    final summary = await service.sync();
+    final summary = await serviceWith(FakeRemoteTransactionApi(status: 'error')).sync();
     expect(summary.failed, 2);
     expect(await outboxCount(), 2);
     expect(
@@ -149,5 +155,121 @@ void main() {
       )),
       2,
     );
+  });
+
+  test('payload از آخرین نسخه ساخته می‌شود و فیلد متنی null ندارد', () async {
+    await seedTwo();
+    final api = FakeRemoteTransactionApi();
+    await serviceWith(api).sync();
+    final sent = api.sentBatches.single;
+    expect(sent, hasLength(2));
+    for (final p in sent) {
+      expect(p['counterparty'], isA<String>());
+      expect(p['raw_amount'], isA<String>());
+      expect(p['client_updated_at'], isNotNull);
+    }
+  });
+
+  test('ویرایش بعد از sync دوباره ارسال می‌شود', () async {
+    await seedTwo();
+    final api = FakeRemoteTransactionApi();
+    final service = serviceWith(api);
+    await service.sync();
+
+    final id = (await repo.getAll()).first.id;
+    await repo.updateTransaction(id, description: 'نان');
+    expect(await outboxCount(), 1);
+
+    await service.sync();
+    expect(api.sentBatches, hasLength(2));
+    expect(api.sentBatches.last.single['description'], 'نان');
+  });
+
+  test('دریافت: تراکنش عضو دیگر اعمال و cursor نگه داشته می‌شود', () async {
+    await repo.setSetting(SettingKeys.meUserId, 'u-me');
+    final api = FakeRemoteTransactionApi()
+      ..pages.add(PullPage(
+        results: [
+          {
+            'id': 'r1',
+            'kind': 'expense',
+            'amount_rial': 5000,
+            'owner': 'u-father',
+            'owner_name': 'بابا',
+            'captured_by': 'u-father',
+            'is_deleted': false,
+            'allocations': const [],
+          },
+        ],
+        cursor: 'c1',
+      ));
+    final service = serviceWith(api);
+
+    final s = await service.sync();
+    expect(s.pulled, 1);
+    expect((await repo.getById('r1'))!.ownerName, 'بابا');
+
+    await service.sync();
+    expect(api.pullSinces, [null, 'c1']);
+  });
+
+  test('تکراری با شناسه‌ی دیگر روی سرور → ردیف محلی یکی می‌شود', () async {
+    await seedTwo();
+    final ids = (await repo.getAll()).map((t) => t.id).toList();
+    final api = FakeRemoteTransactionApi()
+      ..resultOverrides[ids.first] = {'id': 'server-x', 'status': 'already_exists'};
+
+    await serviceWith(api).sync();
+
+    expect(await repo.getById('server-x'), isNotNull);
+    expect(await repo.getById(ids.first), isNull);
+    expect(await outboxCount(), 0);
+  });
+
+  test('همگام‌سازی دستی (force) منتظر backoff نمی‌ماند', () async {
+    await seedTwo();
+    final api = FakeRemoteTransactionApi(throwNetwork: true);
+    final service = serviceWith(api);
+    await service.sync();
+
+    api.throwNetwork = false;
+    await service.sync(); // هنوز در backoff
+    expect(api.sentBatches, hasLength(1));
+
+    final s = await service.sync(force: true);
+    expect(s.synced, 2);
+    expect(api.sentBatches, hasLength(2));
+  });
+
+  test('forbidden → از صف خارج و دریافت از اول انجام می‌شود', () async {
+    await seedTwo();
+    await repo.setSetting(SettingKeys.pullCursor, 'old-cursor');
+    final api = FakeRemoteTransactionApi(status: 'forbidden');
+
+    final s = await serviceWith(api).sync();
+
+    expect(s.rejected, 2);
+    expect(await outboxCount(), 0);
+    expect(api.pullSinces, [null]);
+  });
+
+  test('وضعیت آخرین همگام‌سازی برای نمایش ذخیره می‌شود', () async {
+    await seedTwo();
+    final s = await serviceWith(FakeRemoteTransactionApi(throwNetwork: true)).sync();
+    expect(s.offline, isTrue);
+    expect(s.message, contains('سرور در دسترس نبود'));
+
+    final info = await SyncStatusInfo.load(repo);
+    expect(info.last!.offline, isTrue);
+    expect(info.pendingCount, 2);
+    expect(info.lastAt, fixedClock);
+  });
+
+  test('دو همگام‌سازی هم‌زمان فقط یک بار ارسال می‌کنند', () async {
+    await seedTwo();
+    final api = FakeRemoteTransactionApi();
+    final service = serviceWith(api);
+    await Future.wait([service.sync(), service.sync()]);
+    expect(api.sentBatches, hasLength(1));
   });
 }

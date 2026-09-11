@@ -16,6 +16,9 @@ void main() {
   setUp(() async {
     db = await openAppDatabase(path: inMemoryDatabasePath);
     repo = TransactionRepository(db);
+    // این تست‌ها صف دسته‌بندی را بدون محدودیت تاریخ می‌خواهند.
+    await repo.setSetting(
+        SettingKeys.categorizeFrom, DateTime.utc(2000).toIso8601String());
   });
   tearDown(() async => db.close());
 
@@ -52,8 +55,8 @@ void main() {
   });
 
   test('دسته‌بندی، پرچم بازبینی را پاک می‌کند', () async {
-    // فرستنده‌ی ناشناخته → needsReview=true
-    final id = await saveExpense('خرید مبلغ 30,000 ریال', sender: 'Digikala');
+    // احتمال تراکنش ناموفق → needsReview=true
+    final id = await saveExpense('خرید ناموفق مبلغ 30,000 ریال', sender: 'Digikala');
     final before = (await repo.getAll()).firstWhere((t) => t.id == id);
     expect(before.needsReview, isTrue);
 

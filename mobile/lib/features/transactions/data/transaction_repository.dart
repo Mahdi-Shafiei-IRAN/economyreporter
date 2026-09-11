@@ -3,9 +3,12 @@ library;
 
 import 'dart:convert';
 
+import 'package:crypto/crypto.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:uuid/uuid.dart';
 
+import '../../../core/sms/digit_utils.dart';
+import '../../../core/sms/jalali.dart';
 import '../../../core/sms/models.dart';
 import '../../../core/sms/sms_fingerprint.dart';
 import '../../categories/data/category.dart';
@@ -23,13 +26,69 @@ class TxInsertOutcome {
   bool get isDuplicate => status == TxInsertStatus.duplicate;
 }
 
-/// جمع مالی یک بازه. transferها و رکوردهای بدون مبلغ در جمع نمی‌آیند.
+/// جمع مالی یک بازه. transfer، نامشخص، بدون مبلغ و «منتظر بازبینی» شمرده نمی‌شوند.
 class FinanceSummary {
   final int incomeRial;
   final int expenseRial;
   const FinanceSummary({required this.incomeRial, required this.expenseRial});
 
   int get balanceRial => incomeRial - expenseRial;
+
+  /// جمعِ یک فهرستِ آماده (همان قاعده‌ی کوئری‌های مخزن).
+  factory FinanceSummary.of(Iterable<TransactionRecord> items) {
+    var income = 0;
+    var expense = 0;
+    for (final t in items) {
+      if (!countsInTotals(t)) continue;
+      if (t.kind == 'income') income += t.amountRial!;
+      if (t.kind == 'expense') expense += t.amountRial!;
+    }
+    return FinanceSummary(incomeRial: income, expenseRial: expense);
+  }
+}
+
+/// آیا تراکنش در جمع درآمد/هزینه می‌آید؟
+bool countsInTotals(TransactionRecord t) =>
+    !t.isDeleted &&
+    !t.needsReview &&
+    t.amountRial != null &&
+    (t.kind == 'income' || t.kind == 'expense');
+
+/// کلیدهای جدول تنظیمات.
+class SettingKeys {
+  SettingKeys._();
+  static const meUserId = 'me_user_id';
+  static const meName = 'me_name';
+
+  /// JSON: [{"id": "...", "name": "..."}]
+  static const familyMembers = 'family_members';
+  static const categorizeFrom = 'categorize_from';
+  static const pullCursor = 'pull_cursor';
+
+  /// JSON وضعیت آخرین همگام‌سازی.
+  static const lastSync = 'last_sync';
+
+  /// JSON: کلید گپ‌های تطبیق مانده که کاربر نادیده گرفته.
+  static const dismissedGaps = 'dismissed_gaps';
+}
+
+/// پنجره‌ی ضدتکرارِ محتوایی: دریافت زنده و خواندن صندوقِ همان پیامک
+/// ممکن است چند ثانیه/دقیقه زمان متفاوت داشته باشند.
+const Duration kContentDedupWindow = Duration(minutes: 10);
+
+/// اولین لحظه‌ی ماه شمسیِ بعد از [now] (به وقت ایران)؛ پیش‌فرض شروع دسته‌بندی.
+DateTime startOfNextJalaliMonth(DateTime now) {
+  final d = JalaliDate.fromDateTime(now);
+  final next = d.month == 12
+      ? JalaliDate(d.year + 1, 1, 1)
+      : JalaliDate(d.year, d.month + 1, 1);
+  return next.toUtcStart();
+}
+
+/// اثرانگشت محتوای پیامک بدون زمان.
+String smsContentHash({required String sender, required String body}) {
+  final input = '${sender.trim()}|${normalizeForParsing(body)}';
+  return sha256.convert(utf8.encode(input)).toString();
 }
 
 /// انتزاع مخزن تراکنش برای تزریق: اپ از SQLite استفاده می‌کند،
@@ -41,12 +100,26 @@ abstract class TransactionStore {
     String? deviceId,
     DateTime? receivedAt,
   });
+
+  /// ثبت دستی (مثلاً تراکنشِ جاافتاده‌ای که پیامکش نرسیده).
+  Future<String> addManual({
+    required String kind,
+    required int amountRial,
+    required DateTime at,
+    String? description,
+    String? bankId,
+    String? cardLast4,
+    String? accountRef,
+  });
   Future<List<TransactionRecord>> getAll({
     int? limit,
     String? kind,
     bool? needsReview,
     String? search,
+    DateTime? from,
+    DateTime? to,
   });
+  Future<TransactionRecord?> getById(String id);
   Future<FinanceSummary> summary({DateTime? from, DateTime? to});
   Future<int> needsReviewCount();
   Future<void> updateTransaction(
@@ -57,6 +130,8 @@ abstract class TransactionStore {
     String? description,
     bool? needsReview,
   });
+
+  /// حذف نرم: تراکنش نامعتبر (ناموفق/پیامک رمز) پنهان می‌شود ولی پیامکش دوباره وارد نمی‌شود.
   Future<void> deleteTransaction(String id);
 
   // --- دسته‌بندی ---
@@ -67,23 +142,76 @@ abstract class TransactionStore {
     String? description,
   });
   Future<List<CategoryTotal>> categoryTotals({DateTime? from, DateTime? to});
+
+  /// تراکنش‌های خودم که از «شروع دسته‌بندی» به بعد‌اند و هنوز دسته ندارند.
   Future<List<TransactionRecord>> uncategorized({int? limit});
-  Future<TransactionRecord?> getById(String id);
+  Future<DateTime> categorizeFrom();
 
   // --- کیف‌ها (کارت/حساب اعضا) ---
   Future<List<Wallet>> wallets();
   Future<void> addWallet(Wallet wallet);
+  Future<void> updateWallet(Wallet wallet);
   Future<void> deleteWallet(String id);
+
+  /// انتساب دوباره‌ی تراکنش‌های همین گوشی به کیف‌ها/کاربر جاری.
+  Future<void> reattributeLocal();
+
+  /// تعداد تراکنش‌های منتظر ارسال به سرور.
+  Future<int> pendingSyncCount();
+
+  // --- تنظیمات ---
+  Future<String?> getSetting(String key);
+  Future<void> setSetting(String key, String? value);
+}
+
+class _Attribution {
+  final String? ownerUserId;
+  final String? ownerName;
+  final String? walletLabel;
+  const _Attribution(this.ownerUserId, this.ownerName, this.walletLabel);
+}
+
+_Attribution _attributionFrom(
+  List<Wallet> wallets,
+  String? meUserId, {
+  String? cardLast4,
+  String? accountRef,
+  String? bankId,
+}) {
+  for (final w in wallets) {
+    if (w.matches(cardLast4: cardLast4, accountRef: accountRef, bankId: bankId)) {
+      // کیفِ بدون حساب کاربری (مثلاً مامانی که اپ ندارد) → صاحبِ ویرایش، همین گوشی است.
+      return _Attribution(w.ownerUserId ?? meUserId, w.ownerName, w.label);
+    }
+  }
+  return _Attribution(meUserId, null, null);
 }
 
 class TransactionRepository implements TransactionStore {
   final Database _db;
   final Uuid _uuid;
+  final DateTime Function() _clock;
 
-  TransactionRepository(this._db, {Uuid uuid = const Uuid()}) : _uuid = uuid;
+  TransactionRepository(
+    this._db, {
+    Uuid uuid = const Uuid(),
+    DateTime Function()? clock,
+  })  : _uuid = uuid,
+        _clock = clock ?? DateTime.now;
 
-  /// ذخیره‌ی خروجی پارسر. اگر پیامک قبلاً ذخیره شده باشد (اثرانگشت یکسان)،
-  /// رکورد جدید ساخته نمی‌شود و وضعیت `duplicate` برمی‌گردد.
+  static const _dateExpr =
+      'COALESCE(t.transaction_date, t.sms_received_at, t.client_created_at, t.created_at)';
+
+  static const _allocExpr = '''
+    (SELECT GROUP_CONCAT(c.name || char(31) || tc.amount_rial, char(30))
+       FROM transaction_categories tc JOIN categories c ON c.id = tc.category_id
+      WHERE tc.transaction_id = t.id) AS alloc''';
+
+  String _nowIso() => _clock().toUtc().toIso8601String();
+
+  /// ذخیره‌ی خروجی پارسر. اگر همین پیامک قبلاً ذخیره شده باشد (اثرانگشت یکسان،
+  /// یا همان محتوا با فاصله‌ی زمانی کم) رکورد جدید ساخته نمی‌شود — حتی اگر قبلاً
+  /// «حذف» شده باشد، تا تراکنش نامعتبر با خواندن دوباره‌ی صندوق برنگردد.
   @override
   Future<TxInsertOutcome> saveParsed(
     ParsedTransaction parsed, {
@@ -91,24 +219,51 @@ class TransactionRepository implements TransactionStore {
     String? deviceId,
     DateTime? receivedAt,
   }) async {
-    final now = DateTime.now().toUtc();
-    final hash = parsed.rawBody.trim().isEmpty
-        ? null
-        : smsFingerprint(sender: sender, body: parsed.rawBody, receivedAt: receivedAt);
+    final now = _clock().toUtc();
+    final body = parsed.rawBody;
+    final hasBody = body.trim().isNotEmpty;
+    final hash = hasBody
+        ? smsFingerprint(sender: sender, body: body, receivedAt: receivedAt)
+        : null;
+    final contentHash = hasBody ? smsContentHash(sender: sender, body: body) : null;
 
     if (hash != null) {
       final existing = await _db.query(
         'transactions',
-        columns: ['id'],
+        columns: ['id', 'sms_body'],
         where: 'source_message_hash = ?',
         whereArgs: [hash],
         limit: 1,
       );
       if (existing.isNotEmpty) {
-        return TxInsertOutcome(TxInsertStatus.duplicate, existing.first['id'] as String);
+        final id = existing.first['id'] as String;
+        if (existing.first['sms_body'] == null) {
+          // ردیفِ نسخه‌ی قبل: متن و زمان پیامک را تکمیل کن (ترتیب زمانی درست می‌شود).
+          await _db.update(
+            'transactions',
+            {
+              'sms_sender': sender,
+              'sms_body': body,
+              'sms_received_at': receivedAt?.toUtc().toIso8601String(),
+              'sms_content_hash': contentHash,
+            },
+            where: 'id = ?',
+            whereArgs: [id],
+          );
+        }
+        return TxInsertOutcome(TxInsertStatus.duplicate, id);
       }
     }
+    if (contentHash != null && receivedAt != null) {
+      final dup = await _findContentDuplicate(contentHash, receivedAt);
+      if (dup != null) return TxInsertOutcome(TxInsertStatus.duplicate, dup);
+    }
 
+    final a = await _attributionFor(
+      cardLast4: parsed.cardLast4,
+      accountRef: parsed.accountRef,
+      bankId: parsed.bankId,
+    );
     final id = _uuid.v4();
     final record = TransactionRecord.fromParsed(
       parsed,
@@ -116,31 +271,117 @@ class TransactionRepository implements TransactionStore {
       now: now,
       sourceMessageHash: hash,
       deviceId: deviceId,
+      smsReceivedAt: receivedAt,
+      smsContentHash: contentHash,
+      ownerUserId: a.ownerUserId,
+      ownerName: a.ownerName,
+      walletLabel: a.walletLabel,
     );
     await _db.insert('transactions', record.toMap());
     await _enqueueOutbox(record);
     return TxInsertOutcome(TxInsertStatus.created, id);
   }
 
-  /// درج مستقیم یک رکورد (برای ثبت دستی یا تست).
+  Future<String?> _findContentDuplicate(String contentHash, DateTime receivedAt) async {
+    final rows = await _db.query(
+      'transactions',
+      columns: ['id', 'sms_received_at'],
+      where: 'sms_content_hash = ?',
+      whereArgs: [contentHash],
+    );
+    for (final r in rows) {
+      final at = r['sms_received_at'] as String?;
+      if (at == null) continue;
+      final gap = DateTime.parse(at).difference(receivedAt.toUtc()).abs();
+      if (gap <= kContentDedupWindow) return r['id'] as String;
+    }
+    return null;
+  }
+
+  @override
+  Future<String> addManual({
+    required String kind,
+    required int amountRial,
+    required DateTime at,
+    String? description,
+    String? bankId,
+    String? cardLast4,
+    String? accountRef,
+  }) async {
+    final now = _clock().toUtc();
+    final a = await _attributionFor(
+        cardLast4: cardLast4, accountRef: accountRef, bankId: bankId);
+    final record = TransactionRecord(
+      id: _uuid.v4(),
+      kind: kind,
+      amountRial: amountRial,
+      transactionDate: at.toUtc(),
+      clientCreatedAt: now,
+      createdAt: now,
+      updatedAt: now,
+      source: 'manual',
+      description: description,
+      bankId: bankId,
+      cardLast4: cardLast4,
+      accountRef: accountRef,
+      ownerUserId: a.ownerUserId,
+      ownerName: a.ownerName,
+      walletLabel: a.walletLabel,
+    );
+    await _db.insert('transactions', record.toMap());
+    await _enqueueOutbox(record);
+    return record.id;
+  }
+
+  /// درج مستقیم یک رکورد (برای تست).
   Future<void> insert(TransactionRecord record) async {
     await _db.insert('transactions', record.toMap());
     await _enqueueOutbox(record);
   }
 
-  /// صف‌کردن تراکنش برای همگام‌سازی. تراکنش با نوع نامشخص تا بازبینی sync نمی‌شود.
+  /// صف‌کردن تراکنش برای همگام‌سازی. payload هنگام ارسال از روی ردیفِ فعلی ساخته
+  /// می‌شود تا همیشه آخرین نسخه برود. نوع نامشخص تا بازبینی sync نمی‌شود.
   Future<void> _enqueueOutbox(TransactionRecord record) async {
     if (record.kind == 'unknown') return;
     await _db.insert(
       'outbox',
       {
         'transaction_id': record.id,
-        'payload': jsonEncode(record.toSyncPayload()),
+        'payload': '{}',
         'status': 'pending',
         'retry_count': 0,
       },
       conflictAlgorithm: ConflictAlgorithm.replace,
     );
+  }
+
+  Future<_Attribution> _attributionFor({
+    String? cardLast4,
+    String? accountRef,
+    String? bankId,
+  }) async {
+    return _attributionFrom(
+      await wallets(),
+      await getSetting(SettingKeys.meUserId),
+      cardLast4: cardLast4,
+      accountRef: accountRef,
+      bankId: bankId,
+    );
+  }
+
+  Future<List<TransactionRecord>> _select(
+    List<String> where,
+    List<Object?> args, {
+    String orderBy = '$_dateExpr DESC',
+    int? limit,
+  }) async {
+    final rows = await _db.rawQuery(
+      'SELECT t.*, $_allocExpr FROM transactions t '
+      '${where.isEmpty ? '' : 'WHERE ${where.join(' AND ')}'} '
+      'ORDER BY $orderBy ${limit != null ? 'LIMIT $limit' : ''}',
+      args,
+    );
+    return rows.map(TransactionRecord.fromMap).toList();
   }
 
   @override
@@ -149,44 +390,59 @@ class TransactionRepository implements TransactionStore {
     String? kind,
     bool? needsReview,
     String? search,
-  }) async {
-    final where = <String>[];
+    DateTime? from,
+    DateTime? to,
+  }) {
+    final where = <String>['t.deleted_at IS NULL'];
     final args = <Object?>[];
     if (kind != null) {
-      where.add('kind = ?');
+      where.add('t.kind = ?');
       args.add(kind);
     }
     if (needsReview != null) {
-      where.add('needs_review = ?');
+      where.add('t.needs_review = ?');
       args.add(needsReview ? 1 : 0);
     }
     if (search != null && search.trim().isNotEmpty) {
-      where.add('(counterparty LIKE ? OR description LIKE ? OR bank_id LIKE ?)');
+      where.add('(t.counterparty LIKE ? OR t.description LIKE ? OR t.bank_id LIKE ? '
+          'OR t.owner_name LIKE ? OR t.wallet_label LIKE ?)');
       final q = '%${search.trim()}%';
-      args..add(q)..add(q)..add(q);
+      args.addAll([q, q, q, q, q]);
     }
-    final rows = await _db.query(
-      'transactions',
-      where: where.isEmpty ? null : where.join(' AND '),
-      whereArgs: where.isEmpty ? null : args,
-      orderBy: 'COALESCE(transaction_date, client_created_at, created_at) DESC',
-      limit: limit,
-    );
-    return rows.map(TransactionRecord.fromMap).toList();
+    if (from != null) {
+      where.add('$_dateExpr >= ?');
+      args.add(from.toUtc().toIso8601String());
+    }
+    if (to != null) {
+      where.add('$_dateExpr < ?');
+      args.add(to.toUtc().toIso8601String());
+    }
+    return _select(where, args, limit: limit);
+  }
+
+  @override
+  Future<TransactionRecord?> getById(String id) async {
+    final list = await _select(['t.id = ?'], [id], limit: 1);
+    return list.isEmpty ? null : list.first;
   }
 
   Future<int> count() async {
     return Sqflite.firstIntValue(
-          await _db.rawQuery('SELECT COUNT(*) FROM transactions'),
+          await _db.rawQuery(
+              'SELECT COUNT(*) FROM transactions WHERE deleted_at IS NULL'),
         ) ??
         0;
   }
 
   @override
   Future<int> needsReviewCount() async {
+    final me = await getSetting(SettingKeys.meUserId);
     return Sqflite.firstIntValue(
           await _db.rawQuery(
-            'SELECT COUNT(*) FROM transactions WHERE needs_review = 1',
+            'SELECT COUNT(*) FROM transactions WHERE needs_review = 1 '
+            'AND deleted_at IS NULL '
+            '${me == null ? '' : 'AND (owner_user_id IS NULL OR owner_user_id = ?)'}',
+            [if (me != null) me],
           ),
         ) ??
         0;
@@ -201,41 +457,35 @@ class TransactionRepository implements TransactionStore {
     String? description,
     bool? needsReview,
   }) async {
-    final now = DateTime.now().toUtc();
-    final data = <String, Object?>{'updated_at': now.toIso8601String()};
+    final data = <String, Object?>{
+      'updated_at': _nowIso(),
+      'sync_status': 'pending',
+    };
     if (kind != null) data['kind'] = kind;
     if (amountRial != null) data['amount_rial'] = amountRial;
     if (counterparty != null) data['counterparty'] = counterparty;
     if (description != null) data['description'] = description;
-    if (needsReview != null) data['needs_review'] = needsReview ? 1 : 0;
+    if (needsReview != null) {
+      data['needs_review'] = needsReview ? 1 : 0;
+      if (!needsReview) data['review_reason'] = null;
+    }
     await _db.update('transactions', data, where: 'id = ?', whereArgs: [id]);
 
-    final rows =
-        await _db.query('transactions', where: 'id = ?', whereArgs: [id], limit: 1);
-    if (rows.isEmpty) return;
-    final record = TransactionRecord.fromMap(rows.first);
-
-    // اگر نوع معتبر شد و هنوز sync نشده، با payload به‌روز دوباره صف کن.
-    if (record.kind != 'unknown' && record.syncStatus != 'synced') {
-      await _db.update('transactions', {'sync_status': 'pending'},
-          where: 'id = ?', whereArgs: [id]);
-      await _enqueueOutbox(record);
-    }
+    final record = await getById(id);
+    if (record != null) await _enqueueOutbox(record);
   }
 
   @override
   Future<void> deleteTransaction(String id) async {
-    await _db.delete('outbox', where: 'transaction_id = ?', whereArgs: [id]);
-    await _db.delete('transaction_categories',
-        where: 'transaction_id = ?', whereArgs: [id]);
-    await _db.delete('transactions', where: 'id = ?', whereArgs: [id]);
-  }
-
-  @override
-  Future<TransactionRecord?> getById(String id) async {
-    final rows = await _db
-        .query('transactions', where: 'id = ?', whereArgs: [id], limit: 1);
-    return rows.isEmpty ? null : TransactionRecord.fromMap(rows.first);
+    final now = _nowIso();
+    await _db.update(
+      'transactions',
+      {'deleted_at': now, 'updated_at': now, 'sync_status': 'pending'},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+    final record = await getById(id);
+    if (record != null) await _enqueueOutbox(record);
   }
 
   @override
@@ -248,13 +498,75 @@ class TransactionRepository implements TransactionStore {
   Future<void> addWallet(Wallet wallet) async {
     final map = wallet.toMap();
     map['id'] = _uuid.v4();
-    map['created_at'] = DateTime.now().toUtc().toIso8601String();
+    map['created_at'] = _nowIso();
     await _db.insert('wallets', map);
+    await reattributeLocal();
+  }
+
+  @override
+  Future<void> updateWallet(Wallet wallet) async {
+    final map = wallet.toMap()..remove('id');
+    await _db.update('wallets', map, where: 'id = ?', whereArgs: [wallet.id]);
+    await reattributeLocal();
   }
 
   @override
   Future<void> deleteWallet(String id) async {
     await _db.delete('wallets', where: 'id = ?', whereArgs: [id]);
+    await reattributeLocal();
+  }
+
+  @override
+  Future<void> reattributeLocal() async {
+    final me = await getSetting(SettingKeys.meUserId);
+    final ws = await wallets();
+    final rows = await _db.query(
+      'transactions',
+      columns: [
+        'id', 'kind', 'card_last4', 'account_ref', 'bank_id',
+        'owner_user_id', 'owner_name', 'wallet_label',
+      ],
+      where: "origin = 'local' AND deleted_at IS NULL",
+    );
+    final now = _nowIso();
+    for (final r in rows) {
+      final a = _attributionFrom(
+        ws,
+        me,
+        cardLast4: r['card_last4'] as String?,
+        accountRef: r['account_ref'] as String?,
+        bankId: r['bank_id'] as String?,
+      );
+      if (a.ownerUserId == r['owner_user_id'] &&
+          a.ownerName == r['owner_name'] &&
+          a.walletLabel == r['wallet_label']) {
+        continue;
+      }
+      await _db.update(
+        'transactions',
+        {
+          'owner_user_id': a.ownerUserId,
+          'owner_name': a.ownerName,
+          'wallet_label': a.walletLabel,
+          'updated_at': now,
+          'sync_status': 'pending',
+        },
+        where: 'id = ?',
+        whereArgs: [r['id']],
+      );
+      if (r['kind'] != 'unknown') {
+        await _db.insert(
+          'outbox',
+          {
+            'transaction_id': r['id'],
+            'payload': '{}',
+            'status': 'pending',
+            'retry_count': 0,
+          },
+          conflictAlgorithm: ConflictAlgorithm.replace,
+        );
+      }
+    }
   }
 
   @override
@@ -263,13 +575,26 @@ class TransactionRepository implements TransactionStore {
     return rows.map(Category.fromMap).toList();
   }
 
+  Future<String> _categoryIdByName(String name) async {
+    final rows = await _db.query('categories',
+        columns: ['id'], where: 'name = ?', whereArgs: [name], limit: 1);
+    if (rows.isNotEmpty) return rows.first['id'] as String;
+    final id = _uuid.v4();
+    await _db.insert('categories', {
+      'id': id,
+      'name': name,
+      'is_system': 0,
+      'created_at': _nowIso(),
+    });
+    return id;
+  }
+
   @override
   Future<void> categorize(
     String transactionId,
     List<String> categoryIds, {
     String? description,
   }) async {
-    final now = DateTime.now().toUtc();
     final txRows = await _db.query('transactions',
         columns: ['amount_rial'],
         where: 'id = ?',
@@ -300,25 +625,28 @@ class TransactionRepository implements TransactionStore {
 
     final data = <String, Object?>{
       'needs_review': 0,
-      'updated_at': now.toIso8601String(),
+      'review_reason': null,
+      'updated_at': _nowIso(),
+      'sync_status': 'pending',
     };
     if (description != null) data['description'] = description;
     await _db.update('transactions', data,
         where: 'id = ?', whereArgs: [transactionId]);
+
+    final record = await getById(transactionId);
+    if (record != null) await _enqueueOutbox(record);
   }
 
   @override
   Future<List<CategoryTotal>> categoryTotals({DateTime? from, DateTime? to}) async {
-    final where = StringBuffer("t.kind = 'expense'");
+    final where = StringBuffer("t.kind = 'expense' AND t.deleted_at IS NULL");
     final args = <Object?>[];
-    const dateExpr =
-        'COALESCE(t.transaction_date, t.client_created_at, t.created_at)';
     if (from != null) {
-      where.write(' AND $dateExpr >= ?');
+      where.write(' AND $_dateExpr >= ?');
       args.add(from.toUtc().toIso8601String());
     }
     if (to != null) {
-      where.write(' AND $dateExpr <= ?');
+      where.write(' AND $_dateExpr < ?');
       args.add(to.toUtc().toIso8601String());
     }
     final rows = await _db.rawQuery('''
@@ -340,39 +668,54 @@ class TransactionRepository implements TransactionStore {
   }
 
   @override
-  Future<List<TransactionRecord>> uncategorized({int? limit}) async {
-    final rows = await _db.rawQuery('''
-      SELECT t.* FROM transactions t
-      WHERE t.amount_rial IS NOT NULL AND t.kind IN ('income','expense')
-        AND NOT EXISTS (
-          SELECT 1 FROM transaction_categories tc WHERE tc.transaction_id = t.id
-        )
-      ORDER BY COALESCE(t.transaction_date, t.client_created_at, t.created_at) DESC
-      ${limit != null ? 'LIMIT $limit' : ''}
-    ''');
-    return rows.map(TransactionRecord.fromMap).toList();
+  Future<DateTime> categorizeFrom() async {
+    final stored = await getSetting(SettingKeys.categorizeFrom);
+    if (stored != null) return DateTime.parse(stored);
+    // پیش‌فرض: از اول ماه شمسی بعد (تراکنش‌های قدیمی وارد صف دسته‌بندی نمی‌شوند).
+    final start = startOfNextJalaliMonth(_clock());
+    await setSetting(SettingKeys.categorizeFrom, start.toIso8601String());
+    return start;
   }
 
-  /// جمع درآمد/هزینه‌ی بازه (transfer و unknown و رکورد بدون مبلغ حذف می‌شوند).
+  @override
+  Future<List<TransactionRecord>> uncategorized({int? limit}) async {
+    final me = await getSetting(SettingKeys.meUserId);
+    final from = await categorizeFrom();
+    return _select(
+      [
+        't.deleted_at IS NULL',
+        't.amount_rial IS NOT NULL',
+        "t.kind IN ('income','expense')",
+        't.needs_review = 0',
+        if (me != null) '(t.owner_user_id IS NULL OR t.owner_user_id = ?)',
+        '$_dateExpr >= ?',
+        'NOT EXISTS (SELECT 1 FROM transaction_categories tc WHERE tc.transaction_id = t.id)',
+      ],
+      [if (me != null) me, from.toUtc().toIso8601String()],
+      limit: limit,
+    );
+  }
+
+  /// جمع درآمد/هزینه‌ی بازه (همان قاعده‌ی [countsInTotals]).
   @override
   Future<FinanceSummary> summary({DateTime? from, DateTime? to}) async {
     final where = StringBuffer(
-      "amount_rial IS NOT NULL AND kind IN ('income','expense')",
+      "t.amount_rial IS NOT NULL AND t.kind IN ('income','expense') "
+      'AND t.deleted_at IS NULL AND t.needs_review = 0',
     );
     final args = <Object?>[];
-    const dateExpr = 'COALESCE(transaction_date, client_created_at, created_at)';
     if (from != null) {
-      where.write(' AND $dateExpr >= ?');
+      where.write(' AND $_dateExpr >= ?');
       args.add(from.toUtc().toIso8601String());
     }
     if (to != null) {
-      where.write(' AND $dateExpr <= ?');
+      where.write(' AND $_dateExpr < ?');
       args.add(to.toUtc().toIso8601String());
     }
 
     final rows = await _db.rawQuery(
-      'SELECT kind, COALESCE(SUM(amount_rial), 0) AS total '
-      'FROM transactions WHERE $where GROUP BY kind',
+      'SELECT t.kind AS kind, COALESCE(SUM(t.amount_rial), 0) AS total '
+      'FROM transactions t WHERE $where GROUP BY t.kind',
       args,
     );
 
@@ -388,5 +731,174 @@ class TransactionRepository implements TransactionStore {
       }
     }
     return FinanceSummary(incomeRial: income, expenseRial: expense);
+  }
+
+  @override
+  Future<int> pendingSyncCount() async {
+    return Sqflite.firstIntValue(
+          await _db.rawQuery("SELECT COUNT(*) FROM outbox WHERE status = 'pending'"),
+        ) ??
+        0;
+  }
+
+  @override
+  Future<String?> getSetting(String key) async {
+    final rows = await _db.query('settings',
+        columns: ['value'], where: 'key = ?', whereArgs: [key], limit: 1);
+    return rows.isEmpty ? null : rows.first['value'] as String?;
+  }
+
+  @override
+  Future<void> setSetting(String key, String? value) async {
+    if (value == null) {
+      await _db.delete('settings', where: 'key = ?', whereArgs: [key]);
+      return;
+    }
+    await _db.insert('settings', {'key': key, 'value': value},
+        conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  // ---------------------------------------------------------------------------
+  // کمک‌تابع‌های همگام‌سازی (SyncService)
+  // ---------------------------------------------------------------------------
+
+  /// اعمال یک تراکنش دریافتی از سرور (گوشی عضو دیگر یا نسخه‌ی سرورِ همین).
+  /// اگر تغییر محلیِ ارسال‌نشده‌ای دارد، نسخه‌ی محلی مقدم است.
+  Future<void> applyRemote(Map<String, dynamic> j) async {
+    final id = j['id'].toString();
+    final pending = await _db.query('outbox',
+        columns: ['transaction_id'],
+        where: 'transaction_id = ?',
+        whereArgs: [id],
+        limit: 1);
+    if (pending.isNotEmpty) return;
+
+    String? str(Object? v) =>
+        (v == null || (v is String && v.isEmpty)) ? null : v.toString();
+    DateTime? dt(Object? v) =>
+        v == null ? null : DateTime.tryParse(v.toString())?.toUtc();
+    final nowIso = _nowIso();
+    final editedAt = dt(j['client_updated_at']) ?? dt(j['updated_at']) ?? _clock().toUtc();
+    final deleted = j['is_deleted'] == true;
+
+    final fields = <String, Object?>{
+      'kind': j['kind'],
+      'amount_rial': (j['amount_rial'] as num?)?.toInt(),
+      'balance_after_rial': (j['balance_after_rial'] as num?)?.toInt(),
+      'raw_amount': str(j['raw_amount']),
+      'raw_unit': str(j['raw_unit']) ?? 'rial',
+      'counterparty': str(j['counterparty']),
+      'description': str(j['description']),
+      'bank_id': str(j['bank_id']),
+      'card_last4': str(j['card_last4']),
+      'transaction_date': dt(j['transaction_date'])?.toIso8601String(),
+      'needs_review': j['needs_review'] == true ? 1 : 0,
+      'owner_user_id': str(j['owner']),
+      'owner_name': str(j['owner_name']),
+      'wallet_label': str(j['wallet_label']),
+      'sync_status': 'synced',
+      'updated_at': editedAt.toIso8601String(),
+    };
+
+    final existing = await _db.query('transactions',
+        columns: ['id', 'deleted_at', 'origin'],
+        where: 'id = ?',
+        whereArgs: [id],
+        limit: 1);
+    if (existing.isNotEmpty) {
+      final row = existing.first;
+      fields['deleted_at'] = deleted ? (row['deleted_at'] ?? nowIso) : null;
+      if (row['origin'] == 'local') {
+        // صاحبِ تراکنش‌های همین گوشی را کیف‌های همین گوشی تعیین می‌کنند.
+        fields
+          ..remove('owner_user_id')
+          ..remove('owner_name')
+          ..remove('wallet_label')
+          ..remove('bank_id')
+          ..remove('card_last4');
+      }
+      await _db.update('transactions', fields, where: 'id = ?', whereArgs: [id]);
+    } else {
+      final hash = str(j['source_message_hash']);
+      if (hash != null) {
+        final same = await _db.query('transactions',
+            columns: ['id'],
+            where: 'source_message_hash = ?',
+            whereArgs: [hash],
+            limit: 1);
+        if (same.isNotEmpty) {
+          // همان پیامک روی این گوشی هم ثبت شده؛ ردیف محلی شناسه‌ی سرور را می‌گیرد.
+          await rekey(same.first['id'] as String, id);
+          return applyRemote(j);
+        }
+      }
+      final created =
+          dt(j['client_created_at']) ?? dt(j['created_at']) ?? _clock().toUtc();
+      await _db.insert('transactions', {
+        ...fields,
+        'id': id,
+        'source': str(j['source']) ?? 'sms',
+        'source_message_hash': hash,
+        'client_created_at': created.toIso8601String(),
+        'created_at': created.toIso8601String(),
+        'deleted_at': deleted ? nowIso : null,
+        'origin': 'remote',
+      });
+    }
+    await _replaceAllocationsByName(id, j['allocations']);
+  }
+
+  Future<void> _replaceAllocationsByName(String id, Object? raw) async {
+    final list = raw is List ? raw : const [];
+    await _db.delete('transaction_categories',
+        where: 'transaction_id = ?', whereArgs: [id]);
+    for (final item in list) {
+      if (item is! Map) continue;
+      final name = item['name']?.toString() ?? '';
+      final amount = (item['amount_rial'] as num?)?.toInt();
+      if (name.isEmpty || amount == null) continue;
+      await _db.insert(
+        'transaction_categories',
+        {
+          'id': _uuid.v4(),
+          'transaction_id': id,
+          'category_id': await _categoryIdByName(name),
+          'amount_rial': amount,
+        },
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+    }
+  }
+
+  /// سرور همین تراکنش را با شناسه‌ی دیگری دارد (همان پیامک از گوشی دیگر، یا نصب
+  /// دوباره‌ی اپ) → ردیف محلی به شناسه‌ی سرور منتقل می‌شود.
+  Future<void> rekey(String oldId, String newId) async {
+    if (oldId == newId) return;
+    final clash = await _db.query('transactions',
+        columns: ['id'], where: 'id = ?', whereArgs: [newId], limit: 1);
+    await _db.transaction((txn) async {
+      if (clash.isNotEmpty) {
+        final old = await txn.query('transactions',
+            columns: ['sms_sender', 'sms_body', 'sms_received_at', 'sms_content_hash'],
+            where: 'id = ?',
+            whereArgs: [oldId],
+            limit: 1);
+        if (old.isNotEmpty) {
+          await txn.update('transactions', old.first,
+              where: 'id = ? AND sms_body IS NULL', whereArgs: [newId]);
+        }
+        await txn.delete('transaction_categories',
+            where: 'transaction_id = ?', whereArgs: [oldId]);
+        await txn.delete('outbox', where: 'transaction_id = ?', whereArgs: [oldId]);
+        await txn.delete('transactions', where: 'id = ?', whereArgs: [oldId]);
+      } else {
+        await txn.update('transactions', {'id': newId},
+            where: 'id = ?', whereArgs: [oldId]);
+        await txn.update('transaction_categories', {'transaction_id': newId},
+            where: 'transaction_id = ?', whereArgs: [oldId]);
+        await txn.update('outbox', {'transaction_id': newId},
+            where: 'transaction_id = ?', whereArgs: [oldId]);
+      }
+    });
   }
 }

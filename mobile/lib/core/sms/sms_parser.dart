@@ -28,7 +28,34 @@ class SmsParser {
     'کدتأیید',
     'کدفعالسازی',
     'کدفعال‌سازی',
+    'کدپویا',
+    'رمزخرید',
+    'ثانیه', // «اعتبار ۶۰ ثانیه» — پیامک تراکنش واقعی ثانیه ندارد
     'otp',
+    'pooya',
+  ];
+
+  // «رمز: 123456» یا «کد پویا 12345» → رمز یکبارمصرف (حتی اگر مبلغ داشته باشد).
+  static final _otpCodeRe = RegExp(
+    r'(?:رمز|کد)\s*(?:پویا|یکبار\s*مصرف|دوم|خرید|اینترنتی|تایید|تأیید)?\s*:?\s*[0-9]{4,}',
+  );
+
+  // یادآوری/سررسید قسط یا قبض — تراکنشِ انجام‌شده نیست.
+  static const _reminderKeywords = ['یادآوری', 'سررسید', 'مهلتپرداخت', 'قابلپرداخت'];
+
+  // نشانه‌ی تراکنش ناموفق/لغوشده → به صف بازبینی (کاربر تأیید یا حذف می‌کند).
+  static const _failedKeywords = [
+    'ناموفق',
+    'لغوشد',
+    'عدمموفقیت',
+    'انجامنشد',
+    'ردشد',
+    'برگشتخورد',
+    'موجودیکافینیست',
+    'موجودیناکافی',
+    'عدمموجودی',
+    'رمزنامعتبر',
+    'رمزاشتباه',
   ];
 
   // کلیدواژه‌ها به‌صورت فشرده (بدون فاصله) چون فاصله‌گذاری متغیر است.
@@ -61,7 +88,10 @@ class SmsParser {
     final normalized = normalizeForParsing(body);
     final compacted = compact(normalized);
 
-    final isOtp = _otpKeywords.any(compacted.contains);
+    final lowerCompacted = compacted.toLowerCase();
+    final isOtp = _otpKeywords.any(lowerCompacted.contains) ||
+        _otpCodeRe.hasMatch(normalized);
+    final isReminder = _reminderKeywords.any(compacted.contains);
 
     // قدم ۲: استخراج فیلدها
     final kind = _detectKind(compacted);
@@ -72,8 +102,13 @@ class SmsParser {
     final occurredAt = extractOccurredAt(normalized);
     final counterparty = _extractCounterparty(normalized);
 
-    final needsReview =
-        amountResult.amountRial == null || kind == TxKind.unknown || bank == null;
+    // بانکِ ناشناخته دلیل بازبینی نیست؛ فقط ابهام واقعی در مبلغ/نوع/موفقیت.
+    final reviewReasons = [
+      if (amountResult.amountRial == null) ReviewReason.amount,
+      if (kind == TxKind.unknown) ReviewReason.kind,
+      if (_failedKeywords.any(compacted.contains)) ReviewReason.failed,
+    ];
+    final needsReview = reviewReasons.isNotEmpty;
 
     return ParsedTransaction(
       rawSender: sender,
@@ -90,7 +125,9 @@ class SmsParser {
       counterparty: counterparty,
       occurredAt: occurredAt,
       needsReview: needsReview,
+      reviewReasons: reviewReasons,
       isOtp: isOtp,
+      isReminder: isReminder,
     );
   }
 

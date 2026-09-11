@@ -4,6 +4,83 @@
 /// می‌نویسند. اینجا به لحظه‌ی UTC تبدیل می‌شود (ایران UTC+3:30، بدون DST).
 library;
 
+/// اختلاف ساعت ایران با UTC (بدون ساعت تابستانی از ۱۴۰۱).
+const Duration kIranOffset = Duration(hours: 3, minutes: 30);
+
+/// الگوریتم استاندارد تبدیل میلادی → جلالی. خروجی [jy, jm, jd].
+List<int> gregorianToJalali(int gy, int gm, int gd) {
+  const gdm = [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334];
+  final gy2 = gm > 2 ? gy + 1 : gy;
+  var days = 355666 +
+      (365 * gy) +
+      ((gy2 + 3) ~/ 4) -
+      ((gy2 + 99) ~/ 100) +
+      ((gy2 + 399) ~/ 400) +
+      gd +
+      gdm[gm - 1];
+  var jy = -1595 + (33 * (days ~/ 12053));
+  days %= 12053;
+  jy += 4 * (days ~/ 1461);
+  days %= 1461;
+  if (days > 365) {
+    jy += (days - 1) ~/ 365;
+    days = (days - 1) % 365;
+  }
+  final jm = days < 186 ? 1 + (days ~/ 31) : 7 + ((days - 186) ~/ 30);
+  final jd = 1 + (days < 186 ? days % 31 : (days - 186) % 30);
+  return [jy, jm, jd];
+}
+
+/// یک روز در تقویم شمسی.
+class JalaliDate {
+  final int year;
+  final int month;
+  final int day;
+
+  const JalaliDate(this.year, this.month, this.day);
+
+  /// روزِ شمسیِ یک لحظه، به وقت ایران.
+  factory JalaliDate.fromDateTime(DateTime t) {
+    final local = t.toUtc().add(kIranOffset);
+    final j = gregorianToJalali(local.year, local.month, local.day);
+    return JalaliDate(j[0], j[1], j[2]);
+  }
+
+  /// آغاز این روز (۰۰:۰۰ به وقت ایران) به UTC.
+  DateTime toUtcStart() {
+    final g = jalaliToGregorian(year, month, day);
+    return DateTime.utc(g[0], g[1], g[2]).subtract(kIranOffset);
+  }
+
+  /// روز هفته طبق DateTime (۱=دوشنبه … ۷=یکشنبه).
+  int get weekday {
+    final g = jalaliToGregorian(year, month, day);
+    return DateTime.utc(g[0], g[1], g[2]).weekday;
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      other is JalaliDate &&
+      other.year == year &&
+      other.month == month &&
+      other.day == day;
+
+  @override
+  int get hashCode => Object.hash(year, month, day);
+
+  @override
+  String toString() => '$year/$month/$day';
+}
+
+/// تعداد روزهای یک ماه شمسی (اسفندِ سال کبیسه ۳۰ روز).
+int jalaliMonthLength(int jy, int jm) {
+  if (jm <= 6) return 31;
+  if (jm <= 11) return 30;
+  final start = JalaliDate(jy, 12, 1).toUtcStart();
+  final next = JalaliDate(jy + 1, 1, 1).toUtcStart();
+  return next.difference(start).inDays;
+}
+
 /// الگوریتم استاندارد تبدیل جلالی → میلادی. خروجی [gy, gm, gd].
 List<int> jalaliToGregorian(int jy, int jm, int jd) {
   jy += 1595;

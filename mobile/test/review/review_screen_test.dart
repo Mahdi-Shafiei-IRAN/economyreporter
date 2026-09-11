@@ -16,7 +16,7 @@ void main() {
     store = FakeTransactionStore();
     controller = DashboardController(store);
     // یک تراکنش نیازمند بازبینی (فرستنده‌ی ناشناخته) و یک عادی
-    store.seed(parser.parse(sender: 'Digikala', body: 'خرید مبلغ 100,000 ریال'),
+    store.seed(parser.parse(sender: 'Digikala', body: 'خرید ناموفق مبلغ 100,000 ریال'),
         sender: 'Digikala');
     store.seed(parser.parse(sender: 'ملی', body: 'واریز مبلغ 5,000,000 ریال'),
         sender: 'ملی');

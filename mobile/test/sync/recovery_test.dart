@@ -43,6 +43,12 @@ class StatefulFakeServer implements RemoteTransactionApi {
     }
     return results;
   }
+
+  @override
+  Future<PullPage> pull({String? since, int limit = 500}) async {
+    if (!online) throw Exception('network down');
+    return PullPage.empty;
+  }
 }
 
 void main() {

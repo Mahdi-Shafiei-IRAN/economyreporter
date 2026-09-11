@@ -1,7 +1,10 @@
 /// سرویس خواندن پیامک از سیستم‌عامل (بخش دستگاهی).
 ///
-/// دو مسیر: (۱) وارد کردن صندوق پیام هنگام باز شدن اپ، (۲) گوش‌دادن زنده به
-/// پیامک‌های ورودی (پیش‌زمینه و پس‌زمینه). پارس/ذخیره در SmsImporter (تست‌شده).
+/// دو مسیر: (۱) دریافت زنده‌ی پیامک ورودی — به‌محض رسیدن در دیتابیس ذخیره
+/// می‌شود (اپ باز، پس‌زمینه یا بسته؛ گیرنده در AndroidManifest)، پس پاک‌شدن
+/// پیامک از صندوق اثری روی اپ ندارد. (۲) وارد کردن صندوق هنگام باز شدن اپ،
+/// برای پیامک‌هایی که وقتی گوشی خاموش بود رسیده‌اند.
+/// پارس/ذخیره در SmsImporter (تست‌شده).
 library;
 
 import 'package:another_telephony/telephony.dart';
@@ -59,29 +62,26 @@ class SmsInboxService {
       listenInBackground: true,
     );
   }
-
-  RawSms _toRaw(SmsMessage m) => RawSms(
-        sender: m.address ?? '',
-        body: m.body ?? '',
-        receivedAt: m.date != null
-            ? DateTime.fromMillisecondsSinceEpoch(m.date!)
-            : DateTime.now(),
-      );
 }
 
+RawSms _toRaw(SmsMessage m) => RawSms(
+      sender: m.address ?? '',
+      body: m.body ?? '',
+      receivedAt: m.date != null
+          ? DateTime.fromMillisecondsSinceEpoch(m.date!)
+          : DateTime.now(),
+    );
+
 /// هندلر پس‌زمینه (ایزوله‌ی جدا). باید top-level و vm:entry-point باشد.
-/// در پس‌زمینه DB خودش را باز می‌کند و تراکنش را ذخیره می‌کند.
+/// در پس‌زمینه DB را با اتصال جداگانه باز می‌کند (تا بستنش اتصال اپ را نبندد)
+/// و تراکنش را همان لحظه ذخیره می‌کند.
 @pragma('vm:entry-point')
 Future<void> backgroundSmsHandler(SmsMessage message) async {
-  final db = await openAppDatabase();
+  final db = await openAppDatabase(singleInstance: false);
   try {
     final importer = SmsImporter(TransactionRepository(db));
-    final imported = await importer.importOne(RawSms(
-      sender: message.address ?? '',
-      body: message.body ?? '',
-      receivedAt: DateTime.now(),
-    ));
-    if (imported != null) {
+    final imported = await importer.importOne(_toRaw(message));
+    if (imported != null && imported.promptCategorize) {
       await NotificationService.showFromBackground(
           imported.id, imported.amountRial);
     }

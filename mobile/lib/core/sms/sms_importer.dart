@@ -17,7 +17,7 @@ class RawSms {
 class ImportResult {
   final int created;
   final int duplicates;
-  final int skipped; // OTP یا غیرتراکنش
+  final int skipped; // OTP، یادآوری یا غیرتراکنش
 
   const ImportResult({
     required this.created,
@@ -30,7 +30,16 @@ class ImportResult {
 class ImportedTx {
   final String id;
   final int amountRial;
-  const ImportedTx({required this.id, required this.amountRial});
+
+  /// نوتیفیکیشن «دسته‌بندی کن» لازم است؟ فقط برای تراکنشِ خودم (نه عضو دیگر)،
+  /// بدون ابهام، و از «شروع دسته‌بندی» به بعد.
+  final bool promptCategorize;
+
+  const ImportedTx({
+    required this.id,
+    required this.amountRial,
+    this.promptCategorize = true,
+  });
 }
 
 class SmsImporter {
@@ -52,7 +61,20 @@ class SmsImporter {
       receivedAt: sms.receivedAt,
     );
     if (!outcome.isCreated) return null; // تکراری
-    return ImportedTx(id: outcome.id, amountRial: parsed.amountRial ?? 0);
+    return ImportedTx(
+      id: outcome.id,
+      amountRial: parsed.amountRial ?? 0,
+      promptCategorize: await _shouldPrompt(outcome.id),
+    );
+  }
+
+  Future<bool> _shouldPrompt(String id) async {
+    final t = await store.getById(id);
+    if (t == null || t.needsReview) return false;
+    if (t.kind != 'income' && t.kind != 'expense') return false;
+    final me = await store.getSetting(SettingKeys.meUserId);
+    if (me != null && t.ownerUserId != null && t.ownerUserId != me) return false;
+    return !t.effectiveTime.isBefore(await store.categorizeFrom());
   }
 
   /// فهرستی از پیامک‌ها را وارد می‌کند و آمار می‌دهد.

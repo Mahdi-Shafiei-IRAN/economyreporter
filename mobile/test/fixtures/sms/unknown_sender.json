@@ -6,6 +6,6 @@
     "bankId": null,
     "kind": "expense",
     "amountRial": 100000,
-    "needsReview": true
+    "needsReview": false
   }
 }

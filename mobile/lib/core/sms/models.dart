@@ -5,6 +5,21 @@ library;
 /// درآمد/هزینه شمرده نمی‌شود. `unknown` یعنی پارسر نتوانست نوع را تشخیص دهد.
 enum TxKind { income, expense, transfer, unknown }
 
+/// کد دلیل‌های بازبینی (در ستون review_reason ذخیره می‌شود).
+/// «بانک ناشناخته» عمداً دلیل بازبینی نیست؛ مبلغ و نوع که معلوم باشد، تراکنش درست است.
+class ReviewReason {
+  ReviewReason._();
+
+  /// مبلغ از متن پیدا نشد.
+  static const amount = 'amount';
+
+  /// معلوم نیست برداشت است یا واریز.
+  static const kind = 'kind';
+
+  /// متن نشان می‌دهد تراکنش احتمالاً ناموفق/لغو شده.
+  static const failed = 'failed';
+}
+
 /// نتیجه‌ی پارس یک پیامک. مبلغ کانونی همیشه به **ریال** (عدد صحیح) است.
 class ParsedTransaction {
   /// شناسه‌ی بانک (از رجیستری) — null یعنی بانک از روی فرستنده شناخته نشد.
@@ -45,15 +60,21 @@ class ParsedTransaction {
   /// متن خام پیامک (فقط روی دستگاه؛ هرگز به سرور/لاگ نمی‌رود).
   final String rawBody;
 
-  /// نیازمند بازبینی انسان: بانک ناشناخته، مبلغ استخراج‌نشده، یا نوع نامشخص.
+  /// نیازمند بازبینی انسان (دلیل‌ها در [reviewReasons]).
   final bool needsReview;
+
+  /// کدهای [ReviewReason].
+  final List<String> reviewReasons;
 
   /// پیامک رمز پویا/یکبارمصرف است (نباید تراکنش حساب شود).
   final bool isOtp;
 
+  /// یادآوری/سررسید است، نه تراکنشِ انجام‌شده.
+  final bool isReminder;
+
   /// آیا این پیامک واقعاً یک تراکنش است؟ (برای خواندن خودکار پیامک).
   bool get looksLikeTransaction =>
-      !isOtp && amountRial != null && kind != TxKind.unknown;
+      !isOtp && !isReminder && amountRial != null && kind != TxKind.unknown;
 
   const ParsedTransaction({
     required this.rawSender,
@@ -70,7 +91,9 @@ class ParsedTransaction {
     this.accountRef,
     this.counterparty,
     this.occurredAt,
+    this.reviewReasons = const [],
     this.isOtp = false,
+    this.isReminder = false,
   });
 
   @override

@@ -103,7 +103,7 @@ void main() {
   });
 
   testWidgets('نشان بازبینی تعداد موارد را نشان می‌دهد', (tester) async {
-    store.seed(parser.parse(sender: 'Digikala', body: 'خرید مبلغ 100,000 ریال'),
+    store.seed(parser.parse(sender: 'Digikala', body: 'خرید ناموفق مبلغ 100,000 ریال'),
         sender: 'Digikala');
 
     await tester.pumpWidget(app());

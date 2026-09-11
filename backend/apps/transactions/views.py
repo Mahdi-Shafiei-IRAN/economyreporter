@@ -1,3 +1,4 @@
+from collections import defaultdict
 from datetime import datetime, time
 from datetime import timezone as dt_timezone
 
@@ -7,7 +8,7 @@ from django.db.models.functions import Coalesce
 from django.utils import timezone as dj_timezone
 from django.utils.dateparse import parse_date, parse_datetime
 from rest_framework import viewsets
-from rest_framework.exceptions import NotFound, ValidationError
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -17,6 +18,28 @@ from apps.common.family import resolve_family, user_family_ids
 
 from .models import Transaction
 from .serializers import TransactionSerializer
+
+# فقط صاحب تراکنش (عضوی که کارت مال اوست) این‌ها را تغییر می‌دهد.
+CONTENT_FIELDS = frozenset(
+    {
+        "kind",
+        "amount_rial",
+        "balance_after_rial",
+        "raw_amount",
+        "raw_unit",
+        "counterparty",
+        "description",
+        "allocations",
+        "is_deleted",
+        "needs_review",
+        "transaction_date",
+    }
+)
+# «کارت مال کیست» را گوشیِ دریافت‌کننده‌ی پیامک تعیین می‌کند.
+ATTRIBUTION_FIELDS = frozenset({"person_name", "wallet_label", "bank_id", "card_last4"})
+
+PULL_DEFAULT_LIMIT = 500
+PULL_MAX_LIMIT = 1000
 
 
 def _validate_refs(family, account, card, category):
@@ -29,13 +52,35 @@ def _validate_refs(family, account, card, category):
         raise ValidationError({"category": "دسته متعلق به این خانواده نیست"})
 
 
+def _family_members(family):
+    """نگاشت شناسه‌ی کاربر → کاربر، برای اعضای یک خانواده."""
+    return {
+        str(m.user_id): m.user for m in family.memberships.select_related("user")
+    }
+
+
+def _resolve_owner(owner_member, members, fallback):
+    """صاحب تراکنش: عضوِ اعلام‌شده (اگر عضو خانواده باشد)، وگرنه fallback."""
+    if owner_member and str(owner_member) in members:
+        return members[str(owner_member)]
+    return fallback
+
+
+def _iso_z(dt):
+    return dt.astimezone(dt_timezone.utc).isoformat().replace("+00:00", "Z")
+
+
 class TransactionViewSet(viewsets.ModelViewSet):
     serializer_class = TransactionSerializer
 
     def get_queryset(self):
-        qs = Transaction.objects.filter(
-            family_id__in=user_family_ids(self.request.user)
-        ).order_by("-server_received_at")
+        qs = (
+            Transaction.objects.filter(
+                family_id__in=user_family_ids(self.request.user), is_deleted=False
+            )
+            .select_related("owner")
+            .order_by("-server_received_at")
+        )
 
         params = self.request.query_params
         if v := params.get("kind"):
@@ -56,11 +101,60 @@ class TransactionViewSet(viewsets.ModelViewSet):
         family = resolve_family(self.request.user, self.request.data.get("family"))
         data = serializer.validated_data
         _validate_refs(family, data.get("account"), data.get("card"), data.get("category"))
-        serializer.save(family=family, owner=self.request.user)
+        serializer.save(family=family, owner=self.request.user, captured_by=self.request.user)
+
+    def _ensure_owner(self, obj):
+        if obj.owner_id != self.request.user.id:
+            raise PermissionDenied("فقط صاحب کارت می‌تواند این تراکنش را ویرایش کند")
+
+    def perform_update(self, serializer):
+        self._ensure_owner(serializer.instance)
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        # حذف نرم تا به گوشی‌های دیگر هم برسد.
+        self._ensure_owner(instance)
+        instance.is_deleted = True
+        instance.save(update_fields=["is_deleted", "updated_at"])
 
 
 class SyncView(APIView):
-    """آپلود دسته‌ای و idempotent تراکنش‌ها از دستگاه."""
+    """
+    POST: آپلود دسته‌ای و idempotent تراکنش‌ها از دستگاه (ساخت یا به‌روزرسانی).
+    GET: دریافت تغییرات خانواده از یک cursor به بعد (تا گوشی‌های دیگر هم ببینند).
+    """
+
+    def get(self, request):
+        family = resolve_family(request.user, request.query_params.get("family"))
+        since = _parse_dt(request.query_params.get("since"))
+        try:
+            limit = int(request.query_params.get("limit", PULL_DEFAULT_LIMIT))
+        except ValueError:
+            limit = PULL_DEFAULT_LIMIT
+        limit = max(1, min(limit, PULL_MAX_LIMIT))
+
+        qs = (
+            Transaction.objects.filter(family=family)
+            .select_related("owner")
+            .order_by("updated_at", "id")
+        )
+        if since:
+            qs = qs.filter(updated_at__gt=since)
+        rows = list(qs[: limit + 1])
+        has_more = len(rows) > limit
+        rows = rows[:limit]
+
+        if rows:
+            cursor = _iso_z(rows[-1].updated_at)
+        else:
+            cursor = _iso_z(since) if since else None
+        return Response(
+            {
+                "results": TransactionSerializer(rows, many=True).data,
+                "cursor": cursor,
+                "has_more": has_more,
+            }
+        )
 
     def post(self, request):
         family = resolve_family(request.user, request.data.get("family"))
@@ -69,37 +163,37 @@ class SyncView(APIView):
             raise ValidationError({"transactions": "باید یک لیست باشد"})
         device_id = request.data.get("device_id", "")
 
-        valid_accounts = set(
-            BankAccount.objects.filter(family=family).values_list("id", flat=True)
-        )
-        valid_cards = set(
-            Card.objects.filter(account__family=family).values_list("id", flat=True)
-        )
-        valid_categories = set(
-            Category.objects.filter(family=family).values_list("id", flat=True)
-        )
-
-        results = [
-            self._process_item(
-                item, family, request.user, device_id,
-                valid_accounts, valid_cards, valid_categories,
-            )
-            for item in items
-        ]
+        ctx = {
+            "family": family,
+            "user": request.user,
+            "device_id": device_id,
+            "members": _family_members(family),
+            "accounts": set(
+                BankAccount.objects.filter(family=family).values_list("id", flat=True)
+            ),
+            "cards": set(
+                Card.objects.filter(account__family=family).values_list("id", flat=True)
+            ),
+            "categories": set(
+                Category.objects.filter(family=family).values_list("id", flat=True)
+            ),
+        }
+        results = [self._process_item(item, ctx) for item in items]
         return Response({"success": True, "results": results})
 
-    def _process_item(
-        self, item, family, user, device_id, valid_accounts, valid_cards, valid_categories
-    ):
+    def _process_item(self, item, ctx):
+        if not isinstance(item, dict):
+            return {"id": None, "status": "error", "detail": "آیتم نامعتبر"}
+        family, user = ctx["family"], ctx["user"]
         tid = item.get("id")
 
-        # ۱) idempotency بر اساس id
+        # ۱) idempotency بر اساس id (و به‌روزرسانی اگر نسخه‌ی دستگاه جدیدتر باشد)
         if tid:
             existing = Transaction.objects.filter(id=tid).first()
             if existing:
-                if existing.family_id == family.id:
-                    return {"id": str(tid), "status": "already_exists"}
-                return {"id": str(tid), "status": "error", "detail": "تعارض شناسه"}
+                if existing.family_id != family.id:
+                    return {"id": str(tid), "status": "error", "detail": "تعارض شناسه"}
+                return self._update_existing(existing, item, ctx)
 
         # ۲) ضدتکرار بر اساس اثرانگشت پیامک
         h = (item.get("source_message_hash") or "").strip()
@@ -114,28 +208,70 @@ class SyncView(APIView):
 
         data = serializer.validated_data
         acc, card, cat = data.get("account"), data.get("card"), data.get("category")
-        if acc is not None and acc.id not in valid_accounts:
+        if acc is not None and acc.id not in ctx["accounts"]:
             return {"id": str(tid) if tid else None, "status": "error", "detail": "حساب نامعتبر"}
-        if card is not None and card.id not in valid_cards:
+        if card is not None and card.id not in ctx["cards"]:
             return {"id": str(tid) if tid else None, "status": "error", "detail": "کارت نامعتبر"}
-        if cat is not None and cat.id not in valid_categories:
+        if cat is not None and cat.id not in ctx["categories"]:
             return {"id": str(tid) if tid else None, "status": "error", "detail": "دسته نامعتبر"}
 
+        owner = _resolve_owner(item.get("owner_member"), ctx["members"], user)
         try:
             with db_transaction.atomic():
                 obj = serializer.save(
                     family=family,
-                    owner=user,
-                    device_id=data.get("device_id") or device_id,
+                    owner=owner,
+                    captured_by=user,
+                    device_id=data.get("device_id") or ctx["device_id"],
                 )
             return {"id": str(obj.id), "status": "created"}
         except IntegrityError:
             # رقابت هم‌زمان روی اثرانگشت یکتا
             return {"id": str(tid) if tid else None, "status": "already_exists"}
 
+    def _update_existing(self, existing, item, ctx):
+        """
+        «آخرین ویرایش برنده است» بر اساس client_updated_at.
+        صاحب تراکنش محتوا را عوض می‌کند؛ گوشیِ دریافت‌کننده فقط انتساب (کارت مال کیست) را.
+        """
+        user = ctx["user"]
+        tid = str(existing.id)
+        incoming = _parse_dt(item.get("client_updated_at"))
+        if incoming is None or (
+            existing.client_updated_at is not None and incoming <= existing.client_updated_at
+        ):
+            return {"id": tid, "status": "already_exists"}
+
+        is_owner = existing.owner_id == user.id
+        is_capturer = existing.captured_by_id == user.id
+        if not (is_owner or is_capturer):
+            return {
+                "id": tid,
+                "status": "forbidden",
+                "detail": "فقط صاحب کارت می‌تواند این تراکنش را ویرایش کند",
+            }
+
+        serializer = TransactionSerializer(existing, data=item, partial=True)
+        if not serializer.is_valid():
+            return {"id": tid, "status": "error", "detail": serializer.errors}
+
+        allowed = set()
+        if is_owner:
+            allowed |= CONTENT_FIELDS
+        if is_capturer:
+            allowed |= ATTRIBUTION_FIELDS
+        for field, value in serializer.validated_data.items():
+            if field in allowed:
+                setattr(existing, field, value)
+        if is_capturer and "owner_member" in item:
+            existing.owner = _resolve_owner(item.get("owner_member"), ctx["members"], user)
+        existing.client_updated_at = incoming
+        existing.save()
+        return {"id": tid, "status": "updated"}
+
 
 class DashboardSummaryView(APIView):
-    """جمع درآمد/هزینه/مانده به‌تفکیک عضو/دسته/کارت. مبالغ به ریال."""
+    """جمع درآمد/هزینه/مانده به‌تفکیک شخص/دسته/کارت. مبالغ به ریال."""
 
     def get(self, request):
         family = resolve_family(request.user, request.query_params.get("family"))
@@ -143,7 +279,7 @@ class DashboardSummaryView(APIView):
         to = _parse_dt(request.query_params.get("to"), end=True)
 
         qs = Transaction.objects.filter(
-            family=family, amount_rial__isnull=False
+            family=family, amount_rial__isnull=False, is_deleted=False
         ).annotate(effective_date=Coalesce("transaction_date", "server_received_at"))
         if frm:
             qs = qs.filter(effective_date__gte=frm)
@@ -160,30 +296,38 @@ class DashboardSummaryView(APIView):
         members = [
             {
                 "id": str(row["owner"]),
-                "name": row["owner__full_name"] or row["owner__email"],
+                "name": row["person_name"] or row["owner__full_name"] or row["owner__email"],
                 "expenses": row["amount"] or 0,
             }
-            for row in expenses.values("owner", "owner__full_name", "owner__email")
+            for row in expenses.values(
+                "owner", "person_name", "owner__full_name", "owner__email"
+            )
             .annotate(amount=Sum("amount_rial"))
             .order_by("-amount")
         ]
+
+        # دسته‌ها از تخصیص‌های چندتایی (و برای داده‌ی قدیمی از FK دسته).
+        by_category = defaultdict(int)
+        for tx in expenses.select_related("category").only(
+            "amount_rial", "allocations", "category__name"
+        ):
+            if tx.allocations:
+                for a in tx.allocations:
+                    by_category[a.get("name")] += int(a.get("amount_rial") or 0)
+            else:
+                by_category[tx.category.name if tx.category else None] += tx.amount_rial
         categories = [
-            {
-                "category": str(row["category"]) if row["category"] else None,
-                "name": row["category__name"],
-                "amount": row["amount"] or 0,
-            }
-            for row in expenses.values("category", "category__name")
-            .annotate(amount=Sum("amount_rial"))
-            .order_by("-amount")
+            {"category": name, "name": name, "amount": amount}
+            for name, amount in sorted(by_category.items(), key=lambda kv: -kv[1])
         ]
+
         cards = [
             {
-                "card": str(row["card"]) if row["card"] else None,
-                "card_last4": row["card__card_last4"],
+                "card": None,
+                "card_last4": row["card_last4"] or None,
                 "amount": row["amount"] or 0,
             }
-            for row in expenses.values("card", "card__card_last4")
+            for row in expenses.values("card_last4")
             .annotate(amount=Sum("amount_rial"))
             .order_by("-amount")
         ]
@@ -209,6 +353,7 @@ class DashboardSummaryView(APIView):
 def _parse_dt(value, end=False):
     if not value:
         return None
+    value = str(value)
     dt = parse_datetime(value)
     if dt is None:
         d = parse_date(value)
