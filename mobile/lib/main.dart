@@ -7,6 +7,7 @@ import 'core/config/app_config.dart';
 import 'core/dashboard/remote_dashboard_api.dart';
 import 'core/database/app_database.dart';
 import 'core/network/api_client.dart';
+import 'core/sms/sms_importer.dart';
 import 'core/sync/remote_transaction_api.dart';
 import 'core/sync/sync_service.dart';
 import 'features/auth/auth_controller.dart';
@@ -14,6 +15,7 @@ import 'features/auth/login_screen.dart';
 import 'features/dashboard/dashboard_controller.dart';
 import 'features/dashboard/dashboard_screen.dart';
 import 'features/family/family_dashboard_screen.dart';
+import 'features/sms/sms_inbox_service.dart';
 import 'features/transactions/data/transaction_repository.dart';
 
 Future<void> main() async {
@@ -44,7 +46,14 @@ class _Services {
   final DashboardController dashboard;
   final SyncService sync;
   final RemoteDashboardApi dashboardApi;
-  const _Services(this.auth, this.dashboard, this.sync, this.dashboardApi);
+  final SmsInboxService smsInbox;
+  const _Services(
+    this.auth,
+    this.dashboard,
+    this.sync,
+    this.dashboardApi,
+    this.smsInbox,
+  );
 }
 
 class _Bootstrap extends StatefulWidget {
@@ -65,7 +74,8 @@ class _BootstrapState extends State<_Bootstrap> {
     await auth.bootstrap();
 
     final db = await openAppDatabase();
-    final dashboard = DashboardController(TransactionRepository(db));
+    final repo = TransactionRepository(db);
+    final dashboard = DashboardController(repo);
 
     final sync = SyncService(
       db: db,
@@ -74,11 +84,19 @@ class _BootstrapState extends State<_Bootstrap> {
     );
     final dashboardApi = DioRemoteDashboardApi(api.dio);
 
+    final smsInbox = SmsInboxService(
+      importer: SmsImporter(repo),
+      onChanged: () {
+        dashboard.load(); // تازه‌سازی داشبورد محلی
+        sync.sync().ignore(); // ارسال خودکار به سرور (تا داشبورد خانواده هم به‌روز شود)
+      },
+    );
+
     // تلاش اولیه برای همگام‌سازی آنچه هنوز نرفته (در صورت آنلاین‌بودن).
     if (auth.authenticated) {
       sync.sync().ignore();
     }
-    return _Services(auth, dashboard, sync, dashboardApi);
+    return _Services(auth, dashboard, sync, dashboardApi, smsInbox);
   }
 
   @override
@@ -107,13 +125,45 @@ class _BootstrapState extends State<_Bootstrap> {
 }
 
 /// بسته به وضعیت احراز هویت، ورود یا داشبورد را نشان می‌دهد.
-class _Root extends StatelessWidget {
+class _Root extends StatefulWidget {
   final _Services services;
 
   const _Root({required this.services});
 
   @override
+  State<_Root> createState() => _RootState();
+}
+
+class _RootState extends State<_Root> {
+  bool _smsSetupDone = false;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.services.auth.addListener(_maybeSetupSms);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _maybeSetupSms());
+  }
+
+  @override
+  void dispose() {
+    widget.services.auth.removeListener(_maybeSetupSms);
+    super.dispose();
+  }
+
+  /// بعد از ورود، یک‌بار مجوز پیامک را می‌گیرد، صندوق را وارد و listener را شروع می‌کند.
+  Future<void> _maybeSetupSms() async {
+    if (_smsSetupDone || !widget.services.auth.authenticated) return;
+    _smsSetupDone = true;
+    final sms = widget.services.smsInbox;
+    final granted = await sms.requestPermission();
+    if (!granted) return;
+    await sms.importInbox();
+    sms.startListener();
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final services = widget.services;
     return AnimatedBuilder(
       animation: services.auth,
       builder: (context, _) {

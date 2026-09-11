@@ -16,6 +16,21 @@ import 'models.dart';
 class SmsParser {
   const SmsParser();
 
+  // پیامک رمز پویا/یکبارمصرف — نباید تراکنش حساب شود (فشرده).
+  static const _otpKeywords = [
+    'رمزپویا',
+    'رمزیکبار',
+    'یکبارمصرف',
+    'رمزدوم',
+    'رمزاینترنتی',
+    'رمزپرداخت',
+    'کدتایید',
+    'کدتأیید',
+    'کدفعالسازی',
+    'کدفعال‌سازی',
+    'otp',
+  ];
+
   // کلیدواژه‌ها به‌صورت فشرده (بدون فاصله) چون فاصله‌گذاری متغیر است.
   static const _transferKeywords = ['کارتبهکارت', 'حواله'];
   static const _expenseKeywords = ['برداشت', 'خرید', 'پرداخت', 'کسر', 'انتقالوجه', 'انتقال'];
@@ -46,6 +61,8 @@ class SmsParser {
     final normalized = normalizeForParsing(body);
     final compacted = compact(normalized);
 
+    final isOtp = _otpKeywords.any(compacted.contains);
+
     // قدم ۲: استخراج فیلدها
     final kind = _detectKind(compacted);
     final balance = _extractBalance(normalized);
@@ -73,6 +90,7 @@ class SmsParser {
       counterparty: counterparty,
       occurredAt: occurredAt,
       needsReview: needsReview,
+      isOtp: isOtp,
     );
   }
 

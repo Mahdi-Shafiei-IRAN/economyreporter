@@ -159,6 +159,35 @@ void main() {
     });
   });
 
+  group('parse — رمز پویا (OTP)', () {
+    test('پیامک رمز پویا تراکنش حساب نمی‌شود', () {
+      final r = parser.parse(
+        sender: 'BankMellat',
+        body: 'رمز پویا: 84512 اعتبار 60 ثانیه',
+      );
+      expect(r.isOtp, isTrue);
+      expect(r.looksLikeTransaction, isFalse);
+    });
+
+    test('رمز یکبار مصرف خرید اینترنتی تراکنش نیست', () {
+      final r = parser.parse(
+        sender: 'Saman',
+        body: 'رمز یکبار مصرف خرید اینترنتی شما: 123456',
+      );
+      expect(r.isOtp, isTrue);
+      expect(r.looksLikeTransaction, isFalse);
+    });
+
+    test('تراکنش واقعی OTP نیست و looksLikeTransaction=true', () {
+      final r = parser.parse(
+        sender: 'BankMellat',
+        body: 'برداشت مبلغ 2,500,000 ریال از کارت 1234 مانده 43,000,000 ریال',
+      );
+      expect(r.isOtp, isFalse);
+      expect(r.looksLikeTransaction, isTrue);
+    });
+  });
+
   group('parse — قالب‌های واقعی', () {
     test('مبلغِ چسبیده به فعل، بدون واحد و بدون «مبلغ»', () {
       final r = parser.parse(

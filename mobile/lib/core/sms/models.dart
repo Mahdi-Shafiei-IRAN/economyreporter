@@ -48,6 +48,13 @@ class ParsedTransaction {
   /// نیازمند بازبینی انسان: بانک ناشناخته، مبلغ استخراج‌نشده، یا نوع نامشخص.
   final bool needsReview;
 
+  /// پیامک رمز پویا/یکبارمصرف است (نباید تراکنش حساب شود).
+  final bool isOtp;
+
+  /// آیا این پیامک واقعاً یک تراکنش است؟ (برای خواندن خودکار پیامک).
+  bool get looksLikeTransaction =>
+      !isOtp && amountRial != null && kind != TxKind.unknown;
+
   const ParsedTransaction({
     required this.rawSender,
     required this.rawBody,
@@ -63,6 +70,7 @@ class ParsedTransaction {
     this.accountRef,
     this.counterparty,
     this.occurredAt,
+    this.isOtp = false,
   });
 
   @override
