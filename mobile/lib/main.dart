@@ -10,6 +10,7 @@ import 'core/network/api_client.dart';
 import 'core/sms/sms_importer.dart';
 import 'core/sync/remote_transaction_api.dart';
 import 'core/sync/sync_service.dart';
+import 'core/theme/theme_controller.dart';
 import 'features/auth/auth_controller.dart';
 import 'features/auth/login_screen.dart';
 import 'features/categories/categorize_screen.dart';
@@ -25,6 +26,7 @@ final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await themeController.load();
   runApp(const EconomyApp());
 }
 
@@ -33,16 +35,29 @@ class EconomyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'مدیریت مالی خانواده',
-      debugShowCheckedModeBanner: false,
-      navigatorKey: navigatorKey,
-      theme: ThemeData(colorSchemeSeed: Colors.teal, useMaterial3: true),
-      builder: (context, child) => Directionality(
-        textDirection: TextDirection.rtl,
-        child: child ?? const SizedBox.shrink(),
+    return AnimatedBuilder(
+      animation: themeController,
+      builder: (context, _) => MaterialApp(
+        title: 'مدیریت مالی خانواده',
+        debugShowCheckedModeBanner: false,
+        navigatorKey: navigatorKey,
+        theme: ThemeData(
+          colorSchemeSeed: Colors.teal,
+          brightness: Brightness.light,
+          useMaterial3: true,
+        ),
+        darkTheme: ThemeData(
+          colorSchemeSeed: Colors.teal,
+          brightness: Brightness.dark,
+          useMaterial3: true,
+        ),
+        themeMode: themeController.mode,
+        builder: (context, child) => Directionality(
+          textDirection: TextDirection.rtl,
+          child: child ?? const SizedBox.shrink(),
+        ),
+        home: const _Bootstrap(),
       ),
-      home: const _Bootstrap(),
     );
   }
 }

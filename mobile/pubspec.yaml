@@ -43,6 +43,10 @@ dependencies:
   flutter_secure_storage: ^9.2.2
   another_telephony: ^0.4.1
   flutter_local_notifications: 17.2.4
+  shared_preferences: ^2.3.3
+  fl_chart: 0.68.0
+  pdf: ^3.11.3
+  printing: ^5.14.3
 
 dev_dependencies:
   flutter_test:
@@ -69,6 +73,9 @@ flutter:
   # included with your application, so that you can use the icons in
   # the material Icons class.
   uses-material-design: true
+
+  assets:
+    - assets/fonts/Vazirmatn-Regular.ttf
 
   # To add assets to your application, add an assets section, like this:
   # assets:

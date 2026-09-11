@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/format/money_format.dart';
 import '../../core/sms/bank_registry.dart';
+import '../../core/theme/theme_controller.dart';
 import '../categories/categorize_list_screen.dart';
 import '../categories/category_report_screen.dart';
 import '../review/reconciliation_screen.dart';
@@ -28,6 +29,7 @@ const kReconcileBannerKey = Key('reconcile-banner');
 const kFamilyDashboardActionKey = Key('family-dashboard-action');
 const kReportActionKey = Key('report-action');
 const kCategorizeBannerKey = Key('categorize-banner');
+const kThemeToggleKey = Key('theme-toggle');
 
 class DashboardScreen extends StatefulWidget {
   final DashboardController controller;
@@ -133,6 +135,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 icon: const Icon(Icons.pie_chart_outline),
                 tooltip: 'گزارش دسته‌ها',
                 onPressed: _openReport,
+              ),
+              IconButton(
+                key: kThemeToggleKey,
+                icon: Icon(switch (themeController.mode) {
+                  ThemeMode.light => Icons.light_mode,
+                  ThemeMode.dark => Icons.dark_mode,
+                  ThemeMode.system => Icons.brightness_auto,
+                }),
+                tooltip: 'تم روشن/تیره',
+                onPressed: themeController.cycle,
               ),
               if (widget.onOpenFamilyDashboard != null)
                 IconButton(
