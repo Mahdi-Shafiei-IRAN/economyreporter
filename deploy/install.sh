@@ -231,10 +231,13 @@ ok "nginx ready"
 
 # --- 10) firewall ---
 log "Configuring firewall (ufw)"
-ufw allow OpenSSH >/dev/null 2>&1 || true
+# Allow the ACTUAL SSH port(s) first so a custom port (e.g. 9011) never locks you out.
+ssh_ports="$( { sshd -T 2>/dev/null | awk '/^port /{print $2}'; echo "${SSH_CONNECTION##* }"; } | grep -E '^[0-9]+$' | sort -u )"
+[ -n "$ssh_ports" ] || ssh_ports=22
+for p in $ssh_ports; do ufw allow "$p/tcp" >/dev/null 2>&1 || true; done
 ufw allow 'Nginx Full' >/dev/null 2>&1 || true
 ufw status | grep -q "Status: active" || yes | ufw enable >/dev/null 2>&1 || true
-ok "Firewall: SSH and web allowed"
+ok "Firewall: SSH ($(echo $ssh_ports | tr ' ' ',')) and web (80/443) allowed"
 
 # --- 11) SSL certificate ---
 if [ -n "$DOMAIN" ] && [ "$USE_SSL" -eq 1 ]; then
