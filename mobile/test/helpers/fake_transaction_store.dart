@@ -53,10 +53,19 @@ class FakeTransactionStore implements TransactionStore {
   int get _nextSeq => _seq++;
 
   ({String? ownerUserId, String? ownerName, String? walletLabel}) _attribution({
+    String? sender,
     String? cardLast4,
     String? accountRef,
     String? bankId,
   }) {
+    if (sender != null && sender.isNotEmpty) {
+      final s = findAllowedSender(_senders, sender);
+      if (s != null && s.hasOwner) {
+        final w = walletFor(_wallets,
+            cardLast4: cardLast4, accountRef: accountRef, bankId: bankId);
+        return (ownerUserId: s.ownerUserId ?? _me, ownerName: s.ownerName, walletLabel: w?.label);
+      }
+    }
     final w = walletFor(_wallets,
         cardLast4: cardLast4, accountRef: accountRef, bankId: bankId);
     if (w == null) return (ownerUserId: _me, ownerName: null, walletLabel: null);
@@ -87,6 +96,7 @@ class FakeTransactionStore implements TransactionStore {
       }
     }
     final a = _attribution(
+      sender: sender,
       cardLast4: parsed.cardLast4,
       accountRef: parsed.accountRef,
       bankId: parsed.bankId,
@@ -284,11 +294,17 @@ class FakeTransactionStore implements TransactionStore {
   Future<List<AllowedSender>> allowedSenders() async => List.of(_senders);
 
   @override
-  Future<AllowedSender> addAllowedSender(String address, {String? bankId}) async {
+  Future<AllowedSender> addAllowedSender(String address,
+      {String? bankId, String? ownerName, String? ownerUserId}) async {
     final existing = findAllowedSender(_senders, address);
     if (existing != null) return existing;
-    final sender =
-        AllowedSender(id: 's${_senderSeq++}', address: address.trim(), bankId: bankId);
+    final sender = AllowedSender(
+      id: 's${_senderSeq++}',
+      address: address.trim(),
+      bankId: bankId,
+      ownerName: ownerName,
+      ownerUserId: ownerUserId,
+    );
     _senders.add(sender);
     if (bankId != null) {
       // پیامک‌های قبلیِ بی‌بانکِ همین فرستنده، بانکِ فرستنده را می‌گیرند.
@@ -297,8 +313,8 @@ class FakeTransactionStore implements TransactionStore {
         if (t.isRemote || t.bankId != null || t.smsSender == null) continue;
         if (sender.matches(t.smsSender!)) _items[i] = t.copyWith(bankId: bankId);
       }
-      await reattributeLocal();
     }
+    await reattributeLocal();
     return sender;
   }
 
@@ -312,7 +328,10 @@ class FakeTransactionStore implements TransactionStore {
       final t = _items[i];
       if (t.isRemote || t.isDeleted) continue;
       final a = _attribution(
-          cardLast4: t.cardLast4, accountRef: t.accountRef, bankId: t.bankId);
+          sender: t.smsSender,
+          cardLast4: t.cardLast4,
+          accountRef: t.accountRef,
+          bankId: t.bankId);
       _items[i] = t.copyWith(
         ownerUserId: a.ownerUserId,
         ownerName: a.ownerName,

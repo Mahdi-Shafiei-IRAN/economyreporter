@@ -60,6 +60,37 @@ void main() {
     expect(saved.bankId, 'mellat');
   });
 
+  test('فرستنده‌ی شماره‌ای بدون بانک/کارت (مثل دیجی‌پی): با تعیین صاحب نسبت داده می‌شود',
+      () async {
+    // دیجی‌پی: فرستنده شماره است، بانک تشخیص داده نمی‌شود، پیامک شماره‌ی کارت ندارد.
+    await repo.addAllowedSender('982000123', ownerName: 'مهدی', ownerUserId: 'u-me');
+    final tx = await SmsImporter(repo).importOne(RawSms(
+      sender: '982000123',
+      body: 'پرداخت مبلغ 250,000 ریال با دیجی‌پی',
+      receivedAt: DateTime.utc(2026, 9, 1),
+    ));
+    expect(tx, isNotNull);
+    final saved = (await repo.getById(tx!.id))!;
+    expect(saved.ownerName, 'مهدی');
+    expect(saved.ownerUserId, 'u-me');
+  });
+
+  test('تعیین صاحبِ فرستنده بعد از ثبت: تراکنش‌های قبلیِ همان فرستنده هم صاحب می‌گیرند',
+      () async {
+    await repo.addAllowedSender('982000123'); // بدون صاحب
+    final tx = await SmsImporter(repo).importOne(RawSms(
+      sender: '982000123',
+      body: 'پرداخت مبلغ 90,000 ریال',
+      receivedAt: DateTime.utc(2026, 9, 2),
+    ));
+    expect((await repo.getById(tx!.id))!.ownerName, isNull);
+
+    // حالا همان فرستنده را با صاحب دوباره اضافه می‌کنیم → باید backfill شود.
+    await repo.deleteAllowedSender((await repo.allowedSenders()).single.id);
+    await repo.addAllowedSender('+982000123', ownerName: 'بابا', ownerUserId: 'u-father');
+    expect((await repo.getById(tx.id))!.ownerName, 'بابا');
+  });
+
   test('مجاز کردن فرستنده با بانک: پیامک‌های قبلیِ بی‌بانکِ همان فرستنده بانک می‌گیرند',
       () async {
     const parser = SmsParser();

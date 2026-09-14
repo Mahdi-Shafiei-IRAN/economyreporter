@@ -164,7 +164,8 @@ abstract class TransactionStore {
   Future<List<AllowedSender>> allowedSenders();
 
   /// اگر همین فرستنده (با هر شکلِ نوشتن) از قبل باشد، همان برمی‌گردد.
-  Future<AllowedSender> addAllowedSender(String address, {String? bankId});
+  Future<AllowedSender> addAllowedSender(String address,
+      {String? bankId, String? ownerName, String? ownerUserId});
   Future<void> deleteAllowedSender(String id);
 
   /// انتساب دوباره‌ی تراکنش‌های همین گوشی به کیف‌ها/کاربر جاری.
@@ -199,11 +200,22 @@ class _Attribution {
 
 _Attribution _attributionFrom(
   List<Wallet> wallets,
+  List<AllowedSender> allowed,
   String? meUserId, {
+  String? sender,
   String? cardLast4,
   String? accountRef,
   String? bankId,
 }) {
+  // اولویت با صاحبِ صریحِ فرستنده (برای پیامک‌های بی‌شماره مثل دیجی‌پی).
+  if (sender != null && sender.isNotEmpty) {
+    final s = findAllowedSender(allowed, sender);
+    if (s != null && s.hasOwner) {
+      final w = walletFor(wallets,
+          cardLast4: cardLast4, accountRef: accountRef, bankId: bankId);
+      return _Attribution(s.ownerUserId ?? meUserId, s.ownerName, w?.label);
+    }
+  }
   final w = walletFor(wallets,
       cardLast4: cardLast4, accountRef: accountRef, bankId: bankId);
   if (w == null) return _Attribution(meUserId, null, null);
@@ -284,6 +296,7 @@ class TransactionRepository implements TransactionStore {
     }
 
     final a = await _attributionFor(
+      sender: sender,
       cardLast4: parsed.cardLast4,
       accountRef: parsed.accountRef,
       bankId: parsed.bankId,
@@ -380,13 +393,16 @@ class TransactionRepository implements TransactionStore {
   }
 
   Future<_Attribution> _attributionFor({
+    String? sender,
     String? cardLast4,
     String? accountRef,
     String? bankId,
   }) async {
     return _attributionFrom(
       await wallets(),
+      await allowedSenders(),
       await getSetting(SettingKeys.meUserId),
+      sender: sender,
       cardLast4: cardLast4,
       accountRef: accountRef,
       bankId: bankId,
@@ -547,13 +563,21 @@ class TransactionRepository implements TransactionStore {
   }
 
   @override
-  Future<AllowedSender> addAllowedSender(String address, {String? bankId}) async {
+  Future<AllowedSender> addAllowedSender(String address,
+      {String? bankId, String? ownerName, String? ownerUserId}) async {
     final existing = findAllowedSender(await allowedSenders(), address);
     if (existing != null) return existing;
-    final sender =
-        AllowedSender(id: _uuid.v4(), address: address.trim(), bankId: bankId);
+    final sender = AllowedSender(
+      id: _uuid.v4(),
+      address: address.trim(),
+      bankId: bankId,
+      ownerName: ownerName,
+      ownerUserId: ownerUserId,
+    );
     await _db.insert('allowed_senders', {...sender.toMap(), 'created_at': _nowIso()});
+    // بانکِ پیامک‌های قبلیِ همین فرستنده را پر کن، و صاحب را (اگر تعیین شده) اعمال کن.
     if (bankId != null) await _backfillBank(sender);
+    await reattributeLocal();
     return sender;
   }
 
@@ -648,10 +672,11 @@ class TransactionRepository implements TransactionStore {
   Future<void> reattributeLocal() async {
     final me = await getSetting(SettingKeys.meUserId);
     final ws = await wallets();
+    final allowed = await allowedSenders();
     final rows = await _db.query(
       'transactions',
       columns: [
-        'id', 'kind', 'card_last4', 'account_ref', 'bank_id',
+        'id', 'kind', 'sms_sender', 'card_last4', 'account_ref', 'bank_id',
         'owner_user_id', 'owner_name', 'wallet_label',
       ],
       where: "origin = 'local' AND deleted_at IS NULL",
@@ -660,7 +685,9 @@ class TransactionRepository implements TransactionStore {
     for (final r in rows) {
       final a = _attributionFrom(
         ws,
+        allowed,
         me,
+        sender: r['sms_sender'] as String?,
         cardLast4: r['card_last4'] as String?,
         accountRef: r['account_ref'] as String?,
         bankId: r['bank_id'] as String?,

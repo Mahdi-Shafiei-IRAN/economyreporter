@@ -410,8 +410,10 @@ class DashboardController extends ChangeNotifier {
     );
   }
 
-  Future<void> addAllowedSender(String address, {String? bankId}) async {
-    await repository.addAllowedSender(address, bankId: bankId);
+  Future<void> addAllowedSender(String address,
+      {String? bankId, String? ownerName, String? ownerUserId}) async {
+    await repository.addAllowedSender(address,
+        bankId: bankId, ownerName: ownerName, ownerUserId: ownerUserId);
     try {
       await onSendersChanged?.call();
     } catch (_) {

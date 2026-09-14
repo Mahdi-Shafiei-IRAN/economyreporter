@@ -1,5 +1,8 @@
 /// فرستنده‌ی مجاز پیامک بانکی: فقط پیامک سرشماره‌ها/نام‌هایی که خود کاربر تعیین
 /// کرده خودکار ثبت می‌شود؛ بقیه (تبلیغ، فروشگاه، …) حتی اگر مبلغ داشته باشند نه.
+///
+/// می‌شود «صاحب» هم برایش تعیین کرد تا تراکنش‌های این فرستنده به همان شخص نسبت داده
+/// شوند — حتی وقتی پیامک شماره‌ی کارت ندارد (مثل دیجی‌پی که فرستنده‌اش شماره است).
 library;
 
 import '../../../core/sms/digit_utils.dart';
@@ -13,16 +16,39 @@ class AllowedSender {
   /// بانکِ این فرستنده؛ قدم اول پارس (تشخیص بانک از فرستنده) از همین است.
   final String? bankId;
 
-  const AllowedSender({required this.id, required this.address, this.bankId});
+  /// نام صاحبِ تراکنش‌های این فرستنده (اگر تعیین شده باشد).
+  final String? ownerName;
+
+  /// شناسه‌ی کاربرِ صاحب در سرور (اگر عضو خانواده است).
+  final String? ownerUserId;
+
+  const AllowedSender({
+    required this.id,
+    required this.address,
+    this.bankId,
+    this.ownerName,
+    this.ownerUserId,
+  });
 
   bool matches(String sender) => sameSender(address, sender);
 
-  Map<String, Object?> toMap() => {'id': id, 'address': address, 'bank_id': bankId};
+  /// صاحب برایش تعیین شده؟
+  bool get hasOwner => ownerName != null && ownerName!.trim().isNotEmpty;
+
+  Map<String, Object?> toMap() => {
+        'id': id,
+        'address': address,
+        'bank_id': bankId,
+        'owner_name': ownerName,
+        'owner_user_id': ownerUserId,
+      };
 
   factory AllowedSender.fromMap(Map<String, Object?> m) => AllowedSender(
         id: m['id'] as String,
         address: m['address'] as String,
         bankId: m['bank_id'] as String?,
+        ownerName: m['owner_name'] as String?,
+        ownerUserId: m['owner_user_id'] as String?,
       );
 }
 

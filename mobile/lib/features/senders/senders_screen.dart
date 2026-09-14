@@ -55,11 +55,49 @@ class _SendersScreenState extends State<SendersScreen> {
       ..showSnackBar(SnackBar(content: Text(message)));
   }
 
+  /// صاحبِ تراکنش‌های این فرستنده (پیش‌فرض: خودم).
+  Future<({String name, String? userId})?> _pickOwner(String address) async {
+    final me = (name: _c.meName ?? 'خودم', userId: _c.meUserId);
+    final others = _c.members.where((m) => m.id != _c.meUserId).toList();
+    if (others.isEmpty) return me; // فقط خودم — بی‌سروصدا همین.
+    return showModalBottomSheet<({String name, String? userId})>(
+      context: context,
+      useSafeArea: true,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Text('تراکنش‌های «$address» مالِ کیست؟',
+                  style: Theme.of(context).textTheme.titleMedium),
+            ),
+            ListTile(
+              leading: const Icon(Icons.person_rounded),
+              title: Text('${me.name} (من)'),
+              onTap: () => Navigator.pop(context, me),
+            ),
+            for (final m in others)
+              ListTile(
+                leading: const Icon(Icons.person_outline_rounded),
+                title: Text(m.name),
+                onTap: () => Navigator.pop(context, (name: m.name, userId: m.id)),
+              ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
   Future<void> _allow(SenderCandidate s) async {
-    await _c.addAllowedSender(s.address, bankId: s.bankId);
+    final owner = await _pickOwner(s.address);
+    if (owner == null) return;
+    await _c.addAllowedSender(s.address,
+        bankId: s.bankId, ownerName: owner.name, ownerUserId: owner.userId);
     if (!mounted) return;
     _refresh();
-    _snack('«${s.address}» مجاز شد؛ پیامک‌هایش ثبت می‌شود.');
+    _snack('«${s.address}» مجاز شد؛ تراکنش‌هایش به ${owner.name} نسبت داده می‌شود.');
   }
 
   Future<void> _reject(SenderCandidate s) async {
@@ -99,7 +137,10 @@ class _SendersScreenState extends State<SendersScreen> {
       builder: (_) => const _AddSenderDialog(),
     );
     if (result == null) return;
-    await _c.addAllowedSender(result.$1, bankId: result.$2);
+    final owner = await _pickOwner(result.$1);
+    if (owner == null) return;
+    await _c.addAllowedSender(result.$1,
+        bankId: result.$2, ownerName: owner.name, ownerUserId: owner.userId);
     if (mounted) _refresh();
   }
 
@@ -141,9 +182,12 @@ class _SendersScreenState extends State<SendersScreen> {
                             leading: Icon(Icons.verified_outlined,
                                 color: theme.colorScheme.primary),
                             title: _address(allowed[i].address, null),
-                            subtitle: Text(allowed[i].bankId == null
-                                ? 'بانک نامشخص'
-                                : bankNameById(allowed[i].bankId!)),
+                            subtitle: Text([
+                              allowed[i].bankId == null
+                                  ? 'بانک نامشخص'
+                                  : bankNameById(allowed[i].bankId!),
+                              if (allowed[i].hasOwner) 'صاحب: ${allowed[i].ownerName}',
+                            ].join(' • ')),
                             trailing: IconButton(
                               tooltip: 'برداشتن از فهرست',
                               icon: const Icon(Icons.remove_circle_outline_rounded),

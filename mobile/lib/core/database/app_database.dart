@@ -9,7 +9,7 @@ import 'package:sqflite/sqflite.dart';
 import 'package:uuid/uuid.dart';
 
 const String kDbName = 'economy.db';
-const int kDbVersion = 6;
+const int kDbVersion = 7;
 
 /// دسته‌های پیش‌فرض (قابل ویرایش توسط کاربر بعداً).
 const List<String> kDefaultCategories = [
@@ -85,6 +85,22 @@ Future<void> migrateSchema(Database db, int oldVersion, int newVersion) async {
   if (oldVersion < 6) {
     // نسخه ۶: فرستنده‌های مجاز پیامک (فقط پیامک این‌ها خودکار ثبت می‌شود).
     await _createAllowedSendersTable(db);
+  }
+  if (oldVersion < 7) {
+    // نسخه ۷: صاحبِ هر فرستنده (تا پیامک‌های بی‌شماره مثل دیجی‌پی هم نسبت داده شوند).
+    // idempotent: اگر جدول در مهاجرت ۶ با شکلِ جدید ساخته شده باشد، ستون‌ها از قبل هستند.
+    await _ensureColumn(db, 'allowed_senders', 'owner_name', 'TEXT');
+    await _ensureColumn(db, 'allowed_senders', 'owner_user_id', 'TEXT');
+  }
+}
+
+/// اگر ستون نبود، اضافه‌اش می‌کند (تا ALTER تکراری خطا ندهد).
+Future<void> _ensureColumn(Database db, String table, String col, String type) async {
+  final cols = (await db.rawQuery('PRAGMA table_info($table)'))
+      .map((r) => r['name'] as String)
+      .toSet();
+  if (!cols.contains(col)) {
+    await db.execute('ALTER TABLE $table ADD COLUMN $col $type');
   }
 }
 
@@ -215,6 +231,8 @@ Future<void> _createAllowedSendersTable(Database db) async {
       id TEXT PRIMARY KEY,
       address TEXT NOT NULL,
       bank_id TEXT,
+      owner_name TEXT,
+      owner_user_id TEXT,
       created_at TEXT NOT NULL
     )
   ''');

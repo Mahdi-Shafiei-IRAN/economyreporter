@@ -20,6 +20,7 @@ import 'features/dashboard/dashboard_controller.dart';
 import 'features/dashboard/dashboard_screen.dart';
 import 'features/family/family_dashboard_screen.dart';
 import 'features/notifications/notification_service.dart';
+import 'features/senders/senders_screen.dart';
 import 'features/sms/sms_inbox_service.dart';
 import 'features/transactions/data/transaction_repository.dart';
 
@@ -248,7 +249,15 @@ class _RootState extends State<_Root> with WidgetsBindingObserver {
     }
 
     final launchPayload = await NotificationService.launchPayload();
-    if (launchPayload != null) _openCategorize(launchPayload);
+    if (launchPayload != null) {
+      _openCategorize(launchPayload);
+    } else if (granted && s.dashboard.needsSenderSetup) {
+      // بعد از نصب/ورود: اگر هیچ فرستنده‌ای مجاز نشده، صفحه‌ی انتخاب فرستنده‌ها را
+      // خودکار باز کن تا کاربر از روی پیامک‌هایش انتخاب و صاحب تعیین کند.
+      navigatorKey.currentState?.push(MaterialPageRoute(
+        builder: (_) => SendersScreen(controller: s.dashboard),
+      ));
+    }
   }
 
   /// باز کردن صفحه‌ی دسته‌بندی برای تراکنشِ نوتیفیکیشن.
@@ -282,7 +291,11 @@ class _RootState extends State<_Root> with WidgetsBindingObserver {
                 (await services.refreshFromServer(force: true)).message,
             onOpenFamilyDashboard: () => Navigator.of(context).push(
               MaterialPageRoute(
-                builder: (_) => FamilyDashboardScreen(api: services.dashboardApi),
+                builder: (_) => FamilyDashboardScreen(
+                  api: services.dashboardApi,
+                  initialPeriod: services.dashboard.period,
+                  now: services.dashboard.now,
+                ),
               ),
             ),
           );
