@@ -54,9 +54,21 @@ case "$cmd" in
   env)      need_root env; "${EDITOR:-nano}" "$ENVFILE"; systemctl restart "$APP"; echo "restarted"; ;;
   update)
     need_root update
-    echo "==> pulling $BRANCH"
-    gitq fetch --depth 1 origin "$BRANCH" -q
-    gitq reset --hard "origin/$BRANCH" -q
+    src="$(cat "$BASE/.source" 2>/dev/null || true)"
+    if [ -n "$src" ] && [ -d "$src" ]; then
+      echo "==> syncing from local source: $src"
+      git -C "$src" pull -q 2>/dev/null || true   # refresh if reachable; ok if not
+      if command -v rsync >/dev/null 2>&1; then
+        rsync -a --delete --exclude='.env' --exclude='mobile/build' "$src"/ "$APPDIR"/
+      else
+        cp -a "$src/." "$APPDIR/"
+      fi
+      chown -R "$APP:$APP" "$APPDIR"
+    else
+      echo "==> pulling $BRANCH from git"
+      gitq fetch --depth 1 origin "$BRANCH" -q
+      gitq reset --hard "origin/$BRANCH" -q
+    fi
     echo "==> dependencies"
     sudo -u "$APP" "$VENV/bin/pip" install -q -r "$BACKEND/requirements/production.txt"
     echo "==> migrate + static"

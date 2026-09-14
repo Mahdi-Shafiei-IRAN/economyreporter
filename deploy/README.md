@@ -101,6 +101,25 @@ flutter build apk --release --split-per-abi \
 
 ---
 
+## سرورهایی که به گیت‌هاب دسترسی ندارند (اینترنت ایران)
+
+اگر سرور نمی‌تواند به github.com وصل شود (خطای timeout روی پورت 443)، نصب‌کننده خودش از
+**همان نسخه‌ای که اسکریپت را از داخلش اجرا می‌کنی** کد را کپی می‌کند (نیازی به گیت‌هاب نیست).
+اگر pip هم به pypi.org نرسید، یک آینه‌ی ایرانی بده:
+
+```bash
+sudo bash deploy/install.sh --domain koalaverifyshop.ir --email you@example.com      --pip-index https://mirror-pypi.runflare.com/simple
+```
+
+یا برای تست اول روی IP بدون HTTPS:
+```bash
+sudo bash deploy/install.sh --no-ssl --pip-index https://mirror-pypi.runflare.com/simple
+```
+
+به‌روزرسانی هم از همان پوشه‌ی محلی انجام می‌شود (economyctl update). اگر گواهی Let's Encrypt
+هم به‌خاطر فیلترینگ گرفته نشد، از **Cloudflare Origin Certificate** استفاده کن (رایگان، بدون
+نیاز به دسترسی سرور به خارج).
+
 ## مدیریت روزمره (`economyctl`)
 
 ```bash

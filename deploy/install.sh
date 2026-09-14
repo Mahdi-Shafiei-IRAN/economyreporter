@@ -33,6 +33,8 @@ NGINX_SITE="/etc/nginx/sites-available/$APP"
 SOCK="/run/$APP/gunicorn.sock"
 SETTINGS="config.settings.production"
 WORKERS="${WORKERS:-3}"
+SOURCE="${SOURCE:-}"
+PIP_INDEX="${PIP_INDEX:-}"
 
 DOMAIN=""
 EMAIL=""
@@ -50,6 +52,8 @@ while [ $# -gt 0 ]; do
     --email)  EMAIL="${2:-}";  shift 2;;
     --branch) BRANCH="${2:-}"; shift 2;;
     --no-ssl) USE_SSL=0; shift;;
+    --source) SOURCE="${2:-}"; shift 2;;
+    --pip-index) PIP_INDEX="${2:-}"; shift 2;;
     -h|--help) grep -E '^#' "$0" | sed -E 's/^# ?//'; exit 0;;
     *) die "Unknown argument: $1";;
   esac
@@ -63,13 +67,19 @@ if [ -n "$DOMAIN" ] && [ "$USE_SSL" -eq 1 ] && [ -z "$EMAIL" ]; then
   [ -n "$EMAIL" ] || die "SSL needs --email (or pass --no-ssl)."
 fi
 
+# If no --source given, use the checkout this script runs from (offline / blocked github).
+if [ -z "$SOURCE" ]; then
+  _self="$(cd "$(dirname "$0")/.." 2>/dev/null && pwd || true)"
+  [ -n "$_self" ] && [ -f "$_self/backend/manage.py" ] && SOURCE="$_self"
+fi
+
 # --- 1) system packages ---
 log "Installing system packages (Python, PostgreSQL, nginx, ...)"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
 apt-get install -y -qq \
   python3 python3-venv python3-dev build-essential libpq-dev \
-  postgresql nginx git curl ufw openssl >/dev/null
+  postgresql nginx git curl ufw openssl rsync >/dev/null
 if [ -n "$DOMAIN" ] && [ "$USE_SSL" -eq 1 ]; then
   apt-get install -y -qq certbot python3-certbot-nginx >/dev/null
 fi
@@ -85,20 +95,33 @@ usermod -aG "$APP" www-data          # nginx must read the gunicorn socket
 chown "$APP:$APP" "$BASE"
 
 # --- 3) fetch / update code ---
-log "Fetching project code into $APPDIR"
-if [ -d "$APPDIR/.git" ]; then
+log "Placing project code into $APPDIR"
+mkdir -p "$APPDIR"
+if [ -n "$SOURCE" ]; then
+  # Copy from a local checkout (works when the server can't reach github).
+  if command -v rsync >/dev/null 2>&1; then
+    rsync -a --delete --exclude='.env' --exclude='mobile/build' "$SOURCE"/ "$APPDIR"/
+  else
+    cp -a "$SOURCE/." "$APPDIR/"
+  fi
+  chown -R "$APP:$APP" "$APPDIR"
+  echo "$SOURCE" > "$BASE/.source"; chown "$APP:$APP" "$BASE/.source"
+  ok "Code copied from local source: $SOURCE"
+elif [ -d "$APPDIR/.git" ]; then
   sudo -u "$APP" git -C "$APPDIR" fetch --depth 1 origin "$BRANCH" -q
   sudo -u "$APP" git -C "$APPDIR" reset --hard "origin/$BRANCH" -q
+  ok "Code updated from git"
 else
   sudo -u "$APP" git clone --depth 1 -b "$BRANCH" "$REPO" "$APPDIR" -q
+  ok "Code cloned from git"
 fi
-ok "Code ready ($(sudo -u "$APP" git -C "$APPDIR" rev-parse --short HEAD))"
 
 # --- 4) python venv ---
 log "Creating venv and installing dependencies"
 [ -d "$VENV" ] || sudo -u "$APP" python3 -m venv "$VENV"
-sudo -u "$APP" "$VENV/bin/pip" install -q -U pip wheel
-sudo -u "$APP" "$VENV/bin/pip" install -q -r "$BACKEND/requirements/production.txt"
+pip_flags=""; [ -n "$PIP_INDEX" ] && pip_flags="-i $PIP_INDEX"
+sudo -u "$APP" "$VENV/bin/pip" install -q $pip_flags -U pip wheel
+sudo -u "$APP" "$VENV/bin/pip" install -q $pip_flags -r "$BACKEND/requirements/production.txt"
 ok "Dependencies installed"
 
 # --- 5) PostgreSQL ---
