@@ -4,9 +4,15 @@ from .models import Budget
 
 
 class BudgetSerializer(serializers.ModelSerializer):
-    family = serializers.PrimaryKeyRelatedField(read_only=True)
-
     class Meta:
         model = Budget
-        fields = ["id", "family", "category", "period", "limit_rial", "created_at"]
-        read_only_fields = ["id", "family", "created_at"]
+        fields = [
+            "id",
+            "category_name",
+            "period",
+            "limit_rial",
+            "is_deleted",
+            "client_updated_at",
+            "updated_at",
+        ]
+        read_only_fields = ["updated_at"]

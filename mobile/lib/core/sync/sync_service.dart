@@ -200,10 +200,11 @@ class SyncService {
       }
     }
 
-    // کیف‌ها (کارت/حساب) هم هم‌گام شوند؛ خطایش نباید کل sync را بشکند.
+    // کیف‌ها و بودجه‌ها هم هم‌گام شوند؛ خطایشان نباید کل sync را بشکند.
     if (error == null) {
       try {
         await _syncWallets(fromScratch: refetchAll);
+        await _syncBudgets(fromScratch: refetchAll);
       } catch (_) {
         error = 'network';
       }
@@ -284,6 +285,38 @@ class SyncService {
     }
     if (cursor != null) await _repo.setSetting(SettingKeys.walletCursor, cursor);
   }
+
+  /// هم‌گام‌سازی بودجه‌ها (مثلِ کیف‌ها؛ بین اعضای خانواده مشترک‌اند).
+  Future<void> _syncBudgets({required bool fromScratch}) async {
+    final pending = await _repo.pendingBudgets();
+    if (pending.isNotEmpty) {
+      final payloads = [for (final b in pending) _budgetPayload(b)];
+      await api.syncBudgets(budgets: payloads);
+      for (final b in pending) {
+        await _repo.markBudgetSynced(b['id'] as String);
+      }
+    }
+    var cursor =
+        fromScratch ? null : await _repo.getSetting(SettingKeys.budgetCursor);
+    for (var guard = 0; guard < 100; guard++) {
+      final page = await api.pullBudgets(since: cursor);
+      for (final item in page.results) {
+        await _repo.applyRemoteBudget(item);
+      }
+      if (page.cursor != null) cursor = page.cursor;
+      if (!page.hasMore || page.results.isEmpty) break;
+    }
+    if (cursor != null) await _repo.setSetting(SettingKeys.budgetCursor, cursor);
+  }
+
+  Map<String, dynamic> _budgetPayload(Map<String, Object?> b) => {
+        'id': b['id'],
+        'category_name': b['category_name'] ?? '',
+        'period': b['period'] ?? 'monthly',
+        'limit_rial': b['limit_rial'] ?? 0,
+        'is_deleted': (b['is_deleted'] as int? ?? 0) == 1,
+        'client_updated_at': b['client_updated_at'],
+      };
 
   Map<String, dynamic> _walletPayload(Map<String, Object?> w) => {
         'id': w['id'],

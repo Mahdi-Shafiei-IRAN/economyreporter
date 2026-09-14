@@ -3,6 +3,7 @@ import 'package:economy/core/sms/sms_parser.dart';
 import 'package:economy/core/sync/remote_transaction_api.dart';
 import 'package:economy/core/sync/sync_service.dart';
 import 'package:economy/features/transactions/data/transaction_repository.dart';
+import 'package:economy/features/budgets/data/budget.dart';
 import 'package:economy/features/wallets/data/wallet.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sqflite/sqflite.dart';
@@ -53,6 +54,21 @@ class FakeRemoteTransactionApi implements RemoteTransactionApi {
   Future<PullPage> pullWallets({String? since}) async {
     if (throwNetwork) throw Exception('network down');
     return walletPages.isEmpty ? PullPage.empty : walletPages.removeAt(0);
+  }
+
+  final List<List<Map<String, dynamic>>> sentBudgets = [];
+  final List<PullPage> budgetPages = [];
+
+  @override
+  Future<void> syncBudgets({required List<Map<String, dynamic>> budgets}) async {
+    if (throwNetwork) throw Exception('network down');
+    sentBudgets.add(budgets);
+  }
+
+  @override
+  Future<PullPage> pullBudgets({String? since}) async {
+    if (throwNetwork) throw Exception('network down');
+    return budgetPages.isEmpty ? PullPage.empty : budgetPages.removeAt(0);
   }
 }
 
@@ -271,6 +287,28 @@ void main() {
       ]));
     await serviceWith(api).sync();
     expect((await repo.wallets()).where((w) => w.id == 'srv-2'), isEmpty);
+  });
+
+  test('بودجه‌ها هم‌گام می‌شوند: pending آپلود و بودجه‌ی سرور محلی می‌شود', () async {
+    await repo.addBudget(const Budget(id: '', categoryName: 'میوه', limitRial: 500000));
+    final api = FakeRemoteTransactionApi()
+      ..budgetPages.add(const PullPage(results: [
+        {
+          'id': 'srv-b1',
+          'category_name': 'قبوض',
+          'period': 'monthly',
+          'limit_rial': 800000,
+          'is_deleted': false,
+          'updated_at': '2026-09-10T08:00:00Z',
+        },
+      ]));
+
+    await serviceWith(api).sync();
+
+    expect(api.sentBudgets.single.single['category_name'], 'میوه');
+    expect(await repo.pendingBudgets(), isEmpty);
+    final names = (await repo.budgets()).map((b) => b.categoryName).toSet();
+    expect(names, containsAll(['میوه', 'قبوض']));
   });
 
   test('عضوِ عادی: تراکنشِ بقیه از سرور اعمال نمی‌شود (حریم مدیر)', () async {

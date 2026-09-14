@@ -11,6 +11,7 @@ import '../../../core/sms/digit_utils.dart';
 import '../../../core/sms/jalali.dart';
 import '../../../core/sms/models.dart';
 import '../../../core/sms/sms_fingerprint.dart';
+import '../../budgets/data/budget.dart';
 import '../../categories/data/category.dart';
 import '../../senders/data/allowed_sender.dart';
 import '../../wallets/data/wallet.dart';
@@ -89,6 +90,9 @@ class SettingKeys {
 
   /// cursor دریافتِ کیف‌ها از سرور.
   static const walletCursor = 'wallet_cursor';
+
+  /// cursor دریافتِ بودجه‌ها از سرور.
+  static const budgetCursor = 'budget_cursor';
 }
 
 /// پنجره‌ی ضدتکرارِ محتوایی: دریافت زنده و خواندن صندوقِ همان پیامک
@@ -179,6 +183,20 @@ abstract class TransactionStore {
   Future<List<Map<String, Object?>>> pendingWallets();
   Future<void> markWalletSynced(String id);
   Future<void> applyRemoteWallet(Map<String, dynamic> j);
+
+  // --- بودجه‌ها (سقفِ ماهانه‌ی هر دسته) ---
+  Future<List<Budget>> budgets();
+  Future<void> addBudget(Budget budget);
+  Future<void> updateBudget(Budget budget);
+  Future<void> deleteBudget(String id);
+
+  /// بودجه‌ها همراهِ مقدارِ خرج‌شده‌ی همان دسته در بازه.
+  Future<List<BudgetUsage>> budgetUsage({DateTime? from, DateTime? to});
+
+  // هم‌گام‌سازی بودجه‌ها با سرور.
+  Future<List<Map<String, Object?>>> pendingBudgets();
+  Future<void> markBudgetSynced(String id);
+  Future<void> applyRemoteBudget(Map<String, dynamic> j);
 
   // --- فرستنده‌های مجاز پیامک (فقط پیامک این‌ها خودکار ثبت می‌شود) ---
   Future<List<AllowedSender>> allowedSenders();
@@ -641,6 +659,109 @@ class TransactionRepository implements TransactionStore {
       await _db.insert('wallets', map);
     } else {
       await _db.update('wallets', map, where: 'id = ?', whereArgs: [id]);
+    }
+  }
+
+  // --- بودجه‌ها -------------------------------------------------------------
+
+  @override
+  Future<List<Budget>> budgets() async {
+    final rows = await _db.query('budgets',
+        where: 'is_deleted = 0', orderBy: 'category_name');
+    return rows.map(Budget.fromMap).toList();
+  }
+
+  @override
+  Future<void> addBudget(Budget budget) async {
+    final now = _nowIso();
+    final map = budget.toMap();
+    map['id'] = _uuid.v4();
+    map['created_at'] = now;
+    map['updated_at'] = now;
+    map['client_updated_at'] = now;
+    map['is_deleted'] = 0;
+    map['sync_status'] = 'pending';
+    await _db.insert('budgets', map);
+  }
+
+  @override
+  Future<void> updateBudget(Budget budget) async {
+    final now = _nowIso();
+    final map = budget.toMap()..remove('id');
+    map['updated_at'] = now;
+    map['client_updated_at'] = now;
+    map['sync_status'] = 'pending';
+    await _db.update('budgets', map, where: 'id = ?', whereArgs: [budget.id]);
+  }
+
+  @override
+  Future<void> deleteBudget(String id) async {
+    final now = _nowIso();
+    await _db.update(
+      'budgets',
+      {
+        'is_deleted': 1,
+        'updated_at': now,
+        'client_updated_at': now,
+        'sync_status': 'pending',
+      },
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
+  @override
+  Future<List<BudgetUsage>> budgetUsage({DateTime? from, DateTime? to}) async {
+    final all = await budgets();
+    if (all.isEmpty) return const [];
+    final totals = await categoryTotals(from: from, to: to);
+    final spentByName = <String, int>{};
+    for (final t in totals) {
+      spentByName[t.name] = (spentByName[t.name] ?? 0) + t.amountRial;
+    }
+    final list = [
+      for (final b in all)
+        BudgetUsage(budget: b, spentRial: spentByName[b.categoryName] ?? 0),
+    ];
+    // پرمصرف‌ترها (نزدیک به سقف) اول.
+    list.sort((a, b) => b.ratio.compareTo(a.ratio));
+    return list;
+  }
+
+  @override
+  Future<List<Map<String, Object?>>> pendingBudgets() async {
+    return _db.query('budgets', where: "sync_status = 'pending'");
+  }
+
+  @override
+  Future<void> markBudgetSynced(String id) async {
+    await _db.update('budgets', {'sync_status': 'synced'},
+        where: 'id = ?', whereArgs: [id]);
+  }
+
+  @override
+  Future<void> applyRemoteBudget(Map<String, dynamic> j) async {
+    final id = j['id'].toString();
+    final local = await _db.query('budgets',
+        columns: ['sync_status'], where: 'id = ?', whereArgs: [id], limit: 1);
+    if (local.isNotEmpty && local.first['sync_status'] == 'pending') return;
+    String? s(Object? v) =>
+        (v == null || (v is String && v.isEmpty)) ? null : v.toString();
+    final map = <String, Object?>{
+      'id': id,
+      'category_name': (j['category_name'] ?? '').toString(),
+      'period': (j['period'] ?? 'monthly').toString(),
+      'limit_rial': (j['limit_rial'] as num?)?.toInt() ?? 0,
+      'is_deleted': j['is_deleted'] == true ? 1 : 0,
+      'updated_at': s(j['updated_at']),
+      'client_updated_at': s(j['client_updated_at']),
+      'sync_status': 'synced',
+    };
+    if (local.isEmpty) {
+      map['created_at'] = _nowIso();
+      await _db.insert('budgets', map);
+    } else {
+      await _db.update('budgets', map, where: 'id = ?', whereArgs: [id]);
     }
   }
 

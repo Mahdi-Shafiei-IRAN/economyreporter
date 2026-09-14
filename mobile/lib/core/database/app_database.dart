@@ -9,7 +9,7 @@ import 'package:sqflite/sqflite.dart';
 import 'package:uuid/uuid.dart';
 
 const String kDbName = 'economy.db';
-const int kDbVersion = 8;
+const int kDbVersion = 9;
 
 /// دسته‌های پیش‌فرض (قابل ویرایش توسط کاربر بعداً).
 const List<String> kDefaultCategories = [
@@ -96,6 +96,27 @@ Future<void> migrateSchema(Database db, int oldVersion, int newVersion) async {
     // نسخه ۸: هم‌گام‌سازی کیف‌ها (کارت/حساب) با سرور تا اعضای خانواده هم ببینند.
     await _addWalletSyncColumns(db);
   }
+  if (oldVersion < 9) {
+    // نسخه ۹: بودجه‌ها (سقفِ ماهانه‌ی هر دسته) + هم‌گام‌سازی.
+    await _createBudgetsTable(db);
+  }
+}
+
+/// بودجه‌ها: سقفِ خرجِ هر دسته (بر اساسِ نامِ دسته) + ستون‌های هم‌گام‌سازی.
+Future<void> _createBudgetsTable(Database db) async {
+  await db.execute('''
+    CREATE TABLE IF NOT EXISTS budgets (
+      id TEXT PRIMARY KEY,
+      category_name TEXT NOT NULL,
+      period TEXT NOT NULL DEFAULT 'monthly',
+      limit_rial INTEGER NOT NULL,
+      is_deleted INTEGER NOT NULL DEFAULT 0,
+      updated_at TEXT,
+      client_updated_at TEXT,
+      sync_status TEXT NOT NULL DEFAULT 'pending',
+      created_at TEXT NOT NULL
+    )
+  ''');
 }
 
 /// ستون‌های هم‌گام‌سازی برای جدول wallets (idempotent).
@@ -217,6 +238,7 @@ Future<void> createSchema(Database db) async {
   await _createWalletsTable(db);
   await db.execute('ALTER TABLE wallets ADD COLUMN owner_user_id TEXT');
   await _addWalletSyncColumns(db);
+  await _createBudgetsTable(db);
   await _createSettingsTable(db);
   await _createAllowedSendersTable(db);
 }

@@ -5,5 +5,6 @@ from .models import Budget
 
 @admin.register(Budget)
 class BudgetAdmin(admin.ModelAdmin):
-    list_display = ("category", "family", "period", "limit_rial")
-    list_filter = ("family", "period")
+    list_display = ("category_name", "family", "period", "limit_rial", "is_deleted")
+    list_filter = ("family", "period", "is_deleted")
+    search_fields = ("category_name",)

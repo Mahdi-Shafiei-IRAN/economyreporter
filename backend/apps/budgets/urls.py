@@ -1,8 +1,7 @@
-from rest_framework.routers import DefaultRouter
+from django.urls import path
 
-from .views import BudgetViewSet
+from .views import BudgetSyncView
 
-router = DefaultRouter()
-router.register("budgets", BudgetViewSet, basename="budget")
-
-urlpatterns = router.urls
+urlpatterns = [
+    path("budgets/sync/", BudgetSyncView.as_view(), name="budget-sync"),
+]

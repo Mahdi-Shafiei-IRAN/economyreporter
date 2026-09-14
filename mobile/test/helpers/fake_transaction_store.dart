@@ -4,6 +4,7 @@ library;
 
 import 'package:economy/core/sms/models.dart';
 import 'package:economy/core/sms/sms_fingerprint.dart';
+import 'package:economy/features/budgets/data/budget.dart';
 import 'package:economy/features/categories/data/category.dart';
 import 'package:economy/features/senders/data/allowed_sender.dart';
 import 'package:economy/features/transactions/data/transaction_record.dart';
@@ -295,6 +296,72 @@ class FakeTransactionStore implements TransactionStore {
 
   @override
   Future<void> markWalletSynced(String id) async {}
+
+  final List<Budget> _budgets = [];
+  int _budgetSeq = 1;
+
+  @override
+  Future<List<Budget>> budgets() async => List.of(_budgets);
+
+  @override
+  Future<void> addBudget(Budget budget) async {
+    _budgets.add(Budget(
+      id: 'b${_budgetSeq++}',
+      categoryName: budget.categoryName,
+      limitRial: budget.limitRial,
+      period: budget.period,
+    ));
+  }
+
+  @override
+  Future<void> updateBudget(Budget budget) async {
+    final i = _budgets.indexWhere((b) => b.id == budget.id);
+    if (i != -1) _budgets[i] = budget;
+  }
+
+  @override
+  Future<void> deleteBudget(String id) async {
+    _budgets.removeWhere((b) => b.id == id);
+  }
+
+  @override
+  Future<List<BudgetUsage>> budgetUsage({DateTime? from, DateTime? to}) async {
+    final totals = await categoryTotals(from: from, to: to);
+    final spent = <String, int>{};
+    for (final t in totals) {
+      spent[t.name] = (spent[t.name] ?? 0) + t.amountRial;
+    }
+    return [
+      for (final b in _budgets)
+        BudgetUsage(budget: b, spentRial: spent[b.categoryName] ?? 0),
+    ];
+  }
+
+  @override
+  Future<List<Map<String, Object?>>> pendingBudgets() async => const [];
+
+  @override
+  Future<void> markBudgetSynced(String id) async {}
+
+  @override
+  Future<void> applyRemoteBudget(Map<String, dynamic> j) async {
+    if (j['is_deleted'] == true) {
+      _budgets.removeWhere((b) => b.id == j['id'].toString());
+      return;
+    }
+    final b = Budget(
+      id: j['id'].toString(),
+      categoryName: (j['category_name'] ?? '').toString(),
+      period: (j['period'] ?? 'monthly').toString(),
+      limitRial: (j['limit_rial'] as num?)?.toInt() ?? 0,
+    );
+    final i = _budgets.indexWhere((e) => e.id == b.id);
+    if (i == -1) {
+      _budgets.add(b);
+    } else {
+      _budgets[i] = b;
+    }
+  }
 
   @override
   Future<void> applyRemoteWallet(Map<String, dynamic> j) async {

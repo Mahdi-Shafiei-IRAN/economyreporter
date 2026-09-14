@@ -10,6 +10,7 @@ import 'package:flutter/foundation.dart' hide Category;
 import '../../core/family/family_api.dart';
 import '../../core/dedup/duplicate_finder.dart';
 import '../../core/reconcile/reconciliation.dart';
+import '../budgets/data/budget.dart';
 import '../../core/sms/sms_importer.dart';
 import '../../core/sms/sms_parser.dart';
 import '../../core/sync/sync_service.dart';
@@ -502,6 +503,35 @@ class DashboardController extends ChangeNotifier {
 
   /// افزودنِ عضو فقط برای مدیرِ خانواده (بدون سقفِ تعداد).
   bool get canAddMember => familyApi != null && isManager;
+
+  // --- بودجه‌ها -------------------------------------------------------------
+
+  /// بودجه‌ها همراهِ مصرفِ همین ماهِ شمسی (پرمصرف‌ترها اول).
+  Future<List<BudgetUsage>> budgetUsages() {
+    final month = Period.containing(now);
+    return repository.budgetUsage(from: month.from, to: month.to);
+  }
+
+  Future<List<Budget>> budgets() => repository.budgets();
+
+  Future<void> saveBudget(
+      {String? id, required String categoryName, required int limitRial}) async {
+    if (id == null) {
+      await repository
+          .addBudget(Budget(id: '', categoryName: categoryName, limitRial: limitRial));
+    } else {
+      await repository.updateBudget(
+          Budget(id: id, categoryName: categoryName, limitRial: limitRial));
+    }
+    onLocalChange?.call();
+    notifyListeners();
+  }
+
+  Future<void> deleteBudget(String id) async {
+    await repository.deleteBudget(id);
+    onLocalChange?.call();
+    notifyListeners();
+  }
 
   /// افزودنِ عضوِ تازه توسطِ مدیر؛ در صورت خطا پیام فارسی برمی‌گرداند، وگرنه null.
   Future<String?> addMember({

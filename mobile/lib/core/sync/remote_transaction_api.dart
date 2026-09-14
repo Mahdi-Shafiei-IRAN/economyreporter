@@ -33,6 +33,12 @@ abstract class RemoteTransactionApi {
 
   /// دریافت تغییرات کیف‌های خانواده بعد از [since].
   Future<PullPage> pullWallets({String? since});
+
+  /// آپلود دسته‌ای بودجه‌ها؛ upsert با شناسه‌ی گوشی.
+  Future<void> syncBudgets({required List<Map<String, dynamic>> budgets});
+
+  /// دریافت تغییرات بودجه‌های خانواده بعد از [since].
+  Future<PullPage> pullBudgets({String? since});
 }
 
 class DioRemoteTransactionApi implements RemoteTransactionApi {
@@ -73,6 +79,20 @@ class DioRemoteTransactionApi implements RemoteTransactionApi {
   Future<PullPage> pullWallets({String? since}) async {
     final resp = await dio.get(
       '/wallets/sync/',
+      queryParameters: {if (since != null) 'since': since},
+    );
+    return _pageFrom(resp.data);
+  }
+
+  @override
+  Future<void> syncBudgets({required List<Map<String, dynamic>> budgets}) async {
+    await dio.post('/budgets/sync/', data: {'budgets': budgets});
+  }
+
+  @override
+  Future<PullPage> pullBudgets({String? since}) async {
+    final resp = await dio.get(
+      '/budgets/sync/',
       queryParameters: {if (since != null) 'since': since},
     );
     return _pageFrom(resp.data);

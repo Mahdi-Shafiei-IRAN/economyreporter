@@ -8,6 +8,7 @@ import '../../core/format/date_format.dart';
 import '../../core/format/money_format.dart';
 import '../../core/theme/theme_controller.dart';
 import '../categories/categorize_list_screen.dart';
+import '../budgets/budgets_screen.dart';
 import '../dashboard/dashboard_controller.dart';
 import '../family/add_member_screen.dart';
 import '../review/reconciliation_screen.dart';
@@ -17,6 +18,7 @@ import '../transactions/data/period.dart';
 import '../wallets/wallets_screen.dart';
 
 const kAddMemberTileKey = Key('settings-add-member');
+const kSettingsBudgetsKey = Key('settings-budgets');
 const kSettingsWalletsKey = Key('settings-wallets');
 const kSettingsSendersKey = Key('settings-senders');
 const kShowSmsToggleKey = Key('settings-show-sms');
@@ -257,6 +259,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     onTap: widget.onOpenFamilyDashboard,
                   ),
                 ],
+              ]),
+              _Group(title: 'بودجه', children: [
+                ListTile(
+                  key: kSettingsBudgetsKey,
+                  leading: const Icon(Icons.savings_outlined),
+                  title: const Text('بودجه‌ها'),
+                  subtitle: const Text('سقفِ خرجِ ماهانه‌ی هر دسته و مصرفِ این ماه'),
+                  trailing: const Icon(Icons.chevron_left_rounded),
+                  onTap: () => _push(BudgetsScreen(controller: c)),
+                ),
               ]),
               _Group(title: 'ظاهر', children: [
                 Padding(

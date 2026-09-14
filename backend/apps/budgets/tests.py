@@ -1,75 +1,63 @@
-from django.db import IntegrityError, transaction
-from django.test import TestCase
 from django.urls import reverse
 
-from apps.categories.models import Category
 from apps.common.testutils import ApiTestCase
-from apps.families.models import FamilyGroup
+from apps.families.models import FamilyMembership
 
 from .models import Budget
 
 
-class BudgetModelTests(TestCase):
+class BudgetSyncTests(ApiTestCase):
     def setUp(self):
-        self.family = FamilyGroup.objects.create(name="خانواده")
-        self.category = Category.objects.create(family=self.family, name="خوراک")
-
-    def test_create_budget(self):
-        b = Budget.objects.create(
-            family=self.family, category=self.category, limit_rial=50_000_000
+        self.owner = self.create_user("09120000001", full_name="مدیر")
+        self.family = self.create_family_with(self.owner)
+        self.member = self.create_user("09120000002", full_name="عضو")
+        FamilyMembership.objects.create(
+            family=self.family, user=self.member, role=FamilyMembership.Role.MEMBER
         )
-        self.assertEqual(b.period, Budget.Period.MONTHLY)
-        self.assertEqual(self.family.budgets.count(), 1)
 
-    def test_duplicate_budget_per_category_period_rejected(self):
-        Budget.objects.create(
-            family=self.family, category=self.category, limit_rial=1000
-        )
-        with self.assertRaises(IntegrityError):
-            with transaction.atomic():
-                Budget.objects.create(
-                    family=self.family, category=self.category, limit_rial=2000
-                )
+    def _push(self, budgets):
+        return self.client.post(reverse("budget-sync"), {"budgets": budgets}, format="json")
 
-    def test_different_period_ok(self):
-        Budget.objects.create(
-            family=self.family,
-            category=self.category,
-            period=Budget.Period.MONTHLY,
-            limit_rial=1000,
-        )
-        Budget.objects.create(
-            family=self.family,
-            category=self.category,
-            period=Budget.Period.WEEKLY,
-            limit_rial=500,
-        )
-        self.assertEqual(Budget.objects.count(), 2)
+    def _budget(self, bid, name="میوه", limit=5000000, deleted=False):
+        return {
+            "id": bid,
+            "category_name": name,
+            "period": "monthly",
+            "limit_rial": limit,
+            "is_deleted": deleted,
+            "client_updated_at": "2026-09-10T08:00:00Z",
+        }
 
+    def test_push_and_pull(self):
+        self.auth(self.owner)
+        bid = "11111111-1111-1111-1111-111111111111"
+        r = self._push([self._budget(bid)])
+        self.assertEqual(r.status_code, 200, r.data)
+        pull = self.client.get(reverse("budget-sync"))
+        self.assertEqual(len(pull.data["results"]), 1)
+        self.assertEqual(pull.data["results"][0]["category_name"], "میوه")
+        self.assertEqual(pull.data["results"][0]["limit_rial"], 5000000)
 
-class BudgetApiTests(ApiTestCase):
-    def setUp(self):
-        self.user = self.create_user("09120000001")
-        self.family = self.create_family_with(self.user)
-        self.auth(self.user)
-        self.category = Category.objects.create(family=self.family, name="خوراک")
+    def test_upsert_idempotent(self):
+        self.auth(self.owner)
+        bid = "22222222-2222-2222-2222-222222222222"
+        self._push([self._budget(bid, limit=1000)])
+        self._push([self._budget(bid, limit=2000)])
+        self.assertEqual(Budget.objects.filter(id=bid).count(), 1)
+        self.assertEqual(Budget.objects.get(id=bid).limit_rial, 2000)
 
-    def test_create_budget(self):
-        resp = self.client.post(
-            reverse("budget-list"),
-            {"category": str(self.category.id), "limit_rial": 50_000_000},
-            format="json",
-        )
-        self.assertEqual(resp.status_code, 201)
-        self.assertEqual(str(resp.data["family"]), str(self.family.id))
+    def test_budgets_are_family_shared(self):
+        # عضو هم بودجه‌های خانواده را می‌بیند (بودجه هدفِ مشترک است)
+        self.auth(self.owner)
+        self._push([self._budget("33333333-3333-3333-3333-333333333333", name="قبوض")])
+        self.auth(self.member)
+        pull = self.client.get(reverse("budget-sync"))
+        self.assertIn("قبوض", [b["category_name"] for b in pull.data["results"]])
 
-    def test_cannot_use_other_family_category(self):
-        other_user = self.create_user("09120000002")
-        other_fam = self.create_family_with(other_user, name="دیگر")
-        other_cat = Category.objects.create(family=other_fam, name="حمل‌ونقل")
-        resp = self.client.post(
-            reverse("budget-list"),
-            {"category": str(other_cat.id), "limit_rial": 1000},
-            format="json",
-        )
-        self.assertEqual(resp.status_code, 404)
+    def test_soft_delete(self):
+        self.auth(self.owner)
+        bid = "44444444-4444-4444-4444-444444444444"
+        self._push([self._budget(bid)])
+        self._push([self._budget(bid, deleted=True)])
+        pull = self.client.get(reverse("budget-sync"))
+        self.assertTrue(pull.data["results"][0]["is_deleted"])
