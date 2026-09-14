@@ -739,12 +739,8 @@ class _PersonSection extends StatelessWidget {
                         Text(card.details!,
                             style: theme.textTheme.bodySmall
                                 ?.copyWith(color: scheme.onSurfaceVariant)),
-                      if (!card.registered)
-                        Text(
-                            identifiable
-                                ? 'هنوز در «کارت‌ها» به کسی وصل نشده'
-                                : 'بانکش معلوم نیست؛ فرستنده‌اش را در «فرستنده‌های '
-                                    'پیامک بانک» با بانکش مجاز کن',
+                      if (!card.registered && !identifiable)
+                        Text('بدون بانک — از «فرستنده‌های پیامک» مشخص کن',
                             style: theme.textTheme.bodySmall
                                 ?.copyWith(color: fin.warning)),
                       if (shortTotals(s.incomeRial, s.expenseRial).isNotEmpty)

@@ -421,8 +421,30 @@ class DashboardController extends ChangeNotifier {
       inbox: inbox,
       stored: _byId.values,
       allowed: allowedSenders,
+      dismissed: await _dismissedSenders(),
       parser: parser,
     );
+  }
+
+  Future<Set<String>> _dismissedSenders() async {
+    final raw = await repository.getSetting(SettingKeys.dismissedSenders);
+    if (raw == null) return {};
+    try {
+      return (jsonDecode(raw) as List).map((e) => e.toString()).toSet();
+    } catch (_) {
+      return {};
+    }
+  }
+
+  /// «بانک نیست»: فرستنده دیگر پیشنهاد نمی‌شود؛ تراکنش‌های اشتباهی‌اش (اگر باشد) حذف
+  /// می‌شوند. تعداد تراکنش‌های حذف‌شده را برمی‌گرداند.
+  Future<int> rejectSender(String address, Iterable<TransactionRecord> stored) async {
+    final keys = await _dismissedSenders()..add(address.trim());
+    await repository.setSetting(
+        SettingKeys.dismissedSenders, jsonEncode(keys.toList()));
+    final n = await invalidateMany(stored.where(canEdit));
+    await load();
+    return n;
   }
 
   Future<void> addAllowedSender(String address,
@@ -478,11 +500,8 @@ class DashboardController extends ChangeNotifier {
     await load();
   }
 
-  /// سقفِ اعضای خانواده (روی سرور هم اعمال می‌شود).
-  static const int maxFamilyMembers = 3;
-
-  bool get canAddMember =>
-      familyApi != null && isManager && members.length < maxFamilyMembers;
+  /// افزودنِ عضو فقط برای مدیرِ خانواده (بدون سقفِ تعداد).
+  bool get canAddMember => familyApi != null && isManager;
 
   /// افزودنِ عضوِ تازه توسطِ مدیر؛ در صورت خطا پیام فارسی برمی‌گرداند، وگرنه null.
   Future<String?> addMember({

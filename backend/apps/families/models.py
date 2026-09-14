@@ -1,7 +1,6 @@
 import uuid
 
 from django.conf import settings
-from django.core.exceptions import ValidationError
 from django.db import models
 
 
@@ -53,13 +52,3 @@ class FamilyMembership(models.Model):
 
     def __str__(self):
         return f"{self.user} @ {self.family} ({self.role})"
-
-    def clean(self):
-        # سقف اعضا (در پنل ادمین هم رعایت شود، نه فقط در API).
-        super().clean()
-        if not self.family_id:
-            return
-        limit = settings.FAMILY_MAX_MEMBERS
-        others = FamilyMembership.objects.filter(family_id=self.family_id).exclude(pk=self.pk)
-        if others.count() >= limit:
-            raise ValidationError(f"این خانواده پر است (حداکثر {limit} نفر).")

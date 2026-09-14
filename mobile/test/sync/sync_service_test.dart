@@ -213,6 +213,40 @@ void main() {
     expect(api.pullSinces, [null, 'c1']);
   });
 
+  test('عضوِ عادی: تراکنشِ بقیه از سرور اعمال نمی‌شود (حریم مدیر)', () async {
+    await repo.setSetting(SettingKeys.meUserId, 'u-me');
+    await repo.setSetting(SettingKeys.myRole, 'member');
+    final api = FakeRemoteTransactionApi()
+      ..pages.add(const PullPage(
+        results: [
+          {
+            'id': 'mine',
+            'kind': 'income',
+            'amount_rial': 1000,
+            'owner': 'u-me',
+            'captured_by': 'u-me',
+            'is_deleted': false,
+            'allocations': [],
+          },
+          {
+            'id': 'managers',
+            'kind': 'expense',
+            'amount_rial': 9000,
+            'owner': 'u-father',
+            'captured_by': 'u-father',
+            'is_deleted': false,
+            'allocations': [],
+          },
+        ],
+        cursor: 'c1',
+      ));
+
+    await serviceWith(api).sync();
+
+    expect(await repo.getById('mine'), isNotNull);
+    expect(await repo.getById('managers'), isNull); // مالِ مدیر نباید بیاید
+  });
+
   test('تکراری با شناسه‌ی دیگر روی سرور → ردیف محلی یکی می‌شود', () async {
     await seedTwo();
     final ids = (await repo.getAll()).map((t) => t.id).toList();

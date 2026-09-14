@@ -1,4 +1,3 @@
-from django.conf import settings
 from django.contrib import admin
 
 from .models import FamilyGroup, FamilyMembership
@@ -8,12 +7,11 @@ class MemberInline(admin.TabularInline):
     model = FamilyMembership
     fk_name = "family"
     extra = 1
-    max_num = settings.FAMILY_MAX_MEMBERS
     fields = ("user", "role", "joined_at")
     readonly_fields = ("joined_at",)
     autocomplete_fields = ("user",)
     verbose_name = "عضو"
-    verbose_name_plural = f"اعضا (حداکثر {settings.FAMILY_MAX_MEMBERS} نفر)"
+    verbose_name_plural = "اعضا"
 
 
 @admin.register(FamilyGroup)

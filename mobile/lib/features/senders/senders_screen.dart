@@ -102,11 +102,35 @@ class _SendersScreenState extends State<SendersScreen> {
 
   Future<void> _reject(SenderCandidate s) async {
     final editable = s.stored.where(_c.canEdit).length;
-    if (!await confirmInvalidate(context, count: editable)) return;
-    final n = await _c.invalidateMany(s.stored);
+    if (editable > 0) {
+      // تراکنش هم دارد؛ حذفشان تأیید بگیر.
+      if (!await confirmInvalidate(context, count: editable)) return;
+    } else {
+      // فقط نادیده‌گرفتن؛ یک تأیید ساده.
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text('«${s.address}» بانک نیست؟'),
+          content: const Text(
+              'این فرستنده از فهرست پیشنهادها برداشته می‌شود و دیگر نشان داده نمی‌شود.'),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('انصراف')),
+            FilledButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('بانک نیست')),
+          ],
+        ),
+      );
+      if (ok != true) return;
+    }
+    final n = await _c.rejectSender(s.address, s.stored);
     if (!mounted) return;
     _refresh();
-    _snack('${_fa(n)} تراکنش اشتباهی حذف شد.');
+    _snack(n > 0
+        ? '«${s.address}» رد شد و ${_fa(n)} تراکنش اشتباهی حذف شد.'
+        : '«${s.address}» از پیشنهادها برداشته شد.');
   }
 
   Future<void> _remove(AllowedSender s) async {
@@ -418,14 +442,15 @@ class _CandidateCard extends StatelessWidget {
                   icon: const Icon(Icons.check_rounded),
                   label: const Text('بانک است، مجاز کن'),
                 ),
-                if (removable > 0)
-                  TextButton.icon(
-                    key: ValueKey('reject-${s.address}'),
-                    style: TextButton.styleFrom(foregroundColor: scheme.error),
-                    onPressed: onReject,
-                    icon: const Icon(Icons.delete_outline_rounded),
-                    label: Text('بانک نیست؛ حذف ${_fa(removable)} تراکنش'),
-                  ),
+                TextButton.icon(
+                  key: ValueKey('reject-${s.address}'),
+                  style: TextButton.styleFrom(foregroundColor: scheme.error),
+                  onPressed: onReject,
+                  icon: const Icon(Icons.block_rounded),
+                  label: Text(removable > 0
+                      ? 'بانک نیست؛ حذف ${_fa(removable)} تراکنش'
+                      : 'بانک نیست'),
+                ),
               ],
             ),
           ],

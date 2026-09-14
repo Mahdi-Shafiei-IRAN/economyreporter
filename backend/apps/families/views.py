@@ -1,4 +1,3 @@
-from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.shortcuts import get_object_or_404
 from rest_framework import generics, status
@@ -58,7 +57,7 @@ class FamilyMembersView(APIView):
 
 
 class FamilyInviteView(APIView):
-    """افزودن عضو موجود به خانواده (فقط مالک، با سقف اعضا)."""
+    """افزودن عضو به خانواده (فقط مالک؛ بدون سقفِ تعداد)."""
 
     def post(self, request, family_id):
         family = _get_family_for_member(request.user, family_id)
@@ -69,11 +68,6 @@ class FamilyInviteView(APIView):
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
         phone = normalize_phone(data["phone"])
-
-        if family.memberships.count() >= settings.FAMILY_MAX_MEMBERS:
-            raise ValidationError(
-                f"سقف اعضای خانواده {settings.FAMILY_MAX_MEMBERS} نفر است"
-            )
 
         target = User.objects.filter(phone=phone).first()
         if target is None:

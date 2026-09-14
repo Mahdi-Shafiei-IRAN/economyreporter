@@ -66,7 +66,7 @@ Future<DashboardController> _controller(
 }
 
 void main() {
-  test('مدیر با یک عضو می‌تواند اضافه کند؛ سقف ۳ نفر', () async {
+  test('مدیر می‌تواند عضو اضافه کند (بدون سقف)', () async {
     final store = FakeTransactionStore();
     final api = _FakeFamilyApi();
     final c = await _controller(store, api);
@@ -85,7 +85,7 @@ void main() {
     expect(c.canAddMember, isFalse);
   });
 
-  test('خانواده‌ی پر (۳ نفر) اجازه‌ی افزودن نمی‌دهد', () async {
+  test('حتی با چند عضو، مدیر باز هم می‌تواند اضافه کند (سقف برداشته شد)', () async {
     final store = FakeTransactionStore();
     final api = _FakeFamilyApi(members: const [
       FamilyMember(id: 'a', name: 'یک'),
@@ -93,7 +93,7 @@ void main() {
       FamilyMember(id: 'c', name: 'سه'),
     ]);
     final c = await _controller(store, api);
-    expect(c.canAddMember, isFalse);
+    expect(c.canAddMember, isTrue);
   });
 
   test('خطای سرور به پیام فارسی تبدیل می‌شود', () async {

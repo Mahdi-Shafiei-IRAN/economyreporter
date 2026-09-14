@@ -69,8 +69,6 @@ class _AddMemberScreenState extends State<AddMemberScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final remaining =
-        DashboardController.maxFamilyMembers - widget.controller.members.length;
     return Scaffold(
       appBar: AppBar(title: const Text('افزودن عضو خانواده')),
       body: SingleChildScrollView(
@@ -79,9 +77,7 @@ class _AddMemberScreenState extends State<AddMemberScreen> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Text(
-              'شماره و رمزِ عضو را اینجا بساز؛ او با همین‌ها روی گوشیِ خودش وارد '
-              'می‌شود. تا $remaining نفرِ دیگر می‌توانی اضافه کنی '
-              '(حداکثر ${DashboardController.maxFamilyMembers} نفر).',
+              'شماره و رمزِ عضو را اینجا بساز؛ او با همین‌ها روی گوشیِ خودش وارد می‌شود.',
               style: theme.textTheme.bodyMedium,
             ),
             const SizedBox(height: 20),

@@ -126,19 +126,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     key: kAddMemberTileKey,
                     leading: const Icon(Icons.person_add_alt_1_rounded),
                     title: const Text('افزودن عضو خانواده'),
-                    subtitle: Text(
-                        'تا ${_fa(DashboardController.maxFamilyMembers - c.members.length)} نفرِ دیگر '
-                        '(حداکثر ${_fa(DashboardController.maxFamilyMembers)} نفر)'),
+                    subtitle: const Text('شماره و رمزِ عضو را بساز تا وارد شود'),
                     trailing: const Icon(Icons.chevron_left_rounded),
                     onTap: () => _push(AddMemberScreen(controller: c)),
-                  ),
-                ] else if (c.isManager && c.members.length >= DashboardController.maxFamilyMembers) ...[
-                  const Divider(indent: 56),
-                  ListTile(
-                    leading: const Icon(Icons.group_rounded),
-                    title: const Text('خانواده کامل است'),
-                    subtitle: Text('به حداکثر ${_fa(DashboardController.maxFamilyMembers)} نفر رسیده‌ای'),
-                    enabled: false,
                   ),
                 ],
               ]),

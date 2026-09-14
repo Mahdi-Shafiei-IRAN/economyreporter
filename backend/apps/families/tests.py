@@ -86,15 +86,15 @@ class FamilyTests(APITestCase):
         )
         self.assertEqual(login.status_code, 200)
 
-    def test_invite_beyond_max_fails(self):
+    def test_no_member_limit(self):
+        """سقفِ اعضا برداشته شده؛ افزودنِ بیش از ۳ نفر هم باید کار کند."""
         fid = self.create_family(self.owner).data["id"]
-        User.objects.create_user(phone="09120000004", password=PWD)
-        User.objects.create_user(phone="09120000005", password=PWD)
+        for i in range(4, 9):
+            User.objects.create_user(phone=f"0912000000{i}", password=PWD)
         self.auth(self.owner)
-        self.invite(fid, "09120000003")  # 2
-        self.invite(fid, "09120000004")  # 3 (سقف)
-        resp = self.invite(fid, "09120000005")  # 4 → رد
-        self.assertEqual(resp.status_code, 400)
+        for i in range(4, 9):
+            resp = self.invite(fid, f"0912000000{i}")
+            self.assertEqual(resp.status_code, 201, resp.data)
 
     def test_non_owner_cannot_invite(self):
         fid = self.create_family(self.owner).data["id"]

@@ -58,8 +58,11 @@ List<SenderCandidate> findSenderCandidates({
   required Iterable<RawSms> inbox,
   required Iterable<TransactionRecord> stored,
   required Iterable<AllowedSender> allowed,
+  Iterable<String> dismissed = const [],
   SmsParser parser = const SmsParser(),
 }) {
+  bool isDismissed(String address) =>
+      dismissed.any((d) => sameSender(d, address));
   final groups = <_Group>[];
   _Group groupFor(String address) {
     for (final g in groups) {
@@ -71,7 +74,9 @@ List<SenderCandidate> findSenderCandidates({
   }
 
   for (final sms in inbox) {
-    if (sms.sender.trim().isEmpty || findAllowedSender(allowed, sms.sender) != null) {
+    if (sms.sender.trim().isEmpty ||
+        isDismissed(sms.sender) ||
+        findAllowedSender(allowed, sms.sender) != null) {
       continue;
     }
     final parsed = parser.parse(sender: sms.sender, body: sms.body);
@@ -85,7 +90,7 @@ List<SenderCandidate> findSenderCandidates({
   for (final t in stored) {
     final sender = t.smsSender?.trim();
     if (sender == null || sender.isEmpty || t.isRemote || t.isDeleted) continue;
-    if (findAllowedSender(allowed, sender) != null) continue;
+    if (isDismissed(sender) || findAllowedSender(allowed, sender) != null) continue;
     final g = groupFor(sender)..bankId ??= t.bankId;
     g.stored.add(t);
     if (t.smsBody != null) g.offer(t.smsBody!, t.smsReceivedAt ?? t.effectiveTime);

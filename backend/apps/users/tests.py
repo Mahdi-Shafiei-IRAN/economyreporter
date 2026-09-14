@@ -197,14 +197,6 @@ class AdminPanelTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(User.objects.filter(phone="09125551234").count(), 1)
 
-    def test_full_family_rejects_another_member(self):
-        for i in range(settings.FAMILY_MAX_MEMBERS):
-            u = User.objects.create_user(phone=f"0912000100{i}", password=PWD)
-            FamilyMembership.objects.create(family=self.family, user=u)
-        resp = self._add_user("09125551234", "اضافه", self.family)
-        self.assertEqual(resp.status_code, 200)
-        self.assertFalse(User.objects.filter(phone="09125551234").exists())
-
     def test_soft_delete_action_reaches_phones(self):
         member = User.objects.create_user(phone="09125551234", password=PWD)
         tx = Transaction.objects.create(

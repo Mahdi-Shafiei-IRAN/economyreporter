@@ -227,13 +227,21 @@ class SyncService {
 
   Future<int> _pull({required bool fromScratch}) async {
     final me = await _repo.getSetting(SettingKeys.meUserId);
+    // عضوِ عادی فقط تراکنش‌های خودش را می‌بیند؛ حتی اگر سرور (هنوز به‌روزنشده)
+    // داده‌ی بقیه را بفرستد، اینجا کنار گذاشته می‌شود تا جزئیاتِ مدیر لو نرود.
+    final memberOnly =
+        me != null && (await _repo.getSetting(SettingKeys.myRole)) == 'member';
     var cursor = fromScratch ? null : await _repo.getSetting(SettingKeys.pullCursor);
     var fromOthers = 0;
     for (var guard = 0; guard < 100; guard++) {
       final page = await api.pull(since: cursor);
       for (final item in page.results) {
-        await _repo.applyRemote(item);
+        final owner = item['owner']?.toString();
         final capturedBy = item['captured_by']?.toString();
+        if (memberOnly && owner != me && capturedBy != me) {
+          continue; // مالِ عضوِ دیگر یا کارتِ بی‌صاحبِ گوشیِ دیگر → نادیده
+        }
+        await _repo.applyRemote(item);
         if (me == null || capturedBy != me) fromOthers++;
       }
       if (page.cursor != null) cursor = page.cursor;

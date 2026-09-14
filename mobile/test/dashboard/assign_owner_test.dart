@@ -59,6 +59,6 @@ void main() {
     await pumpApp(tester);
 
     expect(find.text('تعیین صاحب'), findsOneWidget); // فقط برای کارتِ بلو
-    expect(find.textContaining('بانکش معلوم نیست'), findsOneWidget);
+    expect(find.textContaining('بدون بانک'), findsOneWidget);
   });
 }

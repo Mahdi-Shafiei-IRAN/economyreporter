@@ -75,6 +75,9 @@ class SettingKeys {
   /// JSON: کلید گروه‌های تکراری که کاربر «تکراری نیست» زده.
   static const dismissedDuplicates = 'dismissed_dups';
 
+  /// JSON: فرستنده‌هایی که کاربر «بانک نیست» زده تا دیگر پیشنهاد نشوند.
+  static const dismissedSenders = 'dismissed_senders';
+
   /// شناسه‌ی ثابت این گوشی (برای sync).
   static const deviceId = 'device_id';
 
