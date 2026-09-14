@@ -13,6 +13,7 @@ import 'core/sync/remote_transaction_api.dart';
 import 'core/sync/sync_service.dart';
 import 'core/theme/app_theme.dart';
 import 'core/theme/theme_controller.dart';
+import 'core/update/update_service.dart';
 import 'features/auth/auth_controller.dart';
 import 'features/auth/login_screen.dart';
 import 'features/categories/categorize_screen.dart';
@@ -64,6 +65,7 @@ class _Services {
   final ProfileService profile;
   final RemoteDashboardApi dashboardApi;
   final SmsInboxService smsInbox;
+  final UpdateService updater;
 
   const _Services({
     required this.auth,
@@ -72,6 +74,7 @@ class _Services {
     required this.profile,
     required this.dashboardApi,
     required this.smsInbox,
+    required this.updater,
   });
 
   /// پروفایل/اعضا از سرور → ارسال و دریافت تراکنش‌ها → تازه‌سازی صفحه.
@@ -161,6 +164,7 @@ class _BootstrapState extends State<_Bootstrap> {
       profile: profile,
       dashboardApi: DioRemoteDashboardApi(api.dio),
       smsInbox: smsInbox,
+      updater: UpdateService(AppConfig.updatesBaseUrl),
     );
   }
 
@@ -257,6 +261,69 @@ class _RootState extends State<_Root> with WidgetsBindingObserver {
       navigatorKey.currentState?.push(MaterialPageRoute(
         builder: (_) => SendersScreen(controller: s.dashboard),
       ));
+    }
+
+    _checkForUpdate();
+  }
+
+  /// چک نسخه‌ی جدید از سرور و پیشنهاد به‌روزرسانی (بی‌صدا اگر آفلاین/نبود).
+  Future<void> _checkForUpdate() async {
+    final info = await widget.services.updater.check();
+    if (info == null || !mounted) return;
+    final ctx = navigatorKey.currentContext;
+    if (ctx == null || !ctx.mounted) return;
+    final go = await showDialog<bool>(
+      context: ctx,
+      builder: (context) => AlertDialog(
+        icon: const Icon(Icons.system_update_rounded),
+        title: Text('نسخه‌ی جدید (${info.versionName}) آماده است'),
+        content: Text(info.notes.isEmpty
+            ? 'یک نسخه‌ی تازه‌ی برنامه روی سرور هست. همین حالا به‌روزرسانی کن.'
+            : info.notes),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('بعداً'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('به‌روزرسانی'),
+          ),
+        ],
+      ),
+    );
+    if (go == true) _runUpdate(info);
+  }
+
+  Future<void> _runUpdate(AppUpdateInfo info) async {
+    final ctx = navigatorKey.currentContext;
+    if (ctx == null || !ctx.mounted) return;
+    final progress = ValueNotifier<double>(0);
+    showDialog<void>(
+      context: ctx,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: const Text('در حال دانلود…'),
+        content: ValueListenableBuilder<double>(
+          valueListenable: progress,
+          builder: (context, value, _) => Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              LinearProgressIndicator(value: value == 0 ? null : value),
+              const SizedBox(height: 8),
+              Text('${(value * 100).round()}٪'),
+            ],
+          ),
+        ),
+      ),
+    );
+    try {
+      await widget.services.updater
+          .downloadAndInstall(info, onProgress: (p) => progress.value = p);
+    } catch (_) {
+      // دانلود/نصب نشد
+    } finally {
+      navigatorKey.currentState?.pop(); // بستن دیالوگ دانلود
     }
   }
 

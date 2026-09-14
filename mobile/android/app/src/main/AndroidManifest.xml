@@ -5,6 +5,8 @@
     <uses-permission android:name="android.permission.READ_SMS"/>
     <!-- نوتیفیکیشن دسته‌بندی -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <!-- به‌روزرسانی درون‌برنامه: نصب APK دانلودشده از سرور خودمان. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
     <application
         android:label="مالی خانواده"
         android:name="${applicationName}"

@@ -33,6 +33,8 @@ economyctl <command>
   backup [dir]  Dump the database (default: /opt/economy/backups)
   env           Edit .env (then restarts)
   renew-cert    Renew / obtain the HTTPS certificate
+  publish-apk <apk> <versionCode> <versionName> [notes]
+                Host an APK for in-app update (writes updates/version.json)
   version       Show deployed commit
   help          This help
 TXT
@@ -97,6 +99,24 @@ case "$cmd" in
     [ ${#doms[@]} -gt 0 ] || { echo "No domain in ALLOWED_HOSTS; set one with: economyctl env"; exit 1; }
     # certbot reuses the account/email registered at install time.
     certbot --nginx "${doms[@]}" --non-interactive --agree-tos --redirect --keep-until-expiring
+    ;;
+  publish-apk)
+    need_root publish-apk "$@"
+    apk="${1:-}"; code="${2:-}"; name="${3:-}"; shift 3 2>/dev/null || true
+    notes="${*:-}"
+    [ -f "$apk" ] && [ -n "$code" ] && [ -n "$name" ] || {
+      echo "usage: economyctl publish-apk <apk-file> <versionCode> <versionName> [notes]"; exit 1; }
+    dir="$BASE/updates"; mkdir -p "$dir"
+    install -m 0644 "$apk" "$dir/economy-latest.apk"
+    host="$(grep -oP '(?<=^ALLOWED_HOSTS=)[^,]+' "$ENVFILE")"
+    scheme=http; grep -q '^SECURE_SSL_REDIRECT=True' "$ENVFILE" && scheme=https
+    # نقل‌قول‌های ساده در notes را حذف کن تا JSON خراب نشود.
+    notes="$(printf '%s' "$notes" | tr -d '\"' )"
+    cat > "$dir/version.json" <<JSON
+{"versionCode": $code, "versionName": "$name", "notes": "$notes", "url": "$scheme://$host/updates/economy-latest.apk"}
+JSON
+    chown -R "$APP:$APP" "$dir"
+    echo "published: $scheme://$host/updates/economy-latest.apk  (versionCode $code)"
     ;;
   help|-h|--help) usage ;;
   *) echo "Unknown command: $cmd"; echo; usage; exit 1 ;;

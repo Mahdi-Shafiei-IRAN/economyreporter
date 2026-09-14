@@ -220,6 +220,7 @@ ok "Service is active"
 
 # --- 9) nginx ---
 log "Configuring nginx"
+mkdir -p "$BASE/updates"; chown "$APP:$APP" "$BASE/updates"   # APK + version.json for in-app updates
 if [ -n "$DOMAIN" ]; then
   case "$DOMAIN" in www.*) SERVER_NAME="$DOMAIN";; *) SERVER_NAME="$DOMAIN www.$DOMAIN";; esac
 else
@@ -237,6 +238,11 @@ server {
         alias $BACKEND/staticfiles/;
         access_log off;
         expires 7d;
+    }
+
+    location /updates/ {
+        alias $BASE/updates/;   # به‌روزرسانی درون‌برنامه (version.json + APK)
+        access_log off;
     }
 
     location / {

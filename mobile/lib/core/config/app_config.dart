@@ -9,4 +9,8 @@ class AppConfig {
     'API_BASE_URL',
     defaultValue: 'http://192.168.1.100:8000/api/v1',
   );
+
+  /// ریشه‌ی فایل‌های به‌روزرسانی روی سرور (version.json و APK)، از روی apiBaseUrl.
+  static String get updatesBaseUrl =>
+      "${apiBaseUrl.replaceFirst(RegExp(r'/api/v1/?$'), '')}/updates";
 }
