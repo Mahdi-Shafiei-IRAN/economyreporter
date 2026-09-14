@@ -11,10 +11,12 @@ import '../helpers/fake_transaction_store.dart';
 class _FakeFamilyApi implements FamilyApi {
   bool offline;
   UserProfile profile;
+  String role;
 
   _FakeFamilyApi({
     this.offline = false,
     this.profile = const UserProfile(id: 'u-me', phone: '09120000001', fullName: 'مهدی'),
+    this.role = 'owner',
   });
 
   @override
@@ -22,6 +24,9 @@ class _FakeFamilyApi implements FamilyApi {
     if (offline) throw Exception('offline');
     return profile;
   }
+
+  @override
+  Future<String?> myRole() async => role;
 
   @override
   Future<List<FamilyMember>> members() async => const [
@@ -69,6 +74,36 @@ void main() {
     final status = await ProfileService(_FakeFamilyApi(offline: true), store).refresh();
     expect(status, ProfileStatus.offline);
     expect(await store.getSetting(SettingKeys.meUserId), 'u-old');
+  });
+
+  test('عضو عادی: داده‌ی سروریِ بقیه از گوشی پاک می‌شود؛ مالِ خودش می‌ماند', () async {
+    final store = FakeTransactionStore();
+    final at = DateTime.utc(2026, 9, 10);
+    store.addRecord(TransactionRecord(
+      id: 'mine', kind: 'expense', amountRial: 1000, ownerUserId: 'u-me',
+      origin: 'remote', createdAt: at, updatedAt: at));
+    store.addRecord(TransactionRecord(
+      id: 'others', kind: 'expense', amountRial: 2000, ownerUserId: 'u-father',
+      origin: 'remote', createdAt: at, updatedAt: at));
+
+    await ProfileService(_FakeFamilyApi(role: 'member'), store).refresh();
+
+    final ids = (await store.getAll()).map((t) => t.id).toSet();
+    expect(ids, {'mine'});
+    expect(await store.getSetting(SettingKeys.myRole), 'member');
+  });
+
+  test('مدیر خانواده: داده‌ی بقیه پاک نمی‌شود', () async {
+    final store = FakeTransactionStore();
+    final at = DateTime.utc(2026, 9, 10);
+    store.addRecord(TransactionRecord(
+      id: 'others', kind: 'expense', amountRial: 2000, ownerUserId: 'u-father',
+      origin: 'remote', createdAt: at, updatedAt: at));
+
+    await ProfileService(_FakeFamilyApi(role: 'owner'), store).refresh();
+
+    expect((await store.getAll()).map((t) => t.id), contains('others'));
+    expect(await store.getSetting(SettingKeys.myRole), 'owner');
   });
 
   test('حسابِ قدیمیِ بی‌شماره (ایمیلی): باید دوباره با شماره وارد شد', () async {

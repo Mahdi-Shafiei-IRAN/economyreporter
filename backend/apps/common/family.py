@@ -33,3 +33,30 @@ def resolve_family(user, family_id=None):
     if not memberships:
         raise ValidationError("شما عضو هیچ خانواده‌ای نیستید")
     raise ValidationError("چند خانواده دارید؛ پارامتر family را مشخص کنید")
+
+
+def is_family_manager(user, family) -> bool:
+    """مدیر خانواده (owner) یا ادمین کل؛ این‌ها جزئیات همه‌ی تراکنش‌های خانواده را می‌بینند."""
+    if getattr(user, "is_superuser", False):
+        return True
+    return FamilyMembership.objects.filter(
+        family=family, user=user, role=FamilyMembership.Role.OWNER
+    ).exists()
+
+
+def role_scoped_q(user):
+    """
+    محدودیت نقش برای queryset تراکنش‌ها (که از قبل به خانواده‌های کاربر محدود شده):
+    عضو عادی فقط تراکنش‌های خودش را می‌بیند؛ مدیرِ هر خانواده کلِ همان خانواده را؛
+    ادمین کل همه را.
+    """
+    from django.db.models import Q
+
+    if getattr(user, "is_superuser", False):
+        return Q()
+    manager_family_ids = list(
+        FamilyMembership.objects.filter(
+            user=user, role=FamilyMembership.Role.OWNER
+        ).values_list("family_id", flat=True)
+    )
+    return Q(family_id__in=manager_family_ids) | Q(owner=user) | Q(captured_by=user)

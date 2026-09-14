@@ -77,6 +77,9 @@ class SettingKeys {
 
   /// نمایش متن پیامک روی ردیف تراکنش‌ها ('0' = خاموش).
   static const showSmsText = 'show_sms_text';
+
+  /// نقشِ من در خانواده: 'owner' (مدیر) یا 'member' (عضو عادی).
+  static const myRole = 'my_role';
 }
 
 /// پنجره‌ی ضدتکرارِ محتوایی: دریافت زنده و خواندن صندوقِ همان پیامک
@@ -182,6 +185,10 @@ abstract class TransactionStore {
     required String userName,
     Set<String>? memberIds,
   });
+
+  /// حذف تراکنش‌های خانواده که مالِ من نیستند و از سرور آمده‌اند (برای عضوِ عادی که
+  /// دیگر نباید جزئیاتِ بقیه را داشته باشد).
+  Future<void> purgeRemoteNotOwnedBy(String meUserId);
 
   /// تعداد تراکنش‌های منتظر ارسال به سرور.
   Future<int> pendingSyncCount();
@@ -609,6 +616,22 @@ class TransactionRepository implements TransactionStore {
   @override
   Future<void> deleteAllowedSender(String id) async {
     await _db.delete('allowed_senders', where: 'id = ?', whereArgs: [id]);
+  }
+
+  @override
+  Future<void> purgeRemoteNotOwnedBy(String meUserId) async {
+    final rows = await _db.query(
+      'transactions',
+      columns: ['id'],
+      where: "origin = 'remote' AND (owner_user_id IS NULL OR owner_user_id != ?)",
+      whereArgs: [meUserId],
+    );
+    for (final r in rows) {
+      final id = r['id'] as String;
+      await _db.delete('transaction_categories',
+          where: 'transaction_id = ?', whereArgs: [id]);
+      await _db.delete('transactions', where: 'id = ?', whereArgs: [id]);
+    }
   }
 
   @override

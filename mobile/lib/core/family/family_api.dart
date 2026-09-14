@@ -40,6 +40,9 @@ class FamilyMember {
 abstract class FamilyApi {
   Future<UserProfile> me();
   Future<List<FamilyMember>> members();
+
+  /// نقشِ من در خانواده: 'owner' (مدیر) یا 'member' (عضو عادی)؛ null اگر خانواده‌ای نبود.
+  Future<String?> myRole();
 }
 
 class DioFamilyApi implements FamilyApi {
@@ -51,6 +54,13 @@ class DioFamilyApi implements FamilyApi {
   Future<UserProfile> me() async {
     final resp = await dio.get('/auth/me/');
     return UserProfile.fromJson(Map<String, dynamic>.from(resp.data as Map));
+  }
+
+  @override
+  Future<String?> myRole() async {
+    final families = (await dio.get('/family/')).data as List? ?? const [];
+    if (families.isEmpty) return null;
+    return (families.first as Map)['my_role']?.toString();
   }
 
   @override
@@ -104,6 +114,20 @@ class ProfileService {
     } catch (_) {
       // اعضا بعداً دوباره گرفته می‌شوند
     }
+    // نقشِ من (مدیر/عضو) — تعیین می‌کند چه داده‌ای باید روی گوشی بماند.
+    String? role;
+    try {
+      role = await api.myRole();
+    } catch (_) {
+      // نقش بعداً دوباره گرفته می‌شود
+    }
+    if (role != null) await store.setSetting(SettingKeys.myRole, role);
+    final effectiveRole = role ?? await store.getSetting(SettingKeys.myRole);
+    // عضوِ عادی نباید جزئیاتِ بقیه را داشته باشد؛ داده‌ی سروریِ غیرِخودم پاک شود.
+    if (effectiveRole == 'member' && me.id.isNotEmpty) {
+      await store.purgeRemoteNotOwnedBy(me.id);
+    }
+
     final previous = await store.getSetting(SettingKeys.meUserId);
     if (previous != null && previous != me.id) {
       // حساب دیگری روی همین گوشی وارد شد (مثلاً از «کاربر تست» به حساب واقعی).

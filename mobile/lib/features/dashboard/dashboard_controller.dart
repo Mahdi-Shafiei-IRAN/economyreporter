@@ -71,6 +71,7 @@ class DashboardController extends ChangeNotifier {
   List<FamilyMember> members = const [];
   String? meUserId;
   String? meName;
+  String? myRole;
   DateTime? categorizeFrom;
   SyncStatusInfo syncStatus = const SyncStatusInfo();
   Map<String, TransactionRecord> _byId = const {};
@@ -108,6 +109,10 @@ class DashboardController extends ChangeNotifier {
   /// تا فرستنده‌ی مجازی تعیین نشود، هیچ پیامکی خودکار ثبت نمی‌شود.
   bool get needsSenderSetup => allowedSenders.isEmpty;
 
+  /// مدیر خانواده (یا نقشِ نامعلوم)؛ عضو عادی فقط تراکنش‌های خودش را دارد و جمعِ
+  /// خانواده را از «داشبورد خانواده» می‌بیند.
+  bool get isManager => myRole != 'member';
+
   /// همه‌ی افرادی که تراکنش دارند (برای انتخاب شخص؛ «نامشخص» آخر).
   List<String> get people {
     final names = {for (final t in _byId.values) personOf(t)}.toList()
@@ -131,6 +136,7 @@ class DashboardController extends ChangeNotifier {
     }
     meUserId = await repository.getSetting(SettingKeys.meUserId);
     meName = await repository.getSetting(SettingKeys.meName);
+    myRole = await repository.getSetting(SettingKeys.myRole);
     members = FamilyMember.decodeList(
         await repository.getSetting(SettingKeys.familyMembers));
     categorizeFrom = await repository.categorizeFrom();

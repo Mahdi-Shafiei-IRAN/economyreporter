@@ -314,7 +314,8 @@ class SyncOwnershipTests(ApiTestCase):
         gone = dict(item, is_deleted=True, client_updated_at="2026-09-10T11:00:00Z")
         self.assertEqual(self._push(self.father, gone)[0]["status"], "updated")
 
-        self.auth(self.mother)
+        # مدیر خانواده (me) حذف را در دریافت می‌بیند؛ صاحبش (بابا) هم.
+        self.auth(self.me)
         resp = self.client.get(self.url)
         row = next(r for r in resp.data["results"] if r["id"] == item["id"])
         self.assertTrue(row["is_deleted"])
@@ -323,7 +324,8 @@ class SyncOwnershipTests(ApiTestCase):
         a, b = self._item(), self._item(owner_member=str(self.father.id), person_name="بابا")
         self._push(self.me, a, b)
 
-        self.auth(self.mother)
+        # مدیر خانواده کلِ خانواده را می‌بیند (cursor/delta روی همه).
+        self.auth(self.me)
         first = self.client.get(self.url).data
         self.assertEqual({r["id"] for r in first["results"]}, {a["id"], b["id"]})
         names = {r["id"]: r["owner_name"] for r in first["results"]}
@@ -337,7 +339,7 @@ class SyncOwnershipTests(ApiTestCase):
 
         # یک تغییر → فقط همان
         self._push(self.me, dict(a, description="x", client_updated_at="2026-09-10T11:00:00Z"))
-        self.auth(self.mother)
+        self.auth(self.me)
         delta = self.client.get(self.url, {"since": first["cursor"]}).data
         self.assertEqual([r["id"] for r in delta["results"]], [a["id"]])
 
@@ -372,6 +374,55 @@ class SyncOwnershipTests(ApiTestCase):
         resp = self.client.get(self.url, {"since": "2000-01-01T00:00:00Z"})
         self.assertEqual([r["id"] for r in resp.data["results"]], [a["id"]])
 
+    def test_member_pulls_only_own_manager_pulls_all(self):
+        # me = مالک (مدیر)، father و mother = عضو عادی
+        a = self._item(owner_member=str(self.father.id))  # مالِ بابا
+        b = self._item()  # مالِ me (پیش‌فرض)
+        self._push(self.me, a, b)
+        c = self._item()
+        self._push(self.mother, c)  # مالِ مامان
+
+        # عضو عادی (مامان): فقط مالِ خودش
+        self.auth(self.mother)
+        ids = {r["id"] for r in self.client.get(self.url).data["results"]}
+        self.assertEqual(ids, {c["id"]})
+
+        # عضو عادی (بابا): فقط مالِ خودش (که me برایش ثبت کرد)
+        self.auth(self.father)
+        ids = {r["id"] for r in self.client.get(self.url).data["results"]}
+        self.assertEqual(ids, {a["id"]})
+
+        # مدیر خانواده (me): همه‌ی خانواده
+        self.auth(self.me)
+        ids = {r["id"] for r in self.client.get(self.url).data["results"]}
+        self.assertEqual(ids, {a["id"], b["id"], c["id"]})
+
+    def test_superuser_pulls_all(self):
+        a = self._item(owner_member=str(self.father.id))
+        self._push(self.me, a)
+        boss = User.objects.create_superuser(phone="09129999999", password="StrongPass123")
+        FamilyMembership.objects.create(
+            family=self.family, user=boss, role=FamilyMembership.Role.MEMBER
+        )
+        self.auth(boss)  # عضو عادیِ خانواده ولی ادمین کل → همه را می‌بیند
+        ids = {r["id"] for r in self.client.get(self.url).data["results"]}
+        self.assertEqual(ids, {a["id"]})
+
+    def test_rest_list_scoped_by_role(self):
+        a = self._item(owner_member=str(self.father.id))
+        b = self._item()  # مالِ me
+        self._push(self.me, a, b)
+
+        # عضو عادی (بابا) در REST هم فقط مالِ خودش
+        self.auth(self.father)
+        ids = {str(r["id"]) for r in self.client.get(reverse("transaction-list")).data}
+        self.assertEqual(ids, {a["id"]})
+
+        # مدیر (me) همه
+        self.auth(self.me)
+        ids = {str(r["id"]) for r in self.client.get(reverse("transaction-list")).data}
+        self.assertEqual(ids, {a["id"], b["id"]})
+
     def test_pull_is_isolated_between_families(self):
         self._push(self.me, self._item())
         self.create_family_with(self.outsider)
@@ -383,9 +434,10 @@ class SyncOwnershipTests(ApiTestCase):
         self._push(self.me, item)
         detail = reverse("transaction-detail", args=[item["id"]])
 
+        # مامان (عضو عادی) اصلاً این تراکنش را نمی‌بیند → ۴۰۴ (حتی از وجودش باخبر نمی‌شود).
         self.auth(self.mother)
         resp = self.client.patch(detail, {"description": "x"}, format="json")
-        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(resp.status_code, 404)
 
         self.auth(self.father)
         resp = self.client.patch(detail, {"description": "ok"}, format="json")

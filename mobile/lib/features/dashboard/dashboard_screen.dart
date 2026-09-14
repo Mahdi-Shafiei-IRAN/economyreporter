@@ -93,6 +93,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               _TransactionsTab(
                 controller: _c,
                 onOpenSettings: () => setState(() => _tab = 2),
+                onOpenFamilyDashboard: widget.onOpenFamilyDashboard,
               ),
               ReportScreen(controller: _c),
               SettingsScreen(
@@ -142,9 +143,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
 class _TransactionsTab extends StatefulWidget {
   final DashboardController controller;
   final VoidCallback onOpenSettings;
+  final VoidCallback? onOpenFamilyDashboard;
 
   const _TransactionsTab(
-      {required this.controller, required this.onOpenSettings});
+      {required this.controller,
+      required this.onOpenSettings,
+      this.onOpenFamilyDashboard});
 
   @override
   State<_TransactionsTab> createState() => _TransactionsTabState();
@@ -369,6 +373,7 @@ class _TransactionsTabState extends State<_TransactionsTab> {
                           controller: c,
                           push: _push,
                           onOpenSettings: widget.onOpenSettings,
+                          onOpenFamilyDashboard: widget.onOpenFamilyDashboard,
                         ),
                       ),
                       SliverToBoxAdapter(
@@ -780,16 +785,19 @@ class _PersonSection extends StatelessWidget {
 }
 
 const kSendersChipKey = Key('senders-chip');
+const kFamilyTotalsChipKey = Key('family-totals-chip');
 
 class _AttentionStrip extends StatelessWidget {
   final DashboardController controller;
   final void Function(Widget page) push;
   final VoidCallback onOpenSettings;
+  final VoidCallback? onOpenFamilyDashboard;
 
   const _AttentionStrip({
     required this.controller,
     required this.push,
     required this.onOpenSettings,
+    this.onOpenFamilyDashboard,
   });
 
   @override
@@ -798,6 +806,13 @@ class _AttentionStrip extends StatelessWidget {
     final fin = FinanceColors.of(context);
     final pending = c.syncStatus.pendingCount;
     final chips = <Widget>[
+      if (!c.isManager && onOpenFamilyDashboard != null)
+        ActionChip(
+          key: kFamilyTotalsChipKey,
+          avatar: const Icon(Icons.groups_outlined, size: 18),
+          label: const Text('جمعِ خانواده'),
+          onPressed: onOpenFamilyDashboard,
+        ),
       if (c.needsSenderSetup)
         ActionChip(
           key: kSendersChipKey,

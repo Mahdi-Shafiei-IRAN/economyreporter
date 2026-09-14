@@ -366,6 +366,11 @@ class FakeTransactionStore implements TransactionStore {
   }
 
   @override
+  Future<void> purgeRemoteNotOwnedBy(String meUserId) async {
+    _items.removeWhere((t) => t.isRemote && t.ownerUserId != meUserId);
+  }
+
+  @override
   Future<int> pendingSyncCount() async => 0;
 
   @override

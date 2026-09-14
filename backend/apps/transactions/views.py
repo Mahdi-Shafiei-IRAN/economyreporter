@@ -15,7 +15,12 @@ from rest_framework.views import APIView
 
 from apps.accounts.models import BankAccount, Card
 from apps.categories.models import Category
-from apps.common.family import resolve_family, user_family_ids
+from apps.common.family import (
+    is_family_manager,
+    resolve_family,
+    role_scoped_q,
+    user_family_ids,
+)
 
 from .models import Transaction
 from .serializers import TransactionSerializer
@@ -79,6 +84,8 @@ class TransactionViewSet(viewsets.ModelViewSet):
             Transaction.objects.filter(
                 family_id__in=user_family_ids(self.request.user), is_deleted=False
             )
+            # نقش: عضو عادی فقط مالِ خودش؛ مدیر خانواده و ادمین کل همه‌ی خانواده.
+            .filter(role_scoped_q(self.request.user))
             .select_related("owner")
             .order_by("-server_received_at")
         )
@@ -157,10 +164,12 @@ class SyncView(APIView):
             limit = PULL_DEFAULT_LIMIT
         limit = max(1, min(limit, PULL_MAX_LIMIT))
 
+        base = Transaction.objects.filter(family=family)
+        # عضو عادی فقط تراکنش‌های خودش را دریافت می‌کند؛ مدیر/ادمین کلِ خانواده را.
+        if not is_family_manager(request.user, family):
+            base = base.filter(Q(owner=request.user) | Q(captured_by=request.user))
         qs = _after_cursor(
-            Transaction.objects.filter(family=family)
-            .select_related("owner")
-            .order_by("updated_at", "id"),
+            base.select_related("owner").order_by("updated_at", "id"),
             since,
         )
         rows = list(qs[: limit + 1])
