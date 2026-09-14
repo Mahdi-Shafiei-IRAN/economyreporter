@@ -23,6 +23,15 @@ if (flutterVersionName == null) {
     flutterVersionName = "1.0"
 }
 
+// امضای انتشار: مقادیر از android/key.properties خوانده می‌شود (در گیت نیست).
+def keystoreProperties = new Properties()
+def keystorePropertiesFile = rootProject.file("key.properties")
+if (keystorePropertiesFile.exists()) {
+    keystorePropertiesFile.withReader("UTF-8") { reader ->
+        keystoreProperties.load(reader)
+    }
+}
+
 android {
     namespace = "com.mahdi.economy.economy"
     compileSdk = 34  // با AGP 8.1 و aapt2 مربوطه سازگار است
@@ -49,11 +58,22 @@ android {
         versionName = flutterVersionName
     }
 
+    signingConfigs {
+        release {
+            if (keystorePropertiesFile.exists()) {
+                keyAlias = keystoreProperties["keyAlias"]
+                keyPassword = keystoreProperties["keyPassword"]
+                storeFile = file(keystoreProperties["storeFile"])
+                storePassword = keystoreProperties["storePassword"]
+            }
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.debug
+            // اگر key.properties باشد با کلیدِ انتشار امضا می‌شود، وگرنه با کلید دیباگ
+            // تا `flutter run --release` هم کار کند.
+            signingConfig = keystorePropertiesFile.exists() ? signingConfigs.release : signingConfigs.debug
         }
     }
 }

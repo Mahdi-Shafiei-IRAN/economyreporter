@@ -7,5 +7,7 @@
         <domain includeSubdomains="true">192.168.1.100</domain>
         <domain includeSubdomains="true">10.0.2.2</domain>
         <domain includeSubdomains="true">localhost</domain>
+        <!-- سرور تولید (تا وقتی HTTPS با Cloudflare Origin Cert فعال شود) -->
+        <domain includeSubdomains="true">87.248.150.95</domain>
     </domain-config>
 </network-security-config>
