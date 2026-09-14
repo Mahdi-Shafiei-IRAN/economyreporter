@@ -242,28 +242,34 @@ class _RootState extends State<_Root> with WidgetsBindingObserver {
     if (_setupDone) return;
     _setupDone = true;
 
-    s.refreshFromServer().ignore();
-    await NotificationService.init(onTap: _openCategorize);
-
-    final granted = await s.smsInbox.requestPermission();
-    if (granted) {
-      await s.smsInbox.importInbox();
-      await s.dashboard.load();
-      s.smsInbox.startListener();
-    }
-
-    final launchPayload = await NotificationService.launchPayload();
-    if (launchPayload != null) {
-      _openCategorize(launchPayload);
-    } else if (granted && s.dashboard.needsSenderSetup) {
-      // بعد از نصب/ورود: اگر هیچ فرستنده‌ای مجاز نشده، صفحه‌ی انتخاب فرستنده‌ها را
-      // خودکار باز کن تا کاربر از روی پیامک‌هایش انتخاب و صاحب تعیین کند.
-      navigatorKey.currentState?.push(MaterialPageRoute(
-        builder: (_) => SendersScreen(controller: s.dashboard),
-      ));
-    }
-
+    // چکِ به‌روزرسانی مستقل و زودهنگام؛ نباید به مجوز پیامک/صندوق وابسته باشد
+    // (اگر آن مرحله‌ها گیر کنند یا خطا بدهند، آپدیت باز هم بررسی می‌شود).
     _checkForUpdate();
+    s.refreshFromServer().ignore();
+
+    try {
+      await NotificationService.init(onTap: _openCategorize);
+
+      final granted = await s.smsInbox.requestPermission();
+      if (granted) {
+        await s.smsInbox.importInbox();
+        await s.dashboard.load();
+        s.smsInbox.startListener();
+      }
+
+      final launchPayload = await NotificationService.launchPayload();
+      if (launchPayload != null) {
+        _openCategorize(launchPayload);
+      } else if (granted && s.dashboard.needsSenderSetup) {
+        // بعد از نصب/ورود: اگر هیچ فرستنده‌ای مجاز نشده، صفحه‌ی انتخاب فرستنده‌ها را
+        // خودکار باز کن تا کاربر از روی پیامک‌هایش انتخاب و صاحب تعیین کند.
+        navigatorKey.currentState?.push(MaterialPageRoute(
+          builder: (_) => SendersScreen(controller: s.dashboard),
+        ));
+      }
+    } catch (_) {
+      // خطای راه‌اندازی (مجوز/صندوق/نوتیف) نباید بقیه‌ی اپ را زمین بزند.
+    }
   }
 
   /// چک نسخه‌ی جدید از سرور و پیشنهاد به‌روزرسانی (بی‌صدا اگر آفلاین/نبود).
