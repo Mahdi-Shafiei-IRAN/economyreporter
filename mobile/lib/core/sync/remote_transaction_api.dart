@@ -27,6 +27,12 @@ abstract class RemoteTransactionApi {
 
   /// تغییرات تراکنش‌های خانواده بعد از [since] (همه‌ی اعضا).
   Future<PullPage> pull({String? since, int limit = 500});
+
+  /// آپلود دسته‌ای کیف‌ها (کارت/حساب)؛ upsert با شناسه‌ی گوشی.
+  Future<void> syncWallets({required List<Map<String, dynamic>> wallets});
+
+  /// دریافت تغییرات کیف‌های خانواده بعد از [since].
+  Future<PullPage> pullWallets({String? since});
 }
 
 class DioRemoteTransactionApi implements RemoteTransactionApi {
@@ -55,13 +61,31 @@ class DioRemoteTransactionApi implements RemoteTransactionApi {
       '/sync/transactions/',
       queryParameters: {if (since != null) 'since': since, 'limit': limit},
     );
-    final data = Map<String, dynamic>.from(resp.data as Map);
+    return _pageFrom(resp.data);
+  }
+
+  @override
+  Future<void> syncWallets({required List<Map<String, dynamic>> wallets}) async {
+    await dio.post('/wallets/sync/', data: {'wallets': wallets});
+  }
+
+  @override
+  Future<PullPage> pullWallets({String? since}) async {
+    final resp = await dio.get(
+      '/wallets/sync/',
+      queryParameters: {if (since != null) 'since': since},
+    );
+    return _pageFrom(resp.data);
+  }
+
+  PullPage _pageFrom(Object? data) {
+    final map = Map<String, dynamic>.from(data as Map);
     return PullPage(
-      results: ((data['results'] as List?) ?? const [])
+      results: ((map['results'] as List?) ?? const [])
           .map((e) => Map<String, dynamic>.from(e as Map))
           .toList(),
-      cursor: data['cursor'] as String?,
-      hasMore: data['has_more'] == true,
+      cursor: map['cursor'] as String?,
+      hasMore: map['has_more'] == true,
     );
   }
 }

@@ -291,6 +291,36 @@ class FakeTransactionStore implements TransactionStore {
   }
 
   @override
+  Future<List<Map<String, Object?>>> pendingWallets() async => const [];
+
+  @override
+  Future<void> markWalletSynced(String id) async {}
+
+  @override
+  Future<void> applyRemoteWallet(Map<String, dynamic> j) async {
+    if (j['is_deleted'] == true) {
+      _wallets.removeWhere((w) => w.id == j['id'].toString());
+      return;
+    }
+    final w = Wallet(
+      id: j['id'].toString(),
+      ownerName: (j['owner_name'] ?? '').toString(),
+      ownerUserId: (j['owner_user_id'] as String?),
+      label: (j['label'] ?? '').toString(),
+      bankId: j['bank_id'] as String?,
+      cardLast4: j['card_last4'] as String?,
+      accountRef: j['account_ref'] as String?,
+    );
+    final i = _wallets.indexWhere((e) => e.id == w.id);
+    if (i == -1) {
+      _wallets.add(w);
+    } else {
+      _wallets[i] = w;
+    }
+    await reattributeLocal();
+  }
+
+  @override
   Future<List<AllowedSender>> allowedSenders() async => List.of(_senders);
 
   @override

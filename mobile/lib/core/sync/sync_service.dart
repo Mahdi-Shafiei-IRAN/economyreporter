@@ -200,6 +200,15 @@ class SyncService {
       }
     }
 
+    // کیف‌ها (کارت/حساب) هم هم‌گام شوند؛ خطایش نباید کل sync را بشکند.
+    if (error == null) {
+      try {
+        await _syncWallets(fromScratch: refetchAll);
+      } catch (_) {
+        error = 'network';
+      }
+    }
+
     final summary = SyncSummary(
       synced: synced,
       failed: failed,
@@ -250,6 +259,43 @@ class SyncService {
     if (cursor != null) await _repo.setSetting(SettingKeys.pullCursor, cursor);
     return fromOthers;
   }
+
+  /// هم‌گام‌سازی کیف‌ها: ابتدا کیف‌های pending آپلود، سپس تغییرات سرور دریافت.
+  Future<void> _syncWallets({required bool fromScratch}) async {
+    // ۱) آپلودِ کیف‌های تغییرکرده.
+    final pending = await _repo.pendingWallets();
+    if (pending.isNotEmpty) {
+      final payloads = [for (final w in pending) _walletPayload(w)];
+      await api.syncWallets(wallets: payloads);
+      for (final w in pending) {
+        await _repo.markWalletSynced(w['id'] as String);
+      }
+    }
+    // ۲) دریافتِ کیف‌های خانواده (نقش را سرور اعمال می‌کند).
+    var cursor =
+        fromScratch ? null : await _repo.getSetting(SettingKeys.walletCursor);
+    for (var guard = 0; guard < 100; guard++) {
+      final page = await api.pullWallets(since: cursor);
+      for (final item in page.results) {
+        await _repo.applyRemoteWallet(item);
+      }
+      if (page.cursor != null) cursor = page.cursor;
+      if (!page.hasMore || page.results.isEmpty) break;
+    }
+    if (cursor != null) await _repo.setSetting(SettingKeys.walletCursor, cursor);
+  }
+
+  Map<String, dynamic> _walletPayload(Map<String, Object?> w) => {
+        'id': w['id'],
+        'owner_user_id': w['owner_user_id'],
+        'owner_name': w['owner_name'] ?? '',
+        'label': w['label'] ?? '',
+        'bank_id': w['bank_id'] ?? '',
+        'card_last4': w['card_last4'] ?? '',
+        'account_ref': w['account_ref'] ?? '',
+        'is_deleted': (w['is_deleted'] as int? ?? 0) == 1,
+        'client_updated_at': w['client_updated_at'],
+      };
 
   Future<List<Map<String, Object?>>> _eligiblePending({
     required bool force,

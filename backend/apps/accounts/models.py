@@ -38,6 +38,58 @@ class BankAccount(models.Model):
         return f"{self.bank_name} ({self.owner})"
 
 
+class Wallet(models.Model):
+    """کیفِ اپ: کارت/حسابِ یک عضو (شناسه از سمت کلاینت می‌آید تا آفلاین ساخته شود).
+
+    نسخه‌ی هم‌گام‌شونده‌ی همان مدل موبایل؛ برای اینکه اعضای خانواده کارت‌های هم را
+    ببینند و صاحبِ هر تراکنش یکسان تعیین شود. شماره‌ی کاملِ کارت هرگز ذخیره نمی‌شود.
+    """
+
+    id = models.UUIDField(primary_key=True, editable=False)  # UUIDِ ساخته‌شده در گوشی
+    family = models.ForeignKey(
+        "families.FamilyGroup",
+        on_delete=models.CASCADE,
+        related_name="wallets",
+        verbose_name="خانواده",
+    )
+    owner = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="wallets",
+        verbose_name="صاحب",
+    )
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="wallets_created",
+        verbose_name="سازنده",
+    )
+    owner_name = models.CharField("نام صاحب", max_length=100, blank=True)
+    label = models.CharField("برچسب", max_length=100, blank=True)
+    bank_id = models.CharField("شناسه‌ی بانک", max_length=50, blank=True)
+    card_last4 = models.CharField("۴ رقم کارت", max_length=4, blank=True)
+    account_ref = models.CharField("شماره حساب", max_length=32, blank=True)
+    is_deleted = models.BooleanField("حذف‌شده", default=False)
+    client_updated_at = models.DateTimeField("آخرین ویرایش روی گوشی", null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField("آخرین تغییر", auto_now=True)
+
+    class Meta:
+        verbose_name = "کیف (کارت/حساب)"
+        verbose_name_plural = "کیف‌ها (کارت/حساب)"
+        indexes = [
+            models.Index(fields=["family", "updated_at"]),
+            models.Index(fields=["family", "owner"]),
+        ]
+
+    def __str__(self):
+        return f"{self.label or self.owner_name} ({self.owner_name})"
+
+
 class Card(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     account = models.ForeignKey(

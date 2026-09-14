@@ -3,6 +3,7 @@ import 'package:economy/core/sms/sms_parser.dart';
 import 'package:economy/core/sync/remote_transaction_api.dart';
 import 'package:economy/core/sync/sync_service.dart';
 import 'package:economy/features/transactions/data/transaction_repository.dart';
+import 'package:economy/features/wallets/data/wallet.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sqflite/sqflite.dart';
 
@@ -37,6 +38,21 @@ class FakeRemoteTransactionApi implements RemoteTransactionApi {
     pullSinces.add(since);
     if (throwNetwork) throw Exception('network down');
     return pages.isEmpty ? PullPage.empty : pages.removeAt(0);
+  }
+
+  final List<List<Map<String, dynamic>>> sentWallets = [];
+  final List<PullPage> walletPages = [];
+
+  @override
+  Future<void> syncWallets({required List<Map<String, dynamic>> wallets}) async {
+    if (throwNetwork) throw Exception('network down');
+    sentWallets.add(wallets);
+  }
+
+  @override
+  Future<PullPage> pullWallets({String? since}) async {
+    if (throwNetwork) throw Exception('network down');
+    return walletPages.isEmpty ? PullPage.empty : walletPages.removeAt(0);
   }
 }
 
@@ -211,6 +227,50 @@ void main() {
 
     await service.sync();
     expect(api.pullSinces, [null, 'c1']);
+  });
+
+  test('کیف‌ها هم‌گام می‌شوند: pending آپلود و کیفِ سرور محلی می‌شود', () async {
+    await repo.addWallet(const Wallet(
+        id: '', ownerName: 'من', label: 'کارت حقوق', bankId: 'mellat', cardLast4: '1234'));
+    final api = FakeRemoteTransactionApi()
+      ..walletPages.add(const PullPage(results: [
+        {
+          'id': 'srv-1',
+          'owner_user_id': 'u-father',
+          'owner_name': 'بابا',
+          'label': 'کارت بابا',
+          'bank_id': 'melli',
+          'card_last4': '5678',
+          'account_ref': '',
+          'is_deleted': false,
+          'updated_at': '2026-09-10T08:00:00Z',
+        },
+      ]));
+
+    await serviceWith(api).sync();
+
+    // کیفِ محلی آپلود شد
+    expect(api.sentWallets.single.single['label'], 'کارت حقوق');
+    // دیگر pending نمانده
+    expect(await repo.pendingWallets(), isEmpty);
+    // کیفِ سرور در محلی درج شد
+    final labels = (await repo.wallets()).map((w) => w.label).toSet();
+    expect(labels, containsAll(['کارت حقوق', 'کارت بابا']));
+  });
+
+  test('کیفِ حذف‌شده‌ی سرور از محلی پاک می‌شود', () async {
+    final api = FakeRemoteTransactionApi()
+      ..walletPages.add(const PullPage(results: [
+        {
+          'id': 'srv-2',
+          'owner_name': 'بابا',
+          'label': 'کارت حذفی',
+          'is_deleted': true,
+          'updated_at': '2026-09-10T08:00:00Z',
+        },
+      ]));
+    await serviceWith(api).sync();
+    expect((await repo.wallets()).where((w) => w.id == 'srv-2'), isEmpty);
   });
 
   test('عضوِ عادی: تراکنشِ بقیه از سرور اعمال نمی‌شود (حریم مدیر)', () async {

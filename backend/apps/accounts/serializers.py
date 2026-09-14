@@ -1,6 +1,30 @@
 from rest_framework import serializers
 
-from .models import BankAccount, Card
+from .models import BankAccount, Card, Wallet
+
+
+class WalletSerializer(serializers.ModelSerializer):
+    """کیفِ هم‌گام‌شونده. `owner_user_id` همان شناسه‌ی کاربرِ صاحب است."""
+
+    owner_user_id = serializers.CharField(
+        source="owner_id", required=False, allow_null=True, allow_blank=True
+    )
+
+    class Meta:
+        model = Wallet
+        fields = [
+            "id",
+            "owner_user_id",
+            "owner_name",
+            "label",
+            "bank_id",
+            "card_last4",
+            "account_ref",
+            "is_deleted",
+            "client_updated_at",
+            "updated_at",
+        ]
+        read_only_fields = ["updated_at"]
 
 
 class BankAccountSerializer(serializers.ModelSerializer):

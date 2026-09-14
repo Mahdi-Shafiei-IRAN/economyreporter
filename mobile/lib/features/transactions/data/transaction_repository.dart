@@ -86,6 +86,9 @@ class SettingKeys {
 
   /// نقشِ من در خانواده: 'owner' (مدیر) یا 'member' (عضو عادی).
   static const myRole = 'my_role';
+
+  /// cursor دریافتِ کیف‌ها از سرور.
+  static const walletCursor = 'wallet_cursor';
 }
 
 /// پنجره‌ی ضدتکرارِ محتوایی: دریافت زنده و خواندن صندوقِ همان پیامک
@@ -171,6 +174,11 @@ abstract class TransactionStore {
   Future<void> addWallet(Wallet wallet);
   Future<void> updateWallet(Wallet wallet);
   Future<void> deleteWallet(String id);
+
+  // هم‌گام‌سازی کیف‌ها با سرور.
+  Future<List<Map<String, Object?>>> pendingWallets();
+  Future<void> markWalletSynced(String id);
+  Future<void> applyRemoteWallet(Map<String, dynamic> j);
 
   // --- فرستنده‌های مجاز پیامک (فقط پیامک این‌ها خودکار ثبت می‌شود) ---
   Future<List<AllowedSender>> allowedSenders();
@@ -546,30 +554,94 @@ class TransactionRepository implements TransactionStore {
 
   @override
   Future<List<Wallet>> wallets() async {
-    final rows = await _db.query('wallets', orderBy: 'owner_name, label');
+    final rows = await _db.query('wallets',
+        where: 'is_deleted = 0', orderBy: 'owner_name, label');
     return rows.map(Wallet.fromMap).toList();
   }
 
   @override
   Future<void> addWallet(Wallet wallet) async {
+    final now = _nowIso();
     final map = wallet.toMap();
     map['id'] = _uuid.v4();
-    map['created_at'] = _nowIso();
+    map['created_at'] = now;
+    map['updated_at'] = now;
+    map['client_updated_at'] = now;
+    map['is_deleted'] = 0;
+    map['sync_status'] = 'pending';
     await _db.insert('wallets', map);
     await reattributeLocal();
   }
 
   @override
   Future<void> updateWallet(Wallet wallet) async {
+    final now = _nowIso();
     final map = wallet.toMap()..remove('id');
+    map['updated_at'] = now;
+    map['client_updated_at'] = now;
+    map['sync_status'] = 'pending';
     await _db.update('wallets', map, where: 'id = ?', whereArgs: [wallet.id]);
     await reattributeLocal();
   }
 
   @override
   Future<void> deleteWallet(String id) async {
-    await _db.delete('wallets', where: 'id = ?', whereArgs: [id]);
+    // حذف نرم تا حذف به گوشی‌های دیگر هم برسد.
+    final now = _nowIso();
+    await _db.update(
+      'wallets',
+      {
+        'is_deleted': 1,
+        'updated_at': now,
+        'client_updated_at': now,
+        'sync_status': 'pending',
+      },
+      where: 'id = ?',
+      whereArgs: [id],
+    );
     await reattributeLocal();
+  }
+
+  @override
+  Future<List<Map<String, Object?>>> pendingWallets() async {
+    return _db.query('wallets', where: "sync_status = 'pending'");
+  }
+
+  @override
+  Future<void> markWalletSynced(String id) async {
+    await _db.update('wallets', {'sync_status': 'synced'},
+        where: 'id = ?', whereArgs: [id]);
+  }
+
+  @override
+  Future<void> applyRemoteWallet(Map<String, dynamic> j) async {
+    final id = j['id'].toString();
+    // ویرایشِ محلیِ ارسال‌نشده را با نسخه‌ی سرور خراب نکن.
+    final local = await _db.query('wallets',
+        columns: ['sync_status'], where: 'id = ?', whereArgs: [id], limit: 1);
+    if (local.isNotEmpty && local.first['sync_status'] == 'pending') return;
+
+    String? s(Object? v) =>
+        (v == null || (v is String && v.isEmpty)) ? null : v.toString();
+    final map = <String, Object?>{
+      'id': id,
+      'owner_user_id': s(j['owner_user_id']),
+      'owner_name': (j['owner_name'] ?? '').toString(),
+      'label': (j['label'] ?? '').toString(),
+      'bank_id': s(j['bank_id']),
+      'card_last4': s(j['card_last4']),
+      'account_ref': s(j['account_ref']),
+      'is_deleted': j['is_deleted'] == true ? 1 : 0,
+      'updated_at': s(j['updated_at']),
+      'client_updated_at': s(j['client_updated_at']),
+      'sync_status': 'synced',
+    };
+    if (local.isEmpty) {
+      map['created_at'] = _nowIso();
+      await _db.insert('wallets', map);
+    } else {
+      await _db.update('wallets', map, where: 'id = ?', whereArgs: [id]);
+    }
   }
 
   @override

@@ -49,6 +49,17 @@ class StatefulFakeServer implements RemoteTransactionApi {
     if (!online) throw Exception('network down');
     return PullPage.empty;
   }
+
+  @override
+  Future<void> syncWallets({required List<Map<String, dynamic>> wallets}) async {
+    if (!online) throw Exception('network down');
+  }
+
+  @override
+  Future<PullPage> pullWallets({String? since}) async {
+    if (!online) throw Exception('network down');
+    return PullPage.empty;
+  }
 }
 
 void main() {
