@@ -223,8 +223,16 @@ void main() {
       expect(second.isDuplicate, isTrue);
       expect(await repo.count(), 1);
 
-      // همان متن نیم ساعت بعد، تراکنش جداگانه است
-      final later = await repo.saveParsed(parser.parse(sender: sender, body: body),
+      // همان متنِ کامل (شامل مانده) نیم ساعت بعد = همان پیامکِ دوباره‌فرستاده‌شده،
+      // نه یک تراکنشِ واقعیِ جدید → تکراری است (رفعِ باگِ «حقوقِ دوباره‌شمرده»).
+      final resent = await repo.saveParsed(parser.parse(sender: sender, body: body),
+          sender: sender, receivedAt: live.add(const Duration(minutes: 30)));
+      expect(resent.isDuplicate, isTrue);
+      expect(await repo.count(), 1);
+
+      // متنِ متفاوت (مانده‌ی دیگر) = تراکنشِ واقعیِ جدا، ادغام نمی‌شود
+      const other = 'خرید مبلغ 750,000 ریال از کارت 1234 مانده 8,250,000 ریال';
+      final later = await repo.saveParsed(parser.parse(sender: sender, body: other),
           sender: sender, receivedAt: live.add(const Duration(minutes: 30)));
       expect(later.isCreated, isTrue);
     });

@@ -7,6 +7,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart' hide Category;
 
 import '../../core/family/family_api.dart';
+import '../../core/dedup/duplicate_finder.dart';
 import '../../core/reconcile/reconciliation.dart';
 import '../../core/sms/sms_importer.dart';
 import '../../core/sms/sms_parser.dart';
@@ -66,6 +67,7 @@ class DashboardController extends ChangeNotifier {
   List<TransactionRecord> reviewItems = const [];
   List<TransactionRecord> uncategorized = const [];
   List<BalanceGap> balanceGaps = const [];
+  List<DuplicateGroup> duplicateGroups = const [];
   List<Wallet> wallets = const [];
   List<AllowedSender> allowedSenders = const [];
   List<FamilyMember> members = const [];
@@ -153,6 +155,8 @@ class DashboardController extends ChangeNotifier {
     allowedSenders = await repository.allowedSenders();
     balanceGaps = const ReconciliationService()
         .findGaps(all, dismissed: await _dismissedGaps());
+    duplicateGroups = const DuplicateFinder()
+        .find(all, dismissed: await _dismissedDuplicates());
     syncStatus = await SyncStatusInfo.load(repository);
     selected.removeWhere((id) => !_byId.containsKey(id));
 
@@ -445,6 +449,36 @@ class DashboardController extends ChangeNotifier {
     } catch (_) {
       return {};
     }
+  }
+
+  // ---------------------------------------------------------------------------
+  // تراکنش‌های تکراری (یک رخداد که دوبار ثبت شده)
+  // ---------------------------------------------------------------------------
+
+  Future<Set<String>> _dismissedDuplicates() async {
+    final raw = await repository.getSetting(SettingKeys.dismissedDuplicates);
+    if (raw == null) return {};
+    try {
+      return (jsonDecode(raw) as List).map((e) => e.toString()).toSet();
+    } catch (_) {
+      return {};
+    }
+  }
+
+  /// «تکراری نیست»: این گروه دیگر پیشنهاد نشود.
+  Future<void> dismissDuplicate(DuplicateGroup group) async {
+    final keys = await _dismissedDuplicates()..add(group.key);
+    await repository.setSetting(
+        SettingKeys.dismissedDuplicates, jsonEncode(keys.toList()));
+    await load();
+  }
+
+  /// حذفِ تکراری‌ها: قدیمی‌ترین می‌ماند، بقیه حذف (نامعتبر) می‌شوند.
+  Future<void> resolveDuplicate(DuplicateGroup group) async {
+    for (final t in group.extras) {
+      if (canEdit(t)) await repository.deleteTransaction(t.id);
+    }
+    await _changed();
   }
 
   Future<void> dismissGap(BalanceGap gap) async {

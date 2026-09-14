@@ -72,6 +72,9 @@ class SettingKeys {
   /// JSON: کلید گپ‌های تطبیق مانده که کاربر نادیده گرفته.
   static const dismissedGaps = 'dismissed_gaps';
 
+  /// JSON: کلید گروه‌های تکراری که کاربر «تکراری نیست» زده.
+  static const dismissedDuplicates = 'dismissed_dups';
+
   /// شناسه‌ی ثابت این گوشی (برای sync).
   static const deviceId = 'device_id';
 
@@ -84,7 +87,10 @@ class SettingKeys {
 
 /// پنجره‌ی ضدتکرارِ محتوایی: دریافت زنده و خواندن صندوقِ همان پیامک
 /// ممکن است چند ثانیه/دقیقه زمان متفاوت داشته باشند.
-const Duration kContentDedupWindow = Duration(minutes: 10);
+/// پیامکِ محتوایی‌همسان = همان پیامک (متن بانک شامل مانده/زمان است، پس دو تراکنشِ
+/// واقعیِ متفاوت تقریباً هرگز متنِ کاملاً یکسان ندارند). پس بازه‌ی سخاوتمند تا
+/// ارسال دوباره‌ی بانک (حقوقِ دوباره‌شمرده) هم گرفته شود.
+const Duration kContentDedupWindow = Duration(days: 3);
 
 /// اولین لحظه‌ی ماه شمسیِ بعد از [now] (به وقت ایران)؛ پیش‌فرض شروع دسته‌بندی.
 DateTime startOfNextJalaliMonth(DateTime now) {

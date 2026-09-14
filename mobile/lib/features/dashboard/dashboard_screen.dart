@@ -10,6 +10,7 @@ import '../categories/categorize_list_screen.dart';
 import '../categories/categorize_screen.dart';
 import '../reports/report_screen.dart';
 import '../review/reconciliation_screen.dart';
+import '../review/duplicates_screen.dart';
 import '../review/review_screen.dart';
 import '../senders/senders_screen.dart';
 import '../settings/settings_screen.dart';
@@ -36,6 +37,7 @@ const kSearchFieldKey = Key('search-field');
 const kReviewChipKey = Key('review-chip');
 const kCategorizeChipKey = Key('categorize-chip');
 const kReconcileChipKey = Key('reconcile-chip');
+const kDuplicatesChipKey = Key('duplicates-chip');
 const kSyncChipKey = Key('sync-chip');
 const kSelectionBarKey = Key('selection-bar');
 const kSelectionCountKey = Key('selection-count');
@@ -842,6 +844,13 @@ class _AttentionStrip extends StatelessWidget {
           avatar: Icon(Icons.rule_rounded, color: fin.warning, size: 18),
           label: Text('${_fa(c.balanceGaps.length)} ناهماهنگی مانده'),
           onPressed: () => push(ReconciliationScreen(controller: c)),
+        ),
+      if (c.duplicateGroups.isNotEmpty)
+        ActionChip(
+          key: kDuplicatesChipKey,
+          avatar: Icon(Icons.copy_all_rounded, color: fin.warning, size: 18),
+          label: Text('${_fa(c.duplicateGroups.length)} احتمال تکراری'),
+          onPressed: () => push(DuplicatesScreen(controller: c)),
         ),
       if (pending > 0 && c.syncStatus.last?.error != null)
         ActionChip(
