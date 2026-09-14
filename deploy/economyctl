@@ -1,0 +1,91 @@
+#!/usr/bin/env bash
+# economyctl — manage the "economy" deployment. Installed to /usr/local/bin by install.sh.
+set -euo pipefail
+
+APP="economy"
+BASE="/opt/$APP"
+APPDIR="$BASE/app"
+BACKEND="$APPDIR/backend"
+VENV="$BASE/venv"
+ENVFILE="$BASE/.env"
+SETTINGS="config.settings.production"
+BRANCH="main"
+
+need_root() { [ "$(id -u)" -eq 0 ] || { echo "Run with sudo: sudo economyctl $*"; exit 1; }; }
+dj()  { sudo -u "$APP" env DJANGO_SETTINGS_MODULE="$SETTINGS" "$VENV/bin/python" "$BACKEND/manage.py" "$@"; }
+gitq(){ sudo -u "$APP" git -C "$APPDIR" "$@"; }
+
+usage() {
+cat <<TXT
+economyctl <command>
+
+  status        Service status
+  logs [-f]     Show logs (add -f / default follows live)
+  restart       Restart the app
+  reload        Graceful reload (no downtime)
+  update        Pull latest code, install deps, migrate, collectstatic, restart
+  migrate       Apply database migrations
+  static        Recollect static files
+  superuser     Create an admin account (phone + password)
+  passwd <phone>  Change a user's password
+  shell         Django shell
+  dbshell       PostgreSQL shell for this project
+  backup [dir]  Dump the database (default: /opt/economy/backups)
+  env           Edit .env (then restarts)
+  renew-cert    Renew / obtain the HTTPS certificate
+  version       Show deployed commit
+  help          This help
+TXT
+}
+
+cmd="${1:-help}"; shift || true
+case "$cmd" in
+  status)   systemctl status "$APP" --no-pager; ;;
+  logs)     journalctl -u "$APP" "${@:--f}" ;;
+  restart)  need_root restart; systemctl restart "$APP"; echo "restarted"; ;;
+  reload)   need_root reload;  systemctl reload  "$APP"; echo "reloaded"; ;;
+  migrate)  need_root migrate; dj migrate --noinput; ;;
+  static)   need_root static;  dj collectstatic --noinput; ;;
+  superuser) need_root superuser; dj createsuperuser; ;;
+  passwd)   need_root passwd "$@"; [ -n "${1:-}" ] || { echo "usage: economyctl passwd <phone>"; exit 1; }; dj changepassword "$1"; ;;
+  shell)    need_root shell; dj shell; ;;
+  dbshell)  need_root dbshell; dj dbshell; ;;
+  version)  gitq log -1 --format='%h  %ci  %s'; ;;
+  env)      need_root env; "${EDITOR:-nano}" "$ENVFILE"; systemctl restart "$APP"; echo "restarted"; ;;
+  update)
+    need_root update
+    echo "==> pulling $BRANCH"
+    gitq fetch --depth 1 origin "$BRANCH" -q
+    gitq reset --hard "origin/$BRANCH" -q
+    echo "==> dependencies"
+    sudo -u "$APP" "$VENV/bin/pip" install -q -r "$BACKEND/requirements/production.txt"
+    echo "==> migrate + static"
+    dj migrate --noinput
+    dj collectstatic --noinput >/dev/null
+    systemctl restart "$APP"
+    echo "==> done: $(gitq rev-parse --short HEAD)"
+    ;;
+  backup)
+    need_root backup
+    dir="${1:-$BASE/backups}"; mkdir -p "$dir"
+    f="$dir/${APP}-$(date +%Y%m%d-%H%M%S).sql.gz"
+    sudo -u postgres pg_dump "$APP" | gzip > "$f"
+    echo "backup: $f"
+    ;;
+  renew-cert)
+    need_root renew-cert
+    # Build -d args from ALLOWED_HOSTS, skipping bare IPs and localhost.
+    hosts="$(grep -oP '(?<=^ALLOWED_HOSTS=).*' "$ENVFILE" | tr ',' ' ')"
+    doms=()
+    for h in $hosts; do
+      case "$h" in
+        *[a-zA-Z]*) [ "$h" = localhost ] || doms+=(-d "$h");;
+      esac
+    done
+    [ ${#doms[@]} -gt 0 ] || { echo "No domain in ALLOWED_HOSTS; set one with: economyctl env"; exit 1; }
+    # certbot reuses the account/email registered at install time.
+    certbot --nginx "${doms[@]}" --non-interactive --agree-tos --redirect --keep-until-expiring
+    ;;
+  help|-h|--help) usage ;;
+  *) echo "Unknown command: $cmd"; echo; usage; exit 1 ;;
+esac
