@@ -120,6 +120,24 @@ sudo bash deploy/install.sh --no-ssl --pip-index https://mirror-pypi.runflare.co
 هم به‌خاطر فیلترینگ گرفته نشد، از **Cloudflare Origin Certificate** استفاده کن (رایگان، بدون
 نیاز به دسترسی سرور به خارج).
 
+## به‌روزرسانی درون‌برنامه (بدون فروشگاه)
+
+اپ خودش `‏<آدرس سرور>/updates/version.json` را چک می‌کند؛ اگر `versionCode` جدیدتر بود، به
+کاربر پیشنهاد می‌دهد و APK را از سرور دانلود و نصب می‌کند (نیازمند اجازه‌ی یک‌باره‌ی «نصب
+برنامه»). nginx پوشه‌ی `/opt/economy/updates` را روی مسیر `/updates/` سرو می‌کند.
+
+انتشار یک نسخه‌ی جدید:
+```bash
+# APK را روی سرور بگذار (scp)، بعد:
+sudo economyctl publish-apk /root/economy.apk <versionCode> <versionName> "توضیح تغییرات"
+# مثال:
+sudo economyctl publish-apk /root/economy.apk 3 1.0.2 "رفع اشکال و نقش‌ها"
+```
+`versionCode` همان عددِ بعد از `+` در `pubspec.yaml` است (`version: 1.0.2+3` → ۳). گوشی‌هایی
+که نسخه‌ی نصب‌شده‌شان کوچک‌تر است، دفعه‌ی بعدِ باز کردن اپ پیام به‌روزرسانی می‌گیرند.
+
+> اولین نسخه‌ی دارای این قابلیت باید یک‌بار دستی نصب شود؛ از آن به بعد درون‌برنامه‌ای است.
+
 ## مدیریت روزمره (`economyctl`)
 
 ```bash
