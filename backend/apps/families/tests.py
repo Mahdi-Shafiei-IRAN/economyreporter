@@ -62,11 +62,29 @@ class FamilyTests(APITestCase):
         self.assertEqual(resp.data["role"], "member")
         self.assertEqual(resp.data["user"]["phone"], "09120000003")
 
-    def test_invite_unknown_phone_fails(self):
+    def test_invite_unknown_phone_without_password_fails(self):
         fid = self.create_family(self.owner).data["id"]
         self.auth(self.owner)
         resp = self.invite(fid, "09129999999")
         self.assertEqual(resp.status_code, 400)
+
+    def test_owner_creates_new_member_account_with_password(self):
+        fid = self.create_family(self.owner).data["id"]
+        self.auth(self.owner)
+        resp = self.client.post(
+            reverse("family-invite", args=[fid]),
+            {"phone": "09129999999", "password": "MemberPass1", "full_name": "پسر"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 201, resp.data)
+        self.assertEqual(resp.data["user"]["phone"], "09129999999")
+        # حسابِ تازه ساخته شد و می‌تواند وارد شود
+        login = self.client.post(
+            reverse("auth-login"),
+            {"phone": "09129999999", "password": "MemberPass1"},
+            format="json",
+        )
+        self.assertEqual(login.status_code, 200)
 
     def test_invite_beyond_max_fails(self):
         fid = self.create_family(self.owner).data["id"]

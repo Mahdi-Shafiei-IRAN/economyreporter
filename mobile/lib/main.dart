@@ -127,7 +127,7 @@ class _BootstrapState extends State<_Bootstrap> {
       await repo.setSetting(SettingKeys.deviceId, deviceId);
     }
 
-    final dashboard = DashboardController(repo);
+    final dashboard = DashboardController(repo, familyApi: DioFamilyApi(api.dio));
     final sync = SyncService(
       db: db,
       api: DioRemoteTransactionApi(api.dio),

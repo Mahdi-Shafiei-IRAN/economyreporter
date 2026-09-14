@@ -43,6 +43,14 @@ abstract class FamilyApi {
 
   /// نقشِ من در خانواده: 'owner' (مدیر) یا 'member' (عضو عادی)؛ null اگر خانواده‌ای نبود.
   Future<String?> myRole();
+
+  /// افزودنِ عضوِ تازه توسطِ مدیرِ خانواده: حساب با این شماره/رمز ساخته و عضو می‌شود.
+  /// سقفِ خانواده روی سرور اعمال می‌شود (حداکثر ۳ نفر).
+  Future<void> addMember({
+    required String phone,
+    required String password,
+    String? fullName,
+  });
 }
 
 class DioFamilyApi implements FamilyApi {
@@ -63,11 +71,34 @@ class DioFamilyApi implements FamilyApi {
     return (families.first as Map)['my_role']?.toString();
   }
 
+  Future<String?> _firstFamilyId() async {
+    final families = (await dio.get('/family/')).data as List? ?? const [];
+    if (families.isEmpty) return null;
+    return (families.first as Map)['id'].toString();
+  }
+
+  @override
+  Future<void> addMember({
+    required String phone,
+    required String password,
+    String? fullName,
+  }) async {
+    final familyId = await _firstFamilyId();
+    if (familyId == null) {
+      throw StateError('هنوز خانواده‌ای نداری');
+    }
+    await dio.post('/family/$familyId/members/invite/', data: {
+      'phone': phone.trim(),
+      'password': password,
+      if (fullName != null && fullName.trim().isNotEmpty)
+        'full_name': fullName.trim(),
+    });
+  }
+
   @override
   Future<List<FamilyMember>> members() async {
-    final families = (await dio.get('/family/')).data as List? ?? const [];
-    if (families.isEmpty) return const [];
-    final familyId = (families.first as Map)['id'].toString();
+    final familyId = await _firstFamilyId();
+    if (familyId == null) return const [];
     final resp = await dio.get('/family/$familyId/members/');
     return [
       for (final m in (resp.data as List))

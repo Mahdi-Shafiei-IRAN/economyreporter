@@ -9,12 +9,14 @@ import '../../core/format/money_format.dart';
 import '../../core/theme/theme_controller.dart';
 import '../categories/categorize_list_screen.dart';
 import '../dashboard/dashboard_controller.dart';
+import '../family/add_member_screen.dart';
 import '../review/reconciliation_screen.dart';
 import '../review/review_screen.dart';
 import '../senders/senders_screen.dart';
 import '../transactions/data/period.dart';
 import '../wallets/wallets_screen.dart';
 
+const kAddMemberTileKey = Key('settings-add-member');
 const kSettingsWalletsKey = Key('settings-wallets');
 const kSettingsSendersKey = Key('settings-senders');
 const kShowSmsToggleKey = Key('settings-show-sms');
@@ -118,6 +120,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       ? 'فهرست اعضای خانواده هنوز از سرور گرفته نشده'
                       : 'اعضای خانواده: ${c.members.map((m) => m.name).join('، ')}'),
                 ),
+                if (c.canAddMember) ...[
+                  const Divider(indent: 56),
+                  ListTile(
+                    key: kAddMemberTileKey,
+                    leading: const Icon(Icons.person_add_alt_1_rounded),
+                    title: const Text('افزودن عضو خانواده'),
+                    subtitle: Text(
+                        'تا ${_fa(DashboardController.maxFamilyMembers - c.members.length)} نفرِ دیگر '
+                        '(حداکثر ${_fa(DashboardController.maxFamilyMembers)} نفر)'),
+                    trailing: const Icon(Icons.chevron_left_rounded),
+                    onTap: () => _push(AddMemberScreen(controller: c)),
+                  ),
+                ] else if (c.isManager && c.members.length >= DashboardController.maxFamilyMembers) ...[
+                  const Divider(indent: 56),
+                  ListTile(
+                    leading: const Icon(Icons.group_rounded),
+                    title: const Text('خانواده کامل است'),
+                    subtitle: Text('به حداکثر ${_fa(DashboardController.maxFamilyMembers)} نفر رسیده‌ای'),
+                    enabled: false,
+                  ),
+                ],
               ]),
               _Group(title: 'کارت‌ها', children: [
                 ListTile(

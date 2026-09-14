@@ -29,6 +29,13 @@ class _FakeFamilyApi implements FamilyApi {
   Future<String?> myRole() async => role;
 
   @override
+  Future<void> addMember({
+    required String phone,
+    required String password,
+    String? fullName,
+  }) async {}
+
+  @override
   Future<List<FamilyMember>> members() async => const [
         FamilyMember(id: 'u-me', name: 'مهدی'),
         FamilyMember(id: 'u-father', name: 'بابا'),

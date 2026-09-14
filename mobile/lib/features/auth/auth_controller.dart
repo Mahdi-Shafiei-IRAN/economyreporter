@@ -41,6 +41,35 @@ class AuthController extends ChangeNotifier {
     }
   }
 
+  /// ثبت‌نامِ آزاد: حساب + خانواده‌ی تازه؛ در صورت موفقیت وارد می‌شود.
+  Future<bool> register({
+    required String phone,
+    required String password,
+    String? fullName,
+    String? familyName,
+  }) async {
+    loading = true;
+    error = null;
+    notifyListeners();
+    try {
+      await repository.register(
+        phone: phone,
+        password: password,
+        fullName: fullName,
+        familyName: familyName,
+      );
+      authenticated = true;
+      notice = null;
+      return true;
+    } on DioException catch (e) {
+      error = _registerMessageFor(e);
+      return false;
+    } finally {
+      loading = false;
+      notifyListeners();
+    }
+  }
+
   Future<void> logout() async {
     await repository.logout();
     authenticated = false;
@@ -61,6 +90,23 @@ class AuthController extends ChangeNotifier {
     final code = e.response?.statusCode;
     if (code == 401) return 'شماره موبایل یا رمز عبور اشتباه است';
     if (code == 400) return 'شماره موبایل و رمز را کامل وارد کن';
+    if (code == 429) return 'تلاش زیاد بود؛ یک دقیقه صبر کن و دوباره بزن';
+    return 'خطا در اتصال به سرور';
+  }
+
+  String _registerMessageFor(DioException e) {
+    final code = e.response?.statusCode;
+    if (code == 400) {
+      final data = e.response?.data;
+      if (data is Map) {
+        for (final field in const ['phone', 'password', 'full_name']) {
+          final v = data[field];
+          if (v is List && v.isNotEmpty) return v.first.toString();
+          if (v is String) return v;
+        }
+      }
+      return 'شماره یا رمز نامعتبر است';
+    }
     if (code == 429) return 'تلاش زیاد بود؛ یک دقیقه صبر کن و دوباره بزن';
     return 'خطا در اتصال به سرور';
   }

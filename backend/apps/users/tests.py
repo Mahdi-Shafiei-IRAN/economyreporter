@@ -2,7 +2,7 @@ from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from django.test import TestCase
-from django.urls import NoReverseMatch, reverse
+from django.urls import reverse
 from rest_framework.test import APITestCase
 
 from apps.families.models import FamilyGroup, FamilyMembership
@@ -70,16 +70,29 @@ class AuthTests(APITestCase):
         User.objects.create_user(phone="09121234567", password=PWD, is_active=False)
         self.assertEqual(self.login("09121234567").status_code, 401)
 
-    def test_public_registration_is_gone(self):
-        with self.assertRaises(NoReverseMatch):
-            reverse("auth-register")
+    def test_register_creates_user_family_and_tokens(self):
         resp = self.client.post(
-            "/api/v1/auth/register/",
+            reverse("auth-register"),
+            {"phone": "۰۹۱۲۱۲۳۴۵۶۷", "password": PWD, "full_name": "بابا"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 201, resp.data)
+        self.assertIn("access", resp.data)
+        user = User.objects.get()
+        self.assertEqual(user.phone, "09121234567")
+        # سازنده مالکِ خانواده‌ی تازه است
+        membership = FamilyMembership.objects.get(user=user)
+        self.assertEqual(membership.role, FamilyMembership.Role.OWNER)
+
+    def test_register_rejects_duplicate_phone(self):
+        User.objects.create_user(phone="09121234567", password=PWD)
+        resp = self.client.post(
+            reverse("auth-register"),
             {"phone": "09121234567", "password": PWD},
             format="json",
         )
-        self.assertEqual(resp.status_code, 404)
-        self.assertFalse(User.objects.exists())
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(User.objects.count(), 1)
 
     def test_me_requires_auth(self):
         resp = self.client.get(reverse("auth-me"))

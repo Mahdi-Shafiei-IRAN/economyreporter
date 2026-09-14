@@ -4,8 +4,10 @@ library;
 import 'package:flutter/material.dart';
 
 import 'auth_controller.dart';
+import 'register_screen.dart';
 
 const kPhoneFieldKey = Key('login-phone');
+const kGoRegisterKey = Key('login-go-register');
 const kPasswordFieldKey = Key('login-password');
 const kLoginButtonKey = Key('login-button');
 const kLoginErrorKey = Key('login-error');
@@ -100,7 +102,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    'شماره و رمز را مدیر خانواده در پنل مدیریت برایت ساخته است.',
+                    'اگر مدیر خانواده برایت حساب ساخته، با همان شماره و رمز وارد شو.',
                     textAlign: TextAlign.center,
                     style: theme.textTheme.bodySmall
                         ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
@@ -125,6 +127,20 @@ class _LoginScreenState extends State<LoginScreen> {
                             child: CircularProgressIndicator(strokeWidth: 2),
                           )
                         : const Text('ورود'),
+                  ),
+                  const SizedBox(height: 12),
+                  const Divider(),
+                  TextButton(
+                    key: kGoRegisterKey,
+                    onPressed: c.loading
+                        ? null
+                        : () => Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) =>
+                                    RegisterScreen(controller: widget.controller),
+                              ),
+                            ),
+                    child: const Text('خانواده‌ی جدیدی نداری؟ همین‌جا بساز'),
                   ),
                 ],
               );

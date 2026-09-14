@@ -1,5 +1,6 @@
 from rest_framework import serializers
 
+from apps.users.phone import normalize_phone, validate_mobile
 from apps.users.serializers import UserSerializer
 
 from .models import FamilyGroup, FamilyMembership
@@ -33,4 +34,16 @@ class FamilyGroupSerializer(serializers.ModelSerializer):
 
 
 class InviteSerializer(serializers.Serializer):
+    """افزودن عضو: اگر کاربر با این شماره باشد اضافه می‌شود؛ وگرنه با رمزِ داده‌شده
+    حسابِ تازه ساخته می‌شود (ثبت‌نامِ آزاد)."""
+
     phone = serializers.CharField(max_length=20)
+    password = serializers.CharField(
+        write_only=True, min_length=4, max_length=128, required=False, allow_blank=True
+    )
+    full_name = serializers.CharField(max_length=150, required=False, allow_blank=True)
+
+    def validate_phone(self, value):
+        phone = normalize_phone(value)
+        validate_mobile(phone)
+        return phone

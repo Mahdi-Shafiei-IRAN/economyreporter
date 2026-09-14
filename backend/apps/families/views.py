@@ -67,7 +67,8 @@ class FamilyInviteView(APIView):
 
         serializer = InviteSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        phone = normalize_phone(serializer.validated_data["phone"])
+        data = serializer.validated_data
+        phone = normalize_phone(data["phone"])
 
         if family.memberships.count() >= settings.FAMILY_MAX_MEMBERS:
             raise ValidationError(
@@ -76,8 +77,16 @@ class FamilyInviteView(APIView):
 
         target = User.objects.filter(phone=phone).first()
         if target is None:
-            raise ValidationError("کاربری با این شماره یافت نشد؛ اول مدیر باید او را در پنل بسازد")
-        if is_member(target, family):
+            # حسابِ تازه با رمزِ داده‌شده بساز (ثبت‌نامِ آزاد توسط مدیرِ خانواده).
+            password = (data.get("password") or "").strip()
+            if not password:
+                raise ValidationError(
+                    "کاربری با این شماره نیست؛ برای ساختِ حساب رمز را هم بده."
+                )
+            target = User.objects.create_user(
+                phone=phone, password=password, full_name=data.get("full_name", "")
+            )
+        elif is_member(target, family):
             raise ValidationError("این کاربر از قبل عضو خانواده است")
 
         membership = FamilyMembership.objects.create(

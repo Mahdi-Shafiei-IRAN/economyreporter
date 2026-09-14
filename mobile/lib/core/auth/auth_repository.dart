@@ -48,6 +48,31 @@ class AuthRepository {
     );
   }
 
+  /// ثبت‌نامِ آزاد: حساب و خانواده‌ی تازه می‌سازد و بلافاصله وارد می‌شود.
+  Future<void> register({
+    required String phone,
+    required String password,
+    String? fullName,
+    String? familyName,
+  }) async {
+    final resp = await api.dio.post(
+      '/auth/register/',
+      data: {
+        'phone': normalizeDigits(phone.trim()),
+        'password': password,
+        if (fullName != null && fullName.trim().isNotEmpty)
+          'full_name': fullName.trim(),
+        if (familyName != null && familyName.trim().isNotEmpty)
+          'family_name': familyName.trim(),
+      },
+      options: Options(extra: {'skipAuth': true}),
+    );
+    await tokenStore.saveTokens(
+      access: resp.data['access'] as String,
+      refresh: resp.data['refresh'] as String,
+    );
+  }
+
   Future<UserProfile> me() async {
     final resp = await api.dio.get('/auth/me/');
     return UserProfile.fromJson(Map<String, dynamic>.from(resp.data));

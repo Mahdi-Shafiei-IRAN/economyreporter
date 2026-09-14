@@ -4,6 +4,7 @@ library;
 
 import 'dart:convert';
 
+import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart' hide Category;
 
 import '../../core/family/family_api.dart';
@@ -42,9 +43,13 @@ class DashboardController extends ChangeNotifier {
   DashboardController(
     this.repository, {
     this.parser = const SmsParser(),
+    this.familyApi,
     DateTime Function()? clock,
   })  : _clock = clock ?? DateTime.now,
         period = Period.containing((clock ?? DateTime.now)());
+
+  /// برای افزودنِ عضوِ خانواده توسطِ مدیر (اختیاری؛ در تست‌ها معمولاً null).
+  final FamilyApi? familyApi;
 
   bool loading = true;
   bool _loadedOnce = false;
@@ -471,6 +476,45 @@ class DashboardController extends ChangeNotifier {
     await repository.setSetting(
         SettingKeys.dismissedDuplicates, jsonEncode(keys.toList()));
     await load();
+  }
+
+  /// سقفِ اعضای خانواده (روی سرور هم اعمال می‌شود).
+  static const int maxFamilyMembers = 3;
+
+  bool get canAddMember =>
+      familyApi != null && isManager && members.length < maxFamilyMembers;
+
+  /// افزودنِ عضوِ تازه توسطِ مدیر؛ در صورت خطا پیام فارسی برمی‌گرداند، وگرنه null.
+  Future<String?> addMember({
+    required String phone,
+    required String password,
+    String? fullName,
+  }) async {
+    final api = familyApi;
+    if (api == null) return 'افزودن عضو در این حالت ممکن نیست';
+    try {
+      await api.addMember(phone: phone, password: password, fullName: fullName);
+      // فهرست اعضا را تازه کن
+      final fresh = await api.members();
+      members = fresh;
+      await repository.setSetting(
+          SettingKeys.familyMembers, FamilyMember.encodeList(fresh));
+      notifyListeners();
+      return null;
+    } on DioException catch (e) {
+      final data = e.response?.data;
+      if (data is Map) {
+        for (final f in const ['phone', 'password', 'detail', 'non_field_errors']) {
+          final v = data[f];
+          if (v is List && v.isNotEmpty) return v.first.toString();
+          if (v is String) return v;
+        }
+      }
+      if (e.response?.statusCode == 403) return 'فقط مدیرِ خانواده می‌تواند عضو اضافه کند';
+      return 'خطا در افزودن عضو';
+    } catch (_) {
+      return 'خطا در افزودن عضو';
+    }
   }
 
   /// حذفِ تکراری‌ها: قدیمی‌ترین می‌ماند، بقیه حذف (نامعتبر) می‌شوند.
