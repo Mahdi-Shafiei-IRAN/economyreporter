@@ -336,6 +336,7 @@ class _RootState extends State<_Root> with WidgetsBindingObserver {
   /// بررسی دستیِ به‌روزرسانی (از تنظیمات)؛ همیشه بازخورد می‌دهد.
   Future<String> _manualCheckUpdate() async {
     final updater = widget.services.updater;
+    final currentName = await updater.currentVersionName();
     final info = await updater.fetch();
     if (info == null) {
       return 'اتصال به سرور نشد؛ اینترنت را بررسی کن و بعداً دوباره بزن.';
@@ -343,9 +344,9 @@ class _RootState extends State<_Root> with WidgetsBindingObserver {
     final current = await updater.currentVersionCode();
     if (info.versionCode > current) {
       _runUpdate(info);
-      return 'نسخه‌ی جدید (${info.versionName}) پیدا شد؛ در حال دانلود…';
+      return 'نسخه‌ی جدید ${info.versionName} پیدا شد (نسخه‌ی فعلی: $currentName)؛ در حال دانلود…';
     }
-    return 'همین حالا به‌روزترین نسخه (${info.versionName}) را داری.';
+    return 'به‌روزترین نسخه را داری (نسخه‌ی فعلی: $currentName).';
   }
 
   /// باز کردن صفحه‌ی دسته‌بندی برای تراکنشِ نوتیفیکیشن.

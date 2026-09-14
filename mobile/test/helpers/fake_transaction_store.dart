@@ -292,6 +292,23 @@ class FakeTransactionStore implements TransactionStore {
   }
 
   @override
+  Future<void> assignWalletToTransaction(String txId, Wallet wallet) async {
+    final i = _items.indexWhere((t) => t.id == txId);
+    if (i == -1) return;
+    _items[i] = _items[i].copyWith(
+      ownerUserId: wallet.ownerUserId,
+      ownerName: wallet.ownerName,
+      walletLabel: wallet.label,
+      bankId: wallet.bankId ?? _items[i].bankId,
+    );
+  }
+
+  @override
+  Future<void> clearWalletPin(String txId) async {
+    await reattributeLocal();
+  }
+
+  @override
   Future<List<Map<String, Object?>>> pendingWallets() async => const [];
 
   @override

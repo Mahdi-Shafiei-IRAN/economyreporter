@@ -23,6 +23,9 @@ class SummaryCard extends StatelessWidget {
   /// شخصِ انتخاب‌شده (جمع فقط مال اوست)؛ null یعنی همه.
   final String? scope;
 
+  /// موجودیِ واقعی (از «مانده»ی پیامک‌ها)؛ null یعنی مانده‌ای نداریم و فقط خالص را نشان می‌دهیم.
+  final int? realBalance;
+
   const SummaryCard({
     super.key,
     required this.summary,
@@ -30,9 +33,15 @@ class SummaryCard extends StatelessWidget {
     required this.count,
     this.filtered = false,
     this.scope,
+    this.realBalance,
   });
 
+  bool get _hasBalance => realBalance != null;
+
   String get _title {
+    if (_hasBalance) {
+      return scope != null ? 'موجودی $scope' : 'موجودی (از مانده‌ی بانک)';
+    }
     if (scope != null) return 'خالص $scope • ${period.title}';
     return period.isAll ? 'خالص (درآمد − هزینه)' : 'خالص ${period.title}';
   }
@@ -44,6 +53,7 @@ class SummaryCard extends StatelessWidget {
     const onHero = Colors.white;
     final muted = Colors.white.withOpacity(0.78);
     final net = summary.balanceRial;
+    final headline = realBalance ?? net;
 
     return Container(
       padding: const EdgeInsets.fromLTRB(20, 18, 20, 16),
@@ -70,7 +80,7 @@ class SummaryCard extends StatelessWidget {
             children: [
               Flexible(
                 child: Text(
-                  formatToman(net),
+                  formatToman(headline),
                   key: kBalanceValueKey,
                   style: theme.textTheme.headlineSmall?.copyWith(
                     color: onHero,
@@ -80,6 +90,13 @@ class SummaryCard extends StatelessWidget {
               ),
             ],
           ),
+          if (_hasBalance) ...[
+            const SizedBox(height: 2),
+            Text(
+              'خالصِ ${period.isAll ? 'کل' : period.title}: ${formatToman(net)}',
+              style: theme.textTheme.bodySmall?.copyWith(color: muted),
+            ),
+          ],
           const SizedBox(height: 14),
           Row(
             children: [

@@ -70,6 +70,9 @@ void main() {
 
     await tester.tap(find.byKey(const ValueKey('allow-BankMellat')));
     await tester.pumpAndSettle();
+    // دیالوگِ انتخاب بانک (پیش‌فرض: بانکِ حدس‌زده‌شده = ملت) را تأیید کن.
+    await tester.tap(find.byKey(const Key('bank-pick-confirm')));
+    await tester.pumpAndSettle();
 
     expect(controller.allowedSenders.single.address, 'BankMellat');
     expect(controller.allowedSenders.single.bankId, 'mellat');

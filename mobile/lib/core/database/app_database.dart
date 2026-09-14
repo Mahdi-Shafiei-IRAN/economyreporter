@@ -9,7 +9,7 @@ import 'package:sqflite/sqflite.dart';
 import 'package:uuid/uuid.dart';
 
 const String kDbName = 'economy.db';
-const int kDbVersion = 9;
+const int kDbVersion = 10;
 
 /// دسته‌های پیش‌فرض (قابل ویرایش توسط کاربر بعداً).
 const List<String> kDefaultCategories = [
@@ -99,6 +99,11 @@ Future<void> migrateSchema(Database db, int oldVersion, int newVersion) async {
   if (oldVersion < 9) {
     // نسخه ۹: بودجه‌ها (سقفِ ماهانه‌ی هر دسته) + هم‌گام‌سازی.
     await _createBudgetsTable(db);
+  }
+  if (oldVersion < 10) {
+    // نسخه ۱۰: انتسابِ دستیِ تراکنش به یک کارتِ مشخص (وقتی پیامک شماره ندارد و
+    // شخص چند حساب در یک بانک دارد). این انتساب پایدار می‌ماند.
+    await _ensureColumn(db, 'transactions', 'pinned_wallet_id', 'TEXT');
   }
 }
 
@@ -239,6 +244,7 @@ Future<void> createSchema(Database db) async {
   await db.execute('ALTER TABLE wallets ADD COLUMN owner_user_id TEXT');
   await _addWalletSyncColumns(db);
   await _createBudgetsTable(db);
+  await _ensureColumn(db, 'transactions', 'pinned_wallet_id', 'TEXT');
   await _createSettingsTable(db);
   await _createAllowedSendersTable(db);
 }

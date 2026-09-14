@@ -55,6 +55,12 @@ class UpdateService {
     return int.tryParse(info.buildNumber) ?? 0;
   }
 
+  /// نامِ نسخه‌ی نصب‌شده (مثل «1.0.6») برای نمایش به کاربر.
+  Future<String> currentVersionName() async {
+    final info = await PackageInfo.fromPlatform();
+    return info.version;
+  }
+
   /// نسخه‌ی روی سرور را می‌خواند (بدون مقایسه)؛ null یعنی سرور در دسترس نبود.
   Future<AppUpdateInfo?> fetch() async {
     try {

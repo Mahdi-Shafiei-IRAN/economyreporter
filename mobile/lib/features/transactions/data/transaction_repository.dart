@@ -56,6 +56,54 @@ bool countsInTotals(TransactionRecord t) =>
     t.amountRial != null &&
     (t.kind == 'income' || t.kind == 'expense');
 
+/// کلیدِ کارت برای گروه‌بندیِ موجودی (بانک + شماره‌ی کارت/حساب، وگرنه صاحب).
+String _balanceCardKey(TransactionRecord t) {
+  final bank = t.bankId ?? '';
+  if (t.cardLast4?.isNotEmpty ?? false) return '$bank|c:${t.cardLast4}';
+  if (t.accountRef?.isNotEmpty ?? false) return '$bank|a:${t.accountRef}';
+  return '$bank|u:${t.ownerUserId ?? t.walletLabel ?? 'unknown'}';
+}
+
+/// موجودیِ واقعی: برای هر کارت، «مانده»ی آخرین پیامکِ بانک (که مطلق است و شاملِ
+/// موجودیِ ابتدای دوره می‌شود) را می‌گیرد و تراکنش‌های بعد از آن مانده را هم اعمال
+/// می‌کند؛ سپس جمعِ همه‌ی کارت‌ها. [asOf] = فقط تا این زمان (پایان دوره).
+///
+/// چرا؟ چون «خالص = درآمد − هزینه» موجودیِ ابتدای دوره را صفر می‌گیرد و غلط است؛
+/// ولی مانده‌ی بانک عددِ واقعیِ حساب است.
+int realBalanceRial(Iterable<TransactionRecord> all, {DateTime? asOf}) {
+  final byCard = <String, List<TransactionRecord>>{};
+  for (final t in all) {
+    if (t.isDeleted) continue;
+    if (asOf != null && t.effectiveTime.isAfter(asOf)) continue;
+    byCard.putIfAbsent(_balanceCardKey(t), () => []).add(t);
+  }
+  var total = 0;
+  for (final list in byCard.values) {
+    list.sort((a, b) => a.effectiveTime.compareTo(b.effectiveTime));
+    // آخرین تراکنشی که مانده دارد.
+    var anchor = -1;
+    for (var i = list.length - 1; i >= 0; i--) {
+      if (list[i].balanceAfterRial != null) {
+        anchor = i;
+        break;
+      }
+    }
+    if (anchor == -1) {
+      // هیچ مانده‌ای نداریم؛ بهترین تخمین: جمعِ علامت‌دار (بدون موجودیِ ابتدایی).
+      for (final t in list) {
+        total += t.signedAmount;
+      }
+    } else {
+      total += list[anchor].balanceAfterRial!;
+      // تراکنش‌های بعد از آن مانده را هم اعمال کن (اگر پیامکِ جدیدتری مانده نداشت).
+      for (var i = anchor + 1; i < list.length; i++) {
+        total += list[i].signedAmount;
+      }
+    }
+  }
+  return total;
+}
+
 /// کلیدهای جدول تنظیمات.
 class SettingKeys {
   SettingKeys._();
@@ -78,6 +126,9 @@ class SettingKeys {
 
   /// JSON: فرستنده‌هایی که کاربر «بانک نیست» زده تا دیگر پیشنهاد نشوند.
   static const dismissedSenders = 'dismissed_senders';
+
+  /// JSON: جفت‌های انتقالی که کاربر «انتقال نیست» زده.
+  static const dismissedTransfers = 'dismissed_transfers';
 
   /// شناسه‌ی ثابت این گوشی (برای sync).
   static const deviceId = 'device_id';
@@ -159,6 +210,13 @@ abstract class TransactionStore {
 
   /// حذف نرم: تراکنش نامعتبر (ناموفق/پیامک رمز) پنهان می‌شود ولی پیامکش دوباره وارد نمی‌شود.
   Future<void> deleteTransaction(String id);
+
+  /// انتسابِ دستیِ تراکنش به یک کیفِ مشخص (وقتی شخص چند حساب در یک بانک دارد و
+  /// پیامک شماره نداشته). این انتساب پایدار است و با حدسِ خودکار بازنویسی نمی‌شود.
+  Future<void> assignWalletToTransaction(String txId, Wallet wallet);
+
+  /// برداشتنِ انتسابِ دستی و برگشت به حدسِ خودکار.
+  Future<void> clearWalletPin(String txId);
 
   // --- دسته‌بندی ---
   Future<List<Category>> categories();
@@ -894,6 +952,33 @@ class TransactionRepository implements TransactionStore {
   }
 
   @override
+  Future<void> assignWalletToTransaction(String txId, Wallet wallet) async {
+    final data = <String, Object?>{
+      'pinned_wallet_id': wallet.id,
+      'owner_user_id': wallet.ownerUserId,
+      'owner_name': wallet.ownerName,
+      'wallet_label': wallet.label,
+      if (wallet.bankId != null && wallet.bankId!.isNotEmpty) 'bank_id': wallet.bankId,
+      if (wallet.cardLast4 != null && wallet.cardLast4!.isNotEmpty)
+        'card_last4': wallet.cardLast4,
+      if (wallet.accountRef != null && wallet.accountRef!.isNotEmpty)
+        'account_ref': wallet.accountRef,
+      'updated_at': _nowIso(),
+      'sync_status': 'pending',
+    };
+    await _db.update('transactions', data, where: 'id = ?', whereArgs: [txId]);
+    final record = await getById(txId);
+    if (record != null && record.kind != 'unknown') await _enqueueOutbox(record);
+  }
+
+  @override
+  Future<void> clearWalletPin(String txId) async {
+    await _db.update('transactions', {'pinned_wallet_id': null},
+        where: 'id = ?', whereArgs: [txId]);
+    await reattributeLocal();
+  }
+
+  @override
   Future<void> reattributeLocal() async {
     final me = await getSetting(SettingKeys.meUserId);
     final ws = await wallets();
@@ -902,21 +987,46 @@ class TransactionRepository implements TransactionStore {
       'transactions',
       columns: [
         'id', 'kind', 'sms_sender', 'card_last4', 'account_ref', 'bank_id',
-        'owner_user_id', 'owner_name', 'wallet_label',
+        'owner_user_id', 'owner_name', 'wallet_label', 'pinned_wallet_id',
       ],
       where: "origin = 'local' AND deleted_at IS NULL",
     );
     final now = _nowIso();
     for (final r in rows) {
-      final a = _attributionFrom(
-        ws,
-        allowed,
-        me,
-        sender: r['sms_sender'] as String?,
-        cardLast4: r['card_last4'] as String?,
-        accountRef: r['account_ref'] as String?,
-        bankId: r['bank_id'] as String?,
-      );
+      // انتسابِ دستی (pinned): از همان کیف استفاده کن، نه حدسِ خودکار.
+      final pinnedId = r['pinned_wallet_id'] as String?;
+      final _Attribution a;
+      if (pinnedId != null && pinnedId.isNotEmpty) {
+        Wallet? pw;
+        for (final w in ws) {
+          if (w.id == pinnedId) {
+            pw = w;
+            break;
+          }
+        }
+        if (pw == null) {
+          // کیفِ انتساب حذف شده؛ pin را بردار و به حالت خودکار برگرد.
+          await _db.update('transactions', {'pinned_wallet_id': null},
+              where: 'id = ?', whereArgs: [r['id']]);
+          a = _attributionFrom(ws, allowed, me,
+              sender: r['sms_sender'] as String?,
+              cardLast4: r['card_last4'] as String?,
+              accountRef: r['account_ref'] as String?,
+              bankId: r['bank_id'] as String?);
+        } else {
+          a = _Attribution(pw.ownerUserId ?? me, pw.ownerName, pw.label);
+        }
+      } else {
+        a = _attributionFrom(
+          ws,
+          allowed,
+          me,
+          sender: r['sms_sender'] as String?,
+          cardLast4: r['card_last4'] as String?,
+          accountRef: r['account_ref'] as String?,
+          bankId: r['bank_id'] as String?,
+        );
+      }
       if (a.ownerUserId == r['owner_user_id'] &&
           a.ownerName == r['owner_name'] &&
           a.walletLabel == r['wallet_label']) {

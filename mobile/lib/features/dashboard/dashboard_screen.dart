@@ -12,6 +12,7 @@ import '../reports/report_screen.dart';
 import '../review/reconciliation_screen.dart';
 import '../review/duplicates_screen.dart';
 import '../review/review_screen.dart';
+import '../review/transfers_screen.dart';
 import '../senders/senders_screen.dart';
 import '../settings/settings_screen.dart';
 import '../transactions/data/transaction_record.dart';
@@ -38,6 +39,7 @@ const kReviewChipKey = Key('review-chip');
 const kCategorizeChipKey = Key('categorize-chip');
 const kReconcileChipKey = Key('reconcile-chip');
 const kDuplicatesChipKey = Key('duplicates-chip');
+const kTransfersChipKey = Key('transfers-chip');
 const kSyncChipKey = Key('sync-chip');
 const kSelectionBarKey = Key('selection-bar');
 const kSelectionCountKey = Key('selection-count');
@@ -372,6 +374,7 @@ class _TransactionsTabState extends State<_TransactionsTab> {
                             count: c.visible.length,
                             filtered: c.hasActiveFilters,
                             scope: c.person == null ? null : _personLabel(c.person!),
+                            realBalance: c.hasRealBalance ? c.realBalance : null,
                           ),
                         ),
                       ),
@@ -852,6 +855,13 @@ class _AttentionStrip extends StatelessWidget {
           avatar: Icon(Icons.copy_all_rounded, color: fin.warning, size: 18),
           label: Text('${_fa(c.duplicateGroups.length)} احتمال تکراری'),
           onPressed: () => push(DuplicatesScreen(controller: c)),
+        ),
+      if (c.transferPairs.isNotEmpty)
+        ActionChip(
+          key: kTransfersChipKey,
+          avatar: Icon(Icons.swap_horiz_rounded, color: fin.warning, size: 18),
+          label: Text('${_fa(c.transferPairs.length)} احتمال انتقال'),
+          onPressed: () => push(TransfersScreen(controller: c)),
         ),
       if (pending > 0 && c.syncStatus.last?.error != null)
         ActionChip(

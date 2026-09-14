@@ -10,6 +10,7 @@ import 'package:flutter/foundation.dart' hide Category;
 import '../../core/family/family_api.dart';
 import '../../core/dedup/duplicate_finder.dart';
 import '../../core/reconcile/reconciliation.dart';
+import '../../core/transfer/transfer_finder.dart';
 import '../budgets/data/budget.dart';
 import '../../core/sms/sms_importer.dart';
 import '../../core/sms/sms_parser.dart';
@@ -74,6 +75,7 @@ class DashboardController extends ChangeNotifier {
   List<TransactionRecord> uncategorized = const [];
   List<BalanceGap> balanceGaps = const [];
   List<DuplicateGroup> duplicateGroups = const [];
+  List<TransferPair> transferPairs = const [];
   List<Wallet> wallets = const [];
   List<AllowedSender> allowedSenders = const [];
   List<FamilyMember> members = const [];
@@ -105,6 +107,21 @@ class DashboardController extends ChangeNotifier {
   List<TransactionRecord> get transactions => visible;
 
   FinanceSummary get summary => FinanceSummary.of(visible);
+
+  /// موجودیِ واقعی (از «مانده»ی پیامک‌ها) برای شخصِ انتخاب‌شده تا پایانِ دوره؛
+  /// برخلاف «خالص = درآمد − هزینه»، موجودیِ ابتدای دوره را هم لحاظ می‌کند.
+  int get realBalance {
+    final items = _byId.values
+        .where((t) => person == null || personOf(t) == person);
+    final asOf = period.isAll
+        ? null
+        : period.to?.subtract(const Duration(microseconds: 1));
+    return realBalanceRial(items, asOf: asOf);
+  }
+
+  /// آیا اصلاً مانده‌ای از بانک داریم؟ (اگر نه، موجودیِ واقعی نمایش داده نمی‌شود.)
+  bool get hasRealBalance =>
+      _byId.values.any((t) => !t.isDeleted && t.balanceAfterRial != null);
   List<PersonGroup> get personGroups => groupByPerson(visible);
   List<DayGroup> get dayGroups => groupByDay(visible);
   int get needsReviewCount => reviewItems.length;
@@ -163,6 +180,8 @@ class DashboardController extends ChangeNotifier {
         .findGaps(all, dismissed: await _dismissedGaps());
     duplicateGroups = const DuplicateFinder()
         .find(all, dismissed: await _dismissedDuplicates());
+    transferPairs = const TransferFinder()
+        .find(all, dismissed: await _dismissedTransfers());
     syncStatus = await SyncStatusInfo.load(repository);
     selected.removeWhere((id) => !_byId.containsKey(id));
 
@@ -501,8 +520,66 @@ class DashboardController extends ChangeNotifier {
     await load();
   }
 
+  // ---------------------------------------------------------------------------
+  // انتقال بین کارت‌ها (برداشت از یکی + واریزِ هم‌مبلغ به دیگری)
+  // ---------------------------------------------------------------------------
+
+  Future<Set<String>> _dismissedTransfers() async {
+    final raw = await repository.getSetting(SettingKeys.dismissedTransfers);
+    if (raw == null) return {};
+    try {
+      return (jsonDecode(raw) as List).map((e) => e.toString()).toSet();
+    } catch (_) {
+      return {};
+    }
+  }
+
+  /// تأیید انتقال: هر دو طرف به نوعِ «انتقال» تبدیل می‌شوند تا از خالص بیرون بروند.
+  Future<void> confirmTransfer(TransferPair pair) async {
+    if (canEdit(pair.out)) {
+      await repository.updateTransaction(pair.out.id, kind: 'transfer');
+    }
+    if (canEdit(pair.inn)) {
+      await repository.updateTransaction(pair.inn.id, kind: 'transfer');
+    }
+    await _changed();
+  }
+
+  /// «انتقال نیست»: این جفت دیگر پیشنهاد نشود.
+  Future<void> dismissTransfer(TransferPair pair) async {
+    final keys = await _dismissedTransfers()..add(pair.key);
+    await repository.setSetting(
+        SettingKeys.dismissedTransfers, jsonEncode(keys.toList()));
+    await load();
+  }
+
   /// افزودنِ عضو فقط برای مدیرِ خانواده (بدون سقفِ تعداد).
   bool get canAddMember => familyApi != null && isManager;
+
+  // --- انتسابِ دستیِ کارت (برای چند حساب در یک بانک) ---
+
+  /// کیف‌هایی که می‌شود این تراکنش را به آن‌ها نسبت داد (اولویت با هم‌بانک).
+  List<Wallet> assignableWallets(TransactionRecord t) {
+    if (wallets.isEmpty) return const [];
+    final bank = t.bankId;
+    final sameBank = [
+      for (final w in wallets)
+        if (bank != null && bank.isNotEmpty && w.bankId == bank) w
+    ];
+    return sameBank.isNotEmpty ? sameBank : List.of(wallets);
+  }
+
+  Future<void> assignWallet(TransactionRecord t, Wallet wallet) async {
+    if (!canEdit(t)) return;
+    await repository.assignWalletToTransaction(t.id, wallet);
+    await _changed();
+  }
+
+  Future<void> clearWalletPin(TransactionRecord t) async {
+    if (!canEdit(t)) return;
+    await repository.clearWalletPin(t.id);
+    await _changed();
+  }
 
   // --- بودجه‌ها -------------------------------------------------------------
 

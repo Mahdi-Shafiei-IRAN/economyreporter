@@ -18,6 +18,7 @@ const kDetailsSheetKey = Key('details-sheet');
 const kDetailsCategorizeKey = Key('details-categorize');
 const kDetailsEditKey = Key('details-edit');
 const kDetailsDeleteKey = Key('details-delete');
+const kDetailsChooseCardKey = Key('details-choose-card');
 const kDetailsReadOnlyKey = Key('details-readonly');
 const kDetailsSmsKey = Key('details-sms');
 const kConfirmInvalidKey = Key('confirm-invalid');
@@ -111,6 +112,57 @@ class _DetailsBody extends StatelessWidget {
     if (!await confirmInvalidate(context)) return;
     await controller.deleteTransaction(t.id);
     if (context.mounted) Navigator.of(context).pop();
+  }
+
+  /// انتخابِ کارتِ این تراکنش (وقتی شخص چند حساب در یک بانک دارد و پیامک شماره نداشته).
+  Future<void> _chooseCard(BuildContext context, TransactionRecord t) async {
+    final wallets = controller.assignableWallets(t);
+    if (wallets.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('هنوز کارتی نساخته‌ای؛ اول در «کارت‌ها» کارت‌ها را اضافه کن.'),
+      ));
+      return;
+    }
+    await showModalBottomSheet<void>(
+      context: context,
+      useSafeArea: true,
+      builder: (ctx) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          children: [
+            const Padding(
+              padding: EdgeInsets.all(16),
+              child: Text('این تراکنش مالِ کدام کارت/حساب است؟',
+                  style: TextStyle(fontWeight: FontWeight.w700)),
+            ),
+            for (final w in wallets)
+              ListTile(
+                key: ValueKey('assign-wallet-${w.id}'),
+                leading: const Icon(Icons.credit_card_rounded),
+                title: Text(w.label.isEmpty ? w.ownerName : w.label),
+                subtitle: Text([
+                  w.ownerName,
+                  if (w.cardLast4?.isNotEmpty ?? false) 'کارت ${w.cardLast4}',
+                  if (w.accountRef?.isNotEmpty ?? false) 'حساب ${w.accountRef}',
+                ].join(' • ')),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  controller.assignWallet(t, w);
+                },
+              ),
+            const Divider(),
+            ListTile(
+              leading: const Icon(Icons.auto_mode_rounded),
+              title: const Text('خودکار (بدون انتساب دستی)'),
+              onTap: () {
+                Navigator.pop(ctx);
+                controller.clearWalletPin(t);
+              },
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   @override
@@ -240,6 +292,12 @@ class _DetailsBody extends StatelessWidget {
                     onPressed: () => showEditTransactionSheet(context, controller, t),
                     icon: const Icon(Icons.edit_outlined),
                     label: const Text('ویرایش'),
+                  ),
+                  OutlinedButton.icon(
+                    key: kDetailsChooseCardKey,
+                    onPressed: () => _chooseCard(context, t),
+                    icon: const Icon(Icons.credit_card_rounded),
+                    label: const Text('تعیین کارت'),
                   ),
                   TextButton.icon(
                     key: kDetailsDeleteKey,

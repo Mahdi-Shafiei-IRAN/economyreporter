@@ -91,13 +91,25 @@ class _SendersScreenState extends State<SendersScreen> {
   }
 
   Future<void> _allow(SenderCandidate s) async {
+    // اول بانک را مشخص/تأیید کن (به‌ویژه برای سرشماره‌های عددی که خودکار حدس زده نمی‌شوند).
+    final bank = await _pickBank(s.bankId);
+    if (bank == null) return; // انصراف
     final owner = await _pickOwner(s.address);
     if (owner == null) return;
     await _c.addAllowedSender(s.address,
-        bankId: s.bankId, ownerName: owner.name, ownerUserId: owner.userId);
+        bankId: bank.value, ownerName: owner.name, ownerUserId: owner.userId);
     if (!mounted) return;
     _refresh();
     _snack('«${s.address}» مجاز شد؛ تراکنش‌هایش به ${owner.name} نسبت داده می‌شود.');
+  }
+
+  /// انتخاب بانکِ این فرستنده؛ پیش‌فرض حدسِ خودکار. برگرداندنِ null = انصراف،
+  /// و `_Chosen(null)` = «بانک نامشخص».
+  Future<_Chosen?> _pickBank(String? initial) async {
+    return showDialog<_Chosen>(
+      context: context,
+      builder: (_) => _BankPickDialog(initialBankId: initial),
+    );
   }
 
   Future<void> _reject(SenderCandidate s) async {
@@ -456,6 +468,75 @@ class _CandidateCard extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// نتیجه‌ی انتخابِ بانک: `value` شناسه‌ی بانک است (null یعنی «نامشخص»).
+/// خودِ برگشتِ null از دیالوگ یعنی انصراف.
+class _Chosen {
+  final String? value;
+  const _Chosen(this.value);
+}
+
+class _BankPickDialog extends StatefulWidget {
+  final String? initialBankId;
+  const _BankPickDialog({this.initialBankId});
+
+  @override
+  State<_BankPickDialog> createState() => _BankPickDialogState();
+}
+
+class _BankPickDialogState extends State<_BankPickDialog> {
+  String? _bankId;
+
+  @override
+  void initState() {
+    super.initState();
+    _bankId = widget.initialBankId;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('این فرستنده مالِ کدام بانک است؟'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            'بانک را انتخاب کن تا تراکنش‌های این فرستنده درست تفکیک شوند '
+            '(برای سرشماره‌های عددی که خودکار تشخیص داده نمی‌شوند مهم است).',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+          const SizedBox(height: 12),
+          DropdownButtonFormField<String?>(
+            key: const Key('bank-pick-dropdown'),
+            value: _bankId,
+            isExpanded: true,
+            decoration: const InputDecoration(labelText: 'بانک'),
+            items: [
+              const DropdownMenuItem<String?>(value: null, child: Text('نامشخص')),
+              for (final b in kBankRegistry)
+                DropdownMenuItem<String?>(
+                  value: b.id,
+                  child: Text(b.name, overflow: TextOverflow.ellipsis),
+                ),
+            ],
+            onChanged: (v) => setState(() => _bankId = v),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('انصراف'),
+        ),
+        FilledButton(
+          key: const Key('bank-pick-confirm'),
+          onPressed: () => Navigator.of(context).pop(_Chosen(_bankId)),
+          child: const Text('تأیید'),
+        ),
+      ],
     );
   }
 }
