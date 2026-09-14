@@ -3,6 +3,7 @@
 ///   {"versionCode": 3, "versionName": "1.0.2", "notes": "...", "url": ".../economy-latest.apk"}
 library;
 
+import 'dart:convert';
 
 import 'package:dio/dio.dart';
 import 'package:open_filex/open_filex.dart';
@@ -54,19 +55,27 @@ class UpdateService {
     return int.tryParse(info.buildNumber) ?? 0;
   }
 
-  /// اگر نسخه‌ی جدیدتری هست برمی‌گرداند؛ در آفلاین یا نبودِ سرور، null (بی‌صدا).
-  Future<AppUpdateInfo?> check() async {
+  /// نسخه‌ی روی سرور را می‌خواند (بدون مقایسه)؛ null یعنی سرور در دسترس نبود.
+  Future<AppUpdateInfo?> fetch() async {
     try {
       final resp = await _dio.get('$baseUrl/version.json',
           options: Options(responseType: ResponseType.json));
       final data = resp.data is Map
           ? Map<String, dynamic>.from(resp.data as Map)
-          : <String, dynamic>{};
-      final info = AppUpdateInfo.fromJson(data, base: baseUrl);
-      return isUpdateAvailable(await currentVersionCode(), info) ? info : null;
+          : (resp.data is String
+              ? Map<String, dynamic>.from(jsonDecode(resp.data as String) as Map)
+              : <String, dynamic>{});
+      return AppUpdateInfo.fromJson(data, base: baseUrl);
     } catch (_) {
       return null;
     }
+  }
+
+  /// اگر نسخه‌ی جدیدتری هست برمی‌گرداند؛ در آفلاین یا نبودِ سرور، null (بی‌صدا).
+  Future<AppUpdateInfo?> check() async {
+    final info = await fetch();
+    if (info == null) return null;
+    return isUpdateAvailable(await currentVersionCode(), info) ? info : null;
   }
 
   /// APK را دانلود و نصب را باز می‌کند. [onProgress] بین 0 و 1.

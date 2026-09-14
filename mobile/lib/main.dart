@@ -327,6 +327,21 @@ class _RootState extends State<_Root> with WidgetsBindingObserver {
     }
   }
 
+  /// بررسی دستیِ به‌روزرسانی (از تنظیمات)؛ همیشه بازخورد می‌دهد.
+  Future<String> _manualCheckUpdate() async {
+    final updater = widget.services.updater;
+    final info = await updater.fetch();
+    if (info == null) {
+      return 'اتصال به سرور نشد؛ اینترنت را بررسی کن و بعداً دوباره بزن.';
+    }
+    final current = await updater.currentVersionCode();
+    if (info.versionCode > current) {
+      _runUpdate(info);
+      return 'نسخه‌ی جدید (${info.versionName}) پیدا شد؛ در حال دانلود…';
+    }
+    return 'همین حالا به‌روزترین نسخه (${info.versionName}) را داری.';
+  }
+
   /// باز کردن صفحه‌ی دسته‌بندی برای تراکنشِ نوتیفیکیشن.
   Future<void> _openCategorize(String txId) async {
     final record = await widget.services.dashboard.transactionById(txId);
@@ -356,6 +371,7 @@ class _RootState extends State<_Root> with WidgetsBindingObserver {
             },
             onSync: () async =>
                 (await services.refreshFromServer(force: true)).message,
+            onCheckUpdate: _manualCheckUpdate,
             onOpenFamilyDashboard: () => Navigator.of(context).push(
               MaterialPageRoute(
                 builder: (_) => FamilyDashboardScreen(

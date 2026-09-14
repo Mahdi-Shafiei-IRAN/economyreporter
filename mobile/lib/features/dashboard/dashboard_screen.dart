@@ -57,6 +57,9 @@ class DashboardScreen extends StatefulWidget {
   /// همگام‌سازی دستی؛ پیام نتیجه را برمی‌گرداند تا نشان داده شود.
   final Future<String> Function()? onSync;
 
+  /// بررسی دستیِ به‌روزرسانی؛ پیام نتیجه را برمی‌گرداند.
+  final Future<String> Function()? onCheckUpdate;
+
   /// باز کردن خلاصه‌ی خانواده از سرور (نیازمند شبکه).
   final VoidCallback? onOpenFamilyDashboard;
 
@@ -65,6 +68,7 @@ class DashboardScreen extends StatefulWidget {
     required this.controller,
     this.onLogout,
     this.onSync,
+    this.onCheckUpdate,
     this.onOpenFamilyDashboard,
   });
 
@@ -101,6 +105,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               SettingsScreen(
                 controller: _c,
                 onSync: widget.onSync,
+                onCheckUpdate: widget.onCheckUpdate,
                 onLogout: widget.onLogout,
                 onOpenFamilyDashboard: widget.onOpenFamilyDashboard,
               ),

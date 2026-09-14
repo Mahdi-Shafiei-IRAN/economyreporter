@@ -27,6 +27,7 @@ const kSettingsReconcileKey = Key('settings-reconcile');
 const kSettingsCategorizeKey = Key('settings-categorize');
 const kCategorizeFromTileKey = Key('settings-categorize-from');
 const kSyncNowKey = Key('settings-sync-now');
+const kCheckUpdateKey = Key('settings-check-update');
 const kSyncStatusKey = Key('settings-sync-status');
 const kThemeToggleKey = Key('theme-toggle');
 const kLogoutKey = Key('settings-logout');
@@ -36,6 +37,7 @@ String _fa(int n) => toPersianDigits('$n');
 class SettingsScreen extends StatefulWidget {
   final DashboardController controller;
   final Future<String> Function()? onSync;
+  final Future<String> Function()? onCheckUpdate;
   final VoidCallback? onLogout;
   final VoidCallback? onOpenFamilyDashboard;
 
@@ -43,6 +45,7 @@ class SettingsScreen extends StatefulWidget {
     super.key,
     required this.controller,
     this.onSync,
+    this.onCheckUpdate,
     this.onLogout,
     this.onOpenFamilyDashboard,
   });
@@ -53,10 +56,22 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   bool _syncing = false;
+  bool _checkingUpdate = false;
   DashboardController get _c => widget.controller;
 
   void _push(Widget page) =>
       Navigator.of(context).push(MaterialPageRoute(builder: (_) => page));
+
+  Future<void> _checkUpdate() async {
+    setState(() => _checkingUpdate = true);
+    try {
+      final message = await widget.onCheckUpdate!();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+    } finally {
+      if (mounted) setState(() => _checkingUpdate = false);
+    }
+  }
 
   Future<void> _syncNow() async {
     setState(() => _syncing = true);
@@ -260,6 +275,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                 ],
               ]),
+              if (widget.onCheckUpdate != null)
+                _Group(title: 'به‌روزرسانی برنامه', children: [
+                  ListTile(
+                    key: kCheckUpdateKey,
+                    leading: const Icon(Icons.system_update_rounded),
+                    title: const Text('بررسی نسخه‌ی جدید'),
+                    subtitle: const Text('اگر نسخه‌ی تازه‌ای روی سرور باشد، همین‌جا دانلود و نصب می‌شود'),
+                    trailing: _checkingUpdate
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.chevron_left_rounded),
+                    onTap: _checkingUpdate ? null : _checkUpdate,
+                  ),
+                ]),
               _Group(title: 'بودجه', children: [
                 ListTile(
                   key: kSettingsBudgetsKey,
