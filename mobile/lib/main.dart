@@ -341,8 +341,7 @@ class _RootState extends State<_Root> with WidgetsBindingObserver {
     if (info == null) {
       return 'اتصال به سرور نشد؛ اینترنت را بررسی کن و بعداً دوباره بزن.';
     }
-    final current = await updater.currentVersionCode();
-    if (info.versionCode > current) {
+    if (compareVersionNames(info.versionName, currentName) > 0) {
       _runUpdate(info);
       return 'نسخه‌ی جدید ${info.versionName} پیدا شد (نسخه‌ی فعلی: $currentName)؛ در حال دانلود…';
     }

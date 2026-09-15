@@ -37,9 +37,31 @@ class AppUpdateInfo {
   }
 }
 
-/// آیا نسخه‌ی سرور از نسخه‌ی نصب‌شده جدیدتر است؟ (منطق خالص و تست‌پذیر)
-bool isUpdateAvailable(int currentCode, AppUpdateInfo? info) =>
-    info != null && info.url.isNotEmpty && info.versionCode > currentCode;
+/// مقایسه‌ی نامِ نسخه‌ی معنایی («1.0.9» با «1.0.10»). خروجی: مثبت اگر a>b.
+/// چرا نه versionCode؟ با split-per-abi، اندروید به versionCode آفستِ ABI
+/// (مثلاً +۲۰۰۰ برای arm64) اضافه می‌کند و مقایسه‌ی عددی خراب می‌شود؛ ولی
+/// نامِ نسخه دست‌نخورده می‌ماند.
+int compareVersionNames(String a, String b) {
+  List<int> parts(String v) => v
+      .trim()
+      .split('.')
+      .map((s) => int.tryParse(s.replaceAll(RegExp(r'[^0-9]'), '')) ?? 0)
+      .toList();
+  final pa = parts(a), pb = parts(b);
+  final n = pa.length > pb.length ? pa.length : pb.length;
+  for (var i = 0; i < n; i++) {
+    final x = i < pa.length ? pa[i] : 0;
+    final y = i < pb.length ? pb[i] : 0;
+    if (x != y) return x - y;
+  }
+  return 0;
+}
+
+/// آیا نسخه‌ی سرور از نسخه‌ی نصب‌شده جدیدتر است؟ (بر اساسِ نامِ نسخه)
+bool isUpdateAvailable(String currentName, AppUpdateInfo? info) =>
+    info != null &&
+    info.url.isNotEmpty &&
+    compareVersionNames(info.versionName, currentName) > 0;
 
 class UpdateService {
   /// ریشه‌ی فایل‌های به‌روزرسانی (مثل http://server/updates).
@@ -86,7 +108,7 @@ class UpdateService {
   Future<AppUpdateInfo?> check() async {
     final info = await fetch();
     if (info == null) return null;
-    return isUpdateAvailable(await currentVersionCode(), info) ? info : null;
+    return isUpdateAvailable(await currentVersionName(), info) ? info : null;
   }
 
   /// APK را دانلود و نصب را باز می‌کند. [onProgress] بین 0 و 1.

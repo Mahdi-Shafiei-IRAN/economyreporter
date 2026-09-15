@@ -3,15 +3,23 @@ import 'package:economy/core/update/update_service.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  AppUpdateInfo info(int code, {String url = 'http://s/updates/app.apk'}) =>
-      AppUpdateInfo(versionCode: code, versionName: 'x', notes: '', url: url);
+  AppUpdateInfo info(String name, {String url = 'http://s/updates/app.apk'}) =>
+      AppUpdateInfo(versionCode: 0, versionName: name, notes: '', url: url);
 
-  test('نسخه‌ی جدیدتر → به‌روزرسانی موجود', () {
-    expect(isUpdateAvailable(1, info(2)), isTrue);
-    expect(isUpdateAvailable(2, info(2)), isFalse);
-    expect(isUpdateAvailable(3, info(2)), isFalse);
-    expect(isUpdateAvailable(1, null), isFalse);
-    expect(isUpdateAvailable(1, info(2, url: '')), isFalse); // بدون فایل
+  test('نسخه‌ی جدیدتر (بر اساسِ نامِ نسخه) → به‌روزرسانی موجود', () {
+    expect(isUpdateAvailable('1.0.9', info('1.0.10')), isTrue);
+    expect(isUpdateAvailable('1.0.10', info('1.0.10')), isFalse);
+    expect(isUpdateAvailable('1.0.11', info('1.0.10')), isFalse);
+    expect(isUpdateAvailable('1.0.9', null), isFalse);
+    expect(isUpdateAvailable('1.0.9', info('1.0.10', url: '')), isFalse); // بدون فایل
+  });
+
+  test('مقایسه‌ی نامِ نسخه درست است (1.0.10 > 1.0.9)', () {
+    expect(compareVersionNames('1.0.10', '1.0.9') > 0, isTrue);
+    expect(compareVersionNames('1.0.9', '1.0.10') > 0, isFalse);
+    expect(compareVersionNames('1.0.9', '1.0.9'), 0);
+    expect(compareVersionNames('1.1.0', '1.0.99') > 0, isTrue);
+    expect(compareVersionNames('2.0.0', '1.9.9') > 0, isTrue);
   });
 
   test('آدرس نسبی با ریشه کامل می‌شود؛ آدرس مطلق دست‌نخورده', () {
