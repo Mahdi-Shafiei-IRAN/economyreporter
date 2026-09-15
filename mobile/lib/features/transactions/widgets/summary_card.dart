@@ -39,9 +39,8 @@ class SummaryCard extends StatelessWidget {
   bool get _hasBalance => realBalance != null;
 
   String get _title {
-    if (_hasBalance) {
-      return scope != null ? 'موجودی $scope' : 'موجودی (از مانده‌ی بانک)';
-    }
+    // وقتی موجودیِ واقعی داریم، عددِ بزرگ همان موجودی است؛ وگرنه خالصِ دوره.
+    if (_hasBalance) return scope != null ? 'موجودی $scope' : 'موجودی';
     if (scope != null) return 'خالص $scope • ${period.title}';
     return period.isAll ? 'خالص (درآمد − هزینه)' : 'خالص ${period.title}';
   }
@@ -90,13 +89,6 @@ class SummaryCard extends StatelessWidget {
               ),
             ],
           ),
-          if (_hasBalance) ...[
-            const SizedBox(height: 2),
-            Text(
-              'خالصِ ${period.isAll ? 'کل' : period.title}: ${formatToman(net)}',
-              style: theme.textTheme.bodySmall?.copyWith(color: muted),
-            ),
-          ],
           const SizedBox(height: 14),
           Row(
             children: [
