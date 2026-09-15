@@ -11,6 +11,7 @@ import '../data/transaction_repository.dart';
 const kIncomeValueKey = Key('summary-income');
 const kExpenseValueKey = Key('summary-expense');
 const kBalanceValueKey = Key('summary-balance');
+const kOpeningValueKey = Key('summary-opening');
 const kRangeLabelKey = Key('summary-range');
 const kSummaryTitleKey = Key('summary-title');
 
@@ -23,8 +24,9 @@ class SummaryCard extends StatelessWidget {
   /// شخصِ انتخاب‌شده (جمع فقط مال اوست)؛ null یعنی همه.
   final String? scope;
 
-  /// موجودیِ واقعی (از «مانده»ی پیامک‌ها)؛ null یعنی مانده‌ای نداریم و فقط خالص را نشان می‌دهیم.
-  final int? realBalance;
+  /// موجودیِ «اولِ دوره» (از «مانده»ی پیامک‌ها)؛ null یعنی مانده‌ای نداریم.
+  /// وقتی معلوم باشد: موجودیِ نهایی = اولِ دوره + درآمد − هزینه (منطقی و هم‌خوان).
+  final int? openingBalance;
 
   const SummaryCard({
     super.key,
@@ -33,14 +35,13 @@ class SummaryCard extends StatelessWidget {
     required this.count,
     this.filtered = false,
     this.scope,
-    this.realBalance,
+    this.openingBalance,
   });
 
-  bool get _hasBalance => realBalance != null;
+  bool get _hasBalance => openingBalance != null;
 
   String get _title {
-    // وقتی موجودیِ واقعی داریم، عددِ بزرگ همان موجودی است؛ وگرنه خالصِ دوره.
-    if (_hasBalance) return scope != null ? 'موجودی $scope' : 'موجودی';
+    if (_hasBalance) return scope != null ? 'موجودی نهایی $scope' : 'موجودی نهایی';
     if (scope != null) return 'خالص $scope • ${period.title}';
     return period.isAll ? 'خالص (درآمد − هزینه)' : 'خالص ${period.title}';
   }
@@ -52,7 +53,8 @@ class SummaryCard extends StatelessWidget {
     const onHero = Colors.white;
     final muted = Colors.white.withOpacity(0.78);
     final net = summary.balanceRial;
-    final headline = realBalance ?? net;
+    // موجودیِ نهایی = اولِ دوره + (درآمد − هزینه)؛ وگرنه فقط خالص.
+    final headline = _hasBalance ? openingBalance! + net : net;
 
     return Container(
       padding: const EdgeInsets.fromLTRB(20, 18, 20, 16),
@@ -89,6 +91,14 @@ class SummaryCard extends StatelessWidget {
               ),
             ],
           ),
+          if (_hasBalance) ...[
+            const SizedBox(height: 4),
+            Text(
+              'موجودیِ اولِ ${period.title}: ${formatToman(openingBalance!)}',
+              key: kOpeningValueKey,
+              style: theme.textTheme.bodySmall?.copyWith(color: muted),
+            ),
+          ],
           const SizedBox(height: 14),
           Row(
             children: [

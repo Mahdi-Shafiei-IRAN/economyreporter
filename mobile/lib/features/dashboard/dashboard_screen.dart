@@ -374,7 +374,7 @@ class _TransactionsTabState extends State<_TransactionsTab> {
                             count: c.visible.length,
                             filtered: c.hasActiveFilters,
                             scope: c.person == null ? null : _personLabel(c.person!),
-                            realBalance: c.hasRealBalance ? c.realBalance : null,
+                            openingBalance: c.openingBalance,
                           ),
                         ),
                       ),

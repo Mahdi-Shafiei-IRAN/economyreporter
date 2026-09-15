@@ -108,20 +108,29 @@ class DashboardController extends ChangeNotifier {
 
   FinanceSummary get summary => FinanceSummary.of(visible);
 
-  /// موجودیِ واقعی (از «مانده»ی پیامک‌ها) برای شخصِ انتخاب‌شده تا پایانِ دوره؛
-  /// برخلاف «خالص = درآمد − هزینه»، موجودیِ ابتدای دوره را هم لحاظ می‌کند.
-  int get realBalance {
-    final items = _byId.values
-        .where((t) => person == null || personOf(t) == person);
-    final asOf = period.isAll
-        ? null
-        : period.to?.subtract(const Duration(microseconds: 1));
-    return realBalanceRial(items, asOf: asOf);
-  }
-
-  /// آیا اصلاً مانده‌ای از بانک داریم؟ (اگر نه، موجودیِ واقعی نمایش داده نمی‌شود.)
+  /// آیا اصلاً مانده‌ای از بانک داریم؟ (اگر نه، موجودیِ اول دوره نامعلوم است.)
   bool get hasRealBalance =>
       _byId.values.any((t) => !t.isDeleted && t.balanceAfterRial != null);
+
+  Iterable<TransactionRecord> get _scopedAll =>
+      _byId.values.where((t) => person == null || personOf(t) == person);
+
+  /// موجودیِ «اولِ دوره» (از «مانده»ی پیامک‌ها، درست پیش از شروع دوره).
+  /// null یعنی مانده‌ای نداریم یا دوره «همه» است.
+  int? get openingBalance {
+    if (!hasRealBalance || period.isAll) return null;
+    final start = period.from;
+    if (start == null) return null;
+    return realBalanceRial(_scopedAll,
+        asOf: start.subtract(const Duration(microseconds: 1)));
+  }
+
+  /// موجودیِ نهایی = موجودیِ اول دوره + درآمد − هزینه (اگر اول‌دوره معلوم باشد).
+  int? get closingBalance {
+    final o = openingBalance;
+    if (o == null) return null;
+    return o + summary.balanceRial;
+  }
   List<PersonGroup> get personGroups => groupByPerson(visible);
   List<DayGroup> get dayGroups => groupByDay(visible);
   int get needsReviewCount => reviewItems.length;
