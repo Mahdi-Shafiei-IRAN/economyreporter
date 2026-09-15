@@ -64,8 +64,13 @@ class UpdateService {
   /// نسخه‌ی روی سرور را می‌خواند (بدون مقایسه)؛ null یعنی سرور در دسترس نبود.
   Future<AppUpdateInfo?> fetch() async {
     try {
+      // ضدِکش: پارامترِ یکتا + هدرها، تا پروکسیِ اپراتور نسخهٔ قدیمی را ندهد.
       final resp = await _dio.get('$baseUrl/version.json',
-          options: Options(responseType: ResponseType.json));
+          queryParameters: {'_': DateTime.now().millisecondsSinceEpoch},
+          options: Options(
+            responseType: ResponseType.json,
+            headers: {'Cache-Control': 'no-cache', 'Pragma': 'no-cache'},
+          ));
       final data = resp.data is Map
           ? Map<String, dynamic>.from(resp.data as Map)
           : (resp.data is String
@@ -91,9 +96,12 @@ class UpdateService {
   }) async {
     final dir = await getTemporaryDirectory();
     final file = '${dir.path}/economy-${info.versionCode}.apk';
+    // ضدِکش روی دانلودِ APK هم (پروکسیِ اپراتور نسخهٔ قدیمیِ فایل را ندهد).
+    final sep = info.url.contains('?') ? '&' : '?';
     await _dio.download(
-      info.url,
+      '${info.url}${sep}_=${DateTime.now().millisecondsSinceEpoch}',
       file,
+      options: Options(headers: {'Cache-Control': 'no-cache'}),
       onReceiveProgress: (received, total) {
         if (total > 0) onProgress?.call(received / total);
       },
