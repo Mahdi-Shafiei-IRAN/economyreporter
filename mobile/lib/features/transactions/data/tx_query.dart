@@ -155,6 +155,39 @@ class CardGroup {
   });
 
   FinanceSummary get summary => FinanceSummary.of(items);
+
+  /// آیا صاحبِ این کارت از قبل مشخص است؟ (کیفِ ثبت‌شده، یا صاحبِ فرستنده).
+  /// اگر بله، دیگر «تعیین صاحب» لازم نیست.
+  bool get hasOwner =>
+      registered ||
+      items.any((t) => (t.ownerName?.trim().isNotEmpty ?? false));
+}
+
+/// گزارشِ یک کارت: موجودیِ واقعی + درآمد/هزینهٔ دوره + تراکنش‌های همان دوره.
+class CardReport {
+  final String key;
+  final String title;
+  final String owner;
+  final String? details;
+
+  /// موجودیِ واقعی از «مانده»ی پیامک‌ها؛ null یعنی این کارت مانده‌ای در پیامک ندارد.
+  final int? balanceRial;
+  final int incomeRial;
+  final int expenseRial;
+  final List<TransactionRecord> items;
+
+  const CardReport({
+    required this.key,
+    required this.title,
+    required this.owner,
+    required this.incomeRial,
+    required this.expenseRial,
+    required this.items,
+    this.details,
+    this.balanceRial,
+  });
+
+  int get netRial => incomeRial - expenseRial;
 }
 
 /// یک شخص، کارت‌هایش، و تراکنش‌های هر کارت.

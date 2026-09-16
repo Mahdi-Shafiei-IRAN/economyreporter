@@ -11,6 +11,7 @@ import '../../core/format/date_format.dart';
 import '../../core/format/money_format.dart';
 import '../../core/theme/app_theme.dart';
 import '../dashboard/dashboard_controller.dart';
+import 'cards_report_screen.dart';
 import '../transactions/data/period.dart';
 import '../transactions/data/transaction_record.dart';
 import '../transactions/data/transaction_repository.dart';
@@ -125,6 +126,19 @@ class _ReportScreenState extends State<ReportScreen> {
                 onChanged: (p) => setState(() => _period = p),
               ),
               SummaryCard(summary: summary, period: _period, count: items.length),
+              const SizedBox(height: 12),
+              Card(
+                child: ListTile(
+                  key: const Key('open-cards-report'),
+                  leading: const Icon(Icons.credit_card_rounded),
+                  title: const Text('گزارش به‌تفکیک کارت'),
+                  subtitle: const Text('موجودی و تراکنش‌های هر کارت جدا جدا'),
+                  trailing: const Icon(Icons.chevron_left_rounded),
+                  onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                    builder: (_) => CardsReportScreen(controller: c),
+                  )),
+                ),
+              ),
               if (items.isEmpty)
                 const _Hint(
                   key: kReportEmptyKey,

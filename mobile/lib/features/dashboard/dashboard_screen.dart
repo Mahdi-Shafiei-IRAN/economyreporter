@@ -718,8 +718,10 @@ class _PersonSection extends StatelessWidget {
     // بی‌بانک و بی‌شماره: هیچ کارتی نمی‌تواند با این پیامک‌ها جور شود.
     final identifiable =
         card.bankId != null || card.cardLast4 != null || card.accountRef != null;
-    final canRegister =
-        identifiable && !card.registered && card.items.any((t) => !t.isRemote);
+    // «تعیین صاحب» فقط وقتی که کارت واقعاً بی‌صاحب است (نه ثبت‌شده، نه صاحبِ فرستنده).
+    final canRegister = identifiable &&
+        !card.hasOwner &&
+        card.items.any((t) => !t.isRemote);
     final s = card.summary;
 
     return [

@@ -131,6 +131,43 @@ class DashboardController extends ChangeNotifier {
     if (o == null) return null;
     return o + summary.balanceRial;
   }
+
+  /// گزارشِ به‌تفکیکِ کارت: هر کارت با موجودیِ واقعی و درآمد/هزینهٔ [p].
+  /// (شخصِ انتخاب‌شده اعمال می‌شود؛ کارت‌ها بر اساسِ موجودی مرتب می‌شوند.)
+  List<CardReport> cardReports([Period? p]) {
+    final range = p ?? period;
+    final scoped =
+        _scopedAll.where((t) => !t.isDeleted).toList();
+    final byCard = <String, List<TransactionRecord>>{};
+    for (final t in scoped) {
+      byCard.putIfAbsent(cardKeyOf(t), () => []).add(t);
+    }
+    final asOf = range.isAll
+        ? null
+        : range.to?.subtract(const Duration(microseconds: 1));
+    final reports = <CardReport>[];
+    byCard.forEach((key, items) {
+      final periodItems = range.isAll
+          ? items
+          : items.where((t) => range.contains(t.effectiveTime)).toList();
+      final s = FinanceSummary.of(periodItems);
+      final hasBalance = items.any((t) => t.balanceAfterRial != null);
+      reports.add(CardReport(
+        key: key,
+        title: cardTitleOf(items.first),
+        owner: personOf(items.first),
+        details: cardDetailsOf(items.first),
+        balanceRial: hasBalance ? realBalanceRial(items, asOf: asOf) : null,
+        incomeRial: s.incomeRial,
+        expenseRial: s.expenseRial,
+        items: periodItems..sort((a, b) => b.effectiveTime.compareTo(a.effectiveTime)),
+      ));
+    });
+    reports.sort((a, b) =>
+        (b.balanceRial ?? b.netRial).compareTo(a.balanceRial ?? a.netRial));
+    return reports;
+  }
+
   List<PersonGroup> get personGroups => groupByPerson(visible);
   List<DayGroup> get dayGroups => groupByDay(visible);
   int get needsReviewCount => reviewItems.length;
