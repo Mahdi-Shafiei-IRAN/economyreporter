@@ -127,7 +127,7 @@ class UpdateService {
       savedDir: _kDownloadsPath,
       fileName: _kApkFilename,
       showNotification: true,
-      openFileFromNotification: false,
+      openFileFromNotification: true,
       requiresStorageNotLow: false,
     );
   }
