@@ -1,0 +1,115 @@
+name: Build & Deploy APK
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'mobile/**'
+      - '.github/workflows/build-deploy.yml'
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Flutter pub get
+        working-directory: mobile
+        run: flutter pub get
+
+      - name: Decode keystore
+        working-directory: mobile/android/app
+        run: echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > economy-release.jks
+
+      - name: Create key.properties
+        working-directory: mobile/android
+        run: |
+          printf 'storePassword=%s\nkeyPassword=%s\nkeyAlias=%s\nstoreFile=economy-release.jks\n' \
+            "${{ secrets.KEYSTORE_PASSWORD }}" \
+            "${{ secrets.KEY_PASSWORD }}" \
+            "${{ secrets.KEY_ALIAS }}" \
+            > key.properties
+
+      - name: Build release APK
+        working-directory: mobile
+        run: flutter build apk --release --target-platform android-arm64
+
+      - name: Read version
+        id: ver
+        working-directory: mobile
+        run: |
+          LINE=$(grep '^version:' pubspec.yaml)
+          NAME=$(echo "$LINE" | sed 's/version: //' | cut -d'+' -f1)
+          BUILD=$(echo "$LINE" | sed 's/version: //' | cut -d'+' -f2)
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          echo "build=$BUILD" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy to server
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s' "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -p 9011 -H 87.248.150.95 >> ~/.ssh/known_hosts
+
+          BUILD="${{ steps.ver.outputs.build }}"
+          VERSION="${{ steps.ver.outputs.name }}"
+          APK="economy-${BUILD}.apk"
+          NOTES="${{ github.event.head_commit.message }}"
+
+          # آپلود APK
+          scp -i ~/.ssh/deploy_key -P 9011 \
+            mobile/build/app/outputs/flutter-apk/app-release.apk \
+            root@87.248.150.95:/opt/economy/updates/${APK}
+
+          # کپی به latest و به‌روزرسانی version.json
+          ssh -i ~/.ssh/deploy_key -p 9011 root@87.248.150.95 "
+            cp /opt/economy/updates/${APK} /opt/economy/updates/economy-latest.apk
+            chown economy:economy /opt/economy/updates/${APK} /opt/economy/updates/economy-latest.apk
+          "
+
+          # ساخت JSON با Python (از کاراکترهای خاص در پیام کامیت محافظت می‌کند)
+          python3 - <<'PYEOF'
+import json, os, subprocess
+notes = os.environ.get('NOTES', '')
+version = os.environ.get('VERSION', '')
+build = int(os.environ.get('BUILD', '0'))
+data = {
+    'versionCode': build + 3000,
+    'versionName': version,
+    'notes': notes,
+    'url': 'http://87.248.150.95/updates/economy-latest.apk',
+}
+print(json.dumps(data, ensure_ascii=False))
+PYEOF
+          # خروجی Python را روی سرور بنویس
+          python3 -c "
+import json, os
+notes = os.environ.get('NOTES', '')
+version = os.environ.get('VERSION', '')
+build = int(os.environ.get('BUILD', '0'))
+data = {
+    'versionCode': build + 3000,
+    'versionName': version,
+    'notes': notes,
+    'url': 'http://87.248.150.95/updates/economy-latest.apk',
+}
+print(json.dumps(data, ensure_ascii=False))
+" | ssh -i ~/.ssh/deploy_key -p 9011 root@87.248.150.95 \
+            "cat > /opt/economy/updates/version.json && chown economy:economy /opt/economy/updates/version.json"
+        env:
+          NOTES: ${{ github.event.head_commit.message }}
+          VERSION: ${{ steps.ver.outputs.name }}
+          BUILD: ${{ steps.ver.outputs.build }}

@@ -1,4 +1,8 @@
+import 'dart:isolate';
+import 'dart:ui';
+
 import 'package:flutter/material.dart';
+import 'package:flutter_downloader/flutter_downloader.dart';
 import 'package:uuid/uuid.dart';
 
 import 'core/auth/auth_repository.dart';
@@ -28,8 +32,15 @@ import 'features/transactions/data/transaction_repository.dart';
 /// کلید ناوبری سراسری (برای باز کردن صفحه از نوتیفیکیشن).
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
+/// callback دانلود — باید تابع سطح بالا (top-level) باشد؛ در isolate جداگانه اجرا می‌شود.
+@pragma('vm:entry-point')
+void _downloadCallback(String id, int status, int progress) {
+  IsolateNameServer.lookupPortByName('_economy_update_dl')?.send([id, status, progress]);
+}
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await FlutterDownloader.initialize(debug: false);
   await themeController.load();
   runApp(const EconomyApp());
 }
@@ -207,9 +218,15 @@ class _Root extends StatefulWidget {
 class _RootState extends State<_Root> with WidgetsBindingObserver {
   bool _setupDone = false;
 
+  /// پورت دریافت وضعیت دانلود از WorkManager isolate.
+  final _dlPort = ReceivePort();
+
   @override
   void initState() {
     super.initState();
+    IsolateNameServer.registerPortWithName(_dlPort.sendPort, '_economy_update_dl');
+    FlutterDownloader.registerCallback(_downloadCallback);
+    _dlPort.listen(_onDownloadUpdate);
     WidgetsBinding.instance.addObserver(this);
     widget.services.auth.addListener(_maybeSetup);
     WidgetsBinding.instance.addPostFrameCallback((_) => _maybeSetup());
@@ -217,9 +234,19 @@ class _RootState extends State<_Root> with WidgetsBindingObserver {
 
   @override
   void dispose() {
+    IsolateNameServer.removePortNameMapping('_economy_update_dl');
+    _dlPort.close();
     WidgetsBinding.instance.removeObserver(this);
     widget.services.auth.removeListener(_maybeSetup);
     super.dispose();
+  }
+
+  /// وقتی دانلود تمام شد، نصب‌کننده را باز می‌کند.
+  void _onDownloadUpdate(dynamic data) {
+    final status = DownloadTaskStatus.fromInt(data[1] as int);
+    if (status == DownloadTaskStatus.complete) {
+      widget.services.updater.installApk().ignore();
+    }
   }
 
   /// برگشت به اپ: پیامک‌هایی که در پس‌زمینه ذخیره شده‌اند و تغییرات بقیه‌ی اعضا.
@@ -309,35 +336,22 @@ class _RootState extends State<_Root> with WidgetsBindingObserver {
     if (go == true) _runUpdate(info);
   }
 
+  /// دانلود پس‌زمینه — حتی اگر صفحه خاموش شود ادامه می‌دهد (WorkManager).
+  /// فایل در پوشه «دانلودها» ذخیره می‌شود و نوتیفیکیشن پیشرفت نشان می‌دهد.
   Future<void> _runUpdate(AppUpdateInfo info) async {
-    final ctx = navigatorKey.currentContext;
-    if (ctx == null || !ctx.mounted) return;
-    final progress = ValueNotifier<double>(0);
-    showDialog<void>(
-      context: ctx,
-      barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        title: const Text('در حال دانلود…'),
-        content: ValueListenableBuilder<double>(
-          valueListenable: progress,
-          builder: (context, value, _) => Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              LinearProgressIndicator(value: value == 0 ? null : value),
-              const SizedBox(height: 8),
-              Text('${(value * 100).round()}٪'),
-            ],
-          ),
-        ),
-      ),
-    );
     try {
-      await widget.services.updater
-          .downloadAndInstall(info, onProgress: (p) => progress.value = p);
+      await widget.services.updater.startBackgroundDownload(info);
     } catch (_) {
-      // دانلود/نصب نشد
-    } finally {
-      navigatorKey.currentState?.pop(); // بستن دیالوگ دانلود
+      return;
+    }
+    final ctx = navigatorKey.currentContext;
+    if (ctx != null && ctx.mounted) {
+      ScaffoldMessenger.of(ctx).showSnackBar(
+        const SnackBar(
+          content: Text('دانلود شروع شد — پیشرفت را در نوتیفیکیشن ببین'),
+          duration: Duration(seconds: 5),
+        ),
+      );
     }
   }
 
