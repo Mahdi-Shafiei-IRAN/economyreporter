@@ -1,0 +1,14 @@
+{
+  "synthetic": false,
+  "note": "سودِ سپرده‌ی ملت (شماره‌ها ساختگی): «علی الحساب» شماره ندارد؛ حسابِ مقصد بعد از «به حساب».",
+  "sender": "Bank Mellat",
+  "body": "واریز سود علی الحساب\nسپرده4900000001\nبه حساب4900000002\nمبلغ86,184\n05/07/01",
+  "expect": {
+    "bankId": "mellat",
+    "kind": "income",
+    "amountRial": 86184,
+    "accountRef": "4900000002",
+    "hasDate": true,
+    "needsReview": false
+  }
+}

@@ -261,7 +261,7 @@ class _WalletFormState extends State<_WalletForm> {
   /// برچسبِ پیش‌فرض وقتی کاربر خالی گذاشته: «ملت ۵۵۹۶».
   String _autoLabel(String card, String account) {
     final bank = _bankId == null ? 'حساب' : bankNameById(_bankId!).replaceFirst('بانک ', '');
-    final ref = card.isNotEmpty ? card : account;
+    final ref = (card.isNotEmpty ? card : account).replaceAll(RegExp(r'[^0-9]'), '');
     final tail = ref.length > 4 ? ref.substring(ref.length - 4) : ref;
     return '$bank $tail'.trim();
   }

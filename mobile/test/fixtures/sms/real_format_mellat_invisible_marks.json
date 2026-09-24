@@ -1,0 +1,14 @@
+{
+  "synthetic": true,
+  "note": "همان پیامکِ ملت با نویسه‌ی نامرئیِ RLM بینِ کلمه و عدد (روی صفحه دیده نمی‌شود).",
+  "sender": "Bank Mellat",
+  "body": "واریز سود کوتاه مدت\nحساب‏4900000002\nمبلغ‏4,033\n05/07/01",
+  "expect": {
+    "bankId": "mellat",
+    "kind": "income",
+    "amountRial": 4033,
+    "accountRef": "4900000002",
+    "hasDate": true,
+    "needsReview": false
+  }
+}

@@ -57,7 +57,7 @@ String bankNameById(String bankId) => bankById(bankId)?.name ?? bankId;
 
 /// قدم اولِ پارس: تشخیص بانک از روی فرستنده. اگر شناخته نشود null برمی‌گرداند.
 BankProfile? detectBank(String sender) {
-  final s = normalizeForParsing(sender).trim();
+  final s = normalizeForParsing(stripInvisible(sender)).trim();
   final lower = s.toLowerCase();
   for (final bank in kBankRegistry) {
     if (bank.senderCodes.contains(s)) return bank;

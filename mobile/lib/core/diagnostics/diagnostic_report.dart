@@ -18,6 +18,10 @@ import 'sms_diagnosis.dart';
 final _idAfterKeyword = RegExp(
     r'(حساب|کارت|شماره|شبا|سپرده|IR|ir)(\s*:?\s*)([0-9][0-9\-\*xX\.]{3,}[0-9])');
 final _longDigits = RegExp(r'(?<![0-9,])[0-9]{11,}(?![0-9,])');
+
+/// حسابِ نقطه‌دارِ پاسارگاد (777.888.21819509.1).
+final _dottedAccount =
+    RegExp(r'(?<![0-9.])[0-9]{2,4}\.[0-9]{2,4}\.[0-9]{5,10}\.[0-9]{1,2}(?![0-9.])');
 final _digit = RegExp(r'[0-9]');
 
 /// همه‌ی رقم‌ها جز ۴ رقمِ آخر را با * عوض می‌کند.
@@ -35,6 +39,7 @@ String maskSensitive(String text) {
   var s = normalizeDigits(text);
   s = s.replaceAllMapped(
       _idAfterKeyword, (m) => '${m[1]}${m[2]}${_maskToken(m[3]!)}');
+  s = s.replaceAllMapped(_dottedAccount, (m) => _maskToken(m[0]!));
   return s.replaceAllMapped(_longDigits, (m) => _maskToken(m[0]!));
 }
 

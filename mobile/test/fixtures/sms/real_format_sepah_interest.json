@@ -1,0 +1,15 @@
+{
+  "synthetic": false,
+  "note": "قالبِ واقعیِ سپه (شماره حساب ساختگی): حساب در خطِ جدا بعد از «به:».",
+  "sender": "SEPAH BANK",
+  "body": "بانک سپه\nواریز سود به:\n3100000000001\nمبلغ: 39,686 ریال\nزمان: 5:10-1405/1/21\nمانده: 378,059 ریال",
+  "expect": {
+    "bankId": "sepah",
+    "kind": "income",
+    "amountRial": 39686,
+    "accountRef": "3100000000001",
+    "balanceAfterRial": 378059,
+    "hasDate": true,
+    "needsReview": false
+  }
+}

@@ -59,7 +59,7 @@ final _digits = RegExp(r'^\d+$');
 /// شکل قابل‌مقایسه‌ی فرستنده: ارقام لاتین، بدون فاصله/خط‌تیره/پرانتز، حروف کوچک؛
 /// برای شماره‌ها «+» و صفرهای اول هم حذف می‌شود.
 String canonicalSender(String raw) {
-  var s = normalizeForParsing(raw).toLowerCase().replaceAll(_separators, '');
+  var s = normalizeForParsing(stripInvisible(raw)).toLowerCase().replaceAll(_separators, '');
   if (_number.hasMatch(s)) {
     s = s.replaceFirst('+', '').replaceFirst(RegExp(r'^0+'), '');
   }

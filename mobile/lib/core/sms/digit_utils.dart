@@ -35,6 +35,14 @@ String normalizeForParsing(String input) {
   return s;
 }
 
+/// نویسه‌های نامرئیِ جهت‌دهی/قالب (RLM، LRM، …) که بعضی بانک‌ها وسطِ متن می‌گذارند:
+/// «حساب\u200F123…» روی صفحه همان «حساب123…» است ولی Regex را خراب می‌کند.
+final _invisible = RegExp('[\u200B\u200D-\u200F\u202A-\u202E\u2066-\u2069\uFEFF\u061C]');
+
+/// حذفِ نویسه‌های نامرئی. عمداً در [normalizeForParsing] نیست، چون اثرانگشتِ پیامک
+/// (ضدتکرار) از آن ساخته می‌شود و تغییرش پیامک‌های ثبت‌شده را دوباره ثبت می‌کرد.
+String stripInvisible(String input) => input.replaceAll(_invisible, '');
+
 /// نسخه‌ی فشرده (بدون هیچ فاصله‌ای) برای تطبیق کلیدواژه‌ها،
 /// چون فاصله‌گذاری بین کلمات در پیامک بانک‌ها ثابت نیست.
 String compact(String normalized) => normalized.replaceAll(' ', '');

@@ -1,0 +1,14 @@
+{
+  "synthetic": true,
+  "note": "همان قالبِ پاسارگاد با «+» = واریز.",
+  "sender": "B.Pasargad",
+  "body": "777.888.10000001.1\n2,000,000+\n09:10_07/03\nمانده: 97,812,229",
+  "expect": {
+    "bankId": "pasargad",
+    "kind": "income",
+    "amountRial": 2000000,
+    "accountRef": "777.888.10000001.1",
+    "balanceAfterRial": 97812229,
+    "needsReview": false
+  }
+}

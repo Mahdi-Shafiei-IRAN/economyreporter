@@ -338,6 +338,9 @@ class SettingKeys {
   /// زمانِ جدیدترین پیامکی که از صندوق خوانده شد (واردکردنِ بعدی فقط از همین‌جا).
   static const inboxWatermark = 'inbox_watermark';
 
+  /// نسخه‌ی پارسری که صندوق آخرین بار با آن کامل خوانده شد.
+  static const parserVersion = 'parser_version';
+
   /// cursor دریافتِ کیف‌ها از سرور.
   static const walletCursor = 'wallet_cursor';
 

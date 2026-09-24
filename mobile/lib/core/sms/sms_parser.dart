@@ -13,6 +13,11 @@ import 'digit_utils.dart';
 import 'jalali.dart';
 import 'models.dart';
 
+/// نسخه‌ی قاعده‌های پارسر. هر بار که پارسر پیامکی را که قبلاً رد می‌کرد درست می‌خواند
+/// (قالبِ بانکِ تازه و …) بالا برود: بازشدنِ بعدیِ اپ یک بار کلِ صندوق را دوباره می‌خواند.
+/// ۲: نویسه‌های نامرئی، پاسارگاد (مبلغِ علامت‌دار، حسابِ نقطه‌دار)، سپه (حساب بعد از «به:»).
+const int kParserVersion = 2;
+
 class SmsParser {
   const SmsParser();
 
@@ -82,6 +87,20 @@ class SmsParser {
   static final _merchantRe = RegExp(
       r'(?:پذیرنده|فروشگاه)\s*:?\s*(.+?)(?:\s+مانده|\s+تاریخ|\s+\d{2,4}/|$)');
 
+  // --- قاعده‌های مخصوصِ هر بانک (قالبِ پیامکِ بانک‌ها فرق دارد) ---
+
+  /// پاسارگاد: «777.888.21819509.1» شماره‌ی حساب (نقطه‌دار) در خطِ اول.
+  static final _pasargadAccountRe =
+      RegExp(r'(?<![0-9.])([0-9]{2,4}\.[0-9]{2,4}\.[0-9]{5,10}\.[0-9]{1,2})(?![0-9.])');
+
+  /// پاسارگاد: مبلغ با علامتِ آخر «7,400,000-» (برداشت) یا «+» (واریز)، یا اولِ عدد.
+  static final _signedAmountRe = RegExp(
+      r'(?<![0-9.,])(?:([0-9][0-9,]{2,})\s?([+-])|([+-])\s?([0-9][0-9,]{2,}))(?=\s|$)');
+
+  /// سپه: شماره‌ی حساب در خطِ جدا بعد از «به:»/«از:» (مثل «واریز سود به: 3138…»).
+  static final _sepahToRe = RegExp(r'به\s*:\s*([0-9]{8,20})(?![0-9])');
+  static final _sepahFromRe = RegExp(r'از\s*:\s*([0-9]{8,20})(?![0-9])');
+
   /// [bankId]: بانکی که کاربر برای این فرستنده تعیین کرده (فرستنده‌های مجاز).
   ParsedTransaction parse({
     required String sender,
@@ -95,7 +114,8 @@ class SmsParser {
         detectBank(sender) ??
         detectBank(body);
 
-    final normalized = normalizeForParsing(body);
+    // نویسه‌های نامرئیِ جهت‌دهی (RLM و …) اول حذف می‌شوند (فقط برای پارس).
+    final normalized = normalizeForParsing(stripInvisible(body));
     final compacted = compact(normalized);
 
     final lowerCompacted = compacted.toLowerCase();
@@ -103,12 +123,36 @@ class SmsParser {
         _otpCodeRe.hasMatch(normalized);
     final isReminder = _reminderKeywords.any(compacted.contains);
 
-    // قدم ۲: استخراج فیلدها
-    final kind = _detectKind(compacted);
+    // قدم ۲: استخراج فیلدها (عمومی، بعد قاعده‌های همان بانک)
+    var kind = _detectKind(compacted);
     final balance = _extractBalance(normalized);
-    final amountResult = _extractAmount(normalized, balance);
+    var amountResult = _extractAmount(normalized, balance);
     final cardLast4 = _extractCardLast4(normalized);
-    final accountRef = _accountRe.firstMatch(normalized)?.group(1);
+    var accountRef = _accountRe.firstMatch(normalized)?.group(1);
+
+    switch (bank?.id) {
+      case 'pasargad':
+        accountRef ??= _pasargadAccountRe.firstMatch(normalized)?.group(1);
+        final m = _signedAmountRe.firstMatch(normalized);
+        if (m != null && (amountResult.amountRial == null || kind == TxKind.unknown)) {
+          final raw = m.group(1) ?? m.group(4)!;
+          final sign = m.group(2) ?? m.group(3)!;
+          final value = parseIntSafe(raw);
+          if (value != null && value != balance) {
+            amountResult = _AmountResult(amountRial: value, rawAmount: raw, unit: 'rial');
+            if (kind == TxKind.unknown) {
+              kind = sign == '-' ? TxKind.expense : TxKind.income;
+            }
+          }
+        }
+      case 'sepah':
+        if (accountRef == null && cardLast4 == null) {
+          final to = _sepahToRe.firstMatch(normalized)?.group(1);
+          final from = _sepahFromRe.firstMatch(normalized)?.group(1);
+          // واریز «به» حسابِ ما است، برداشت «از» حسابِ ما.
+          accountRef = kind == TxKind.expense ? (from ?? to) : (to ?? from);
+        }
+    }
     final occurredAt = extractOccurredAt(normalized);
     final counterparty = _extractCounterparty(normalized, kind);
 

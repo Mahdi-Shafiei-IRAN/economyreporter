@@ -90,6 +90,10 @@ class SmsImporter {
   /// واردکردنِ صندوقِ گوشی. [full] = false: فقط پیامک‌های بعد از آخرین خواندن (با ۲ روز
   /// حاشیه)؛ اولین بار (یا [full]) همه. «آخرین خواندن» بعد از هر بار به‌روز می‌شود.
   Future<ImportResult> importInbox(List<RawSms> inbox, {bool full = false}) async {
+    // پارسرِ تازه‌تر: پیامک‌هایی که قبلاً رد شده بودند شاید حالا خوانده شوند → کلِ صندوق.
+    final parserChanged =
+        await store.getSetting(SettingKeys.parserVersion) != '$kParserVersion';
+    full = full || parserChanged;
     final raw = full ? null : await store.getSetting(SettingKeys.inboxWatermark);
     final watermark = raw == null ? null : DateTime.tryParse(raw);
     final since = watermark?.subtract(const Duration(days: 2));
@@ -109,6 +113,7 @@ class SmsImporter {
         (watermark == null || newest.isAfter(watermark))) {
       await store.setSetting(SettingKeys.inboxWatermark, newest.toUtc().toIso8601String());
     }
+    if (parserChanged) await store.setSetting(SettingKeys.parserVersion, '$kParserVersion');
     return result;
   }
 

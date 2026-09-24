@@ -1,0 +1,14 @@
+{
+  "synthetic": false,
+  "note": "قالبِ واقعیِ پاسارگاد (شماره حساب ساختگی): حسابِ نقطه‌دار، مبلغ با «-» آخر = برداشت، تاریخ «ساعت_ماه/روز».",
+  "sender": "B.Pasargad",
+  "body": "777.888.10000001.1\n7,400,000-\n10:55_07/02\nمانده: 95,812,229",
+  "expect": {
+    "bankId": "pasargad",
+    "kind": "expense",
+    "amountRial": 7400000,
+    "accountRef": "777.888.10000001.1",
+    "balanceAfterRial": 95812229,
+    "needsReview": false
+  }
+}

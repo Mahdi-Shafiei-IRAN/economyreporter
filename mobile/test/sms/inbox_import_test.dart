@@ -96,4 +96,37 @@ void main() {
       expect(await c.rescanInbox(), 0);
     });
   });
+
+  test('پارسرِ تازه‌تر: بازشدنِ عادی هم یک بار کلِ صندوق را دوباره می‌خواند', () async {
+    // وضعیتِ گوشی با نسخه‌ی قبل: همه‌چیز خوانده شده، ولی آن موقع این بانک مجاز نبود/رد می‌شد.
+    await store.setSetting('parser_version', '1');
+    await store.setSetting('inbox_watermark', now.toIso8601String());
+    await store.addAllowedSender('Bank Mellat', bankId: 'mellat');
+
+    expect((await importer.importInbox(inbox)).created, 10); // با وجودِ watermark
+    expect((await importer.importInbox(inbox)).created, 0); // دفعه‌ی بعد عادی
+  });
+
+  test('فرستنده با نویسه‌ی نامرئی همان فرستنده‌ی مجاز است', () async {
+    await store.addAllowedSender('Bank Mellat', bankId: 'mellat');
+    final r = await importer.importAll([
+      RawSms(
+          sender: '‏Bank Mellat',
+          body: 'واریز سود کوتاه مدت\nحساب‏4933787334\nمبلغ‏4,033\n05/07/01',
+          receivedAt: now),
+    ]);
+    expect(r.created, 1);
+    expect(r.notAllowed, 0);
+  });
+
+  test('نویسه‌ی نامرئی اثرانگشت را عوض نمی‌کند (پیامکِ قبلاً ثبت‌شده دوباره ثبت نمی‌شود)',
+      () async {
+    await store.addAllowedSender('Bank Mellat', bankId: 'mellat');
+    final sms = RawSms(
+        sender: 'Bank Mellat',
+        body: 'حساب4933787334\nواریز‏485\nمانده1,040,193\n05/06/15-10:39',
+        receivedAt: now);
+    expect((await importer.importAll([sms])).created, 1);
+    expect((await importer.importAll([sms])).created, 0);
+  });
 }

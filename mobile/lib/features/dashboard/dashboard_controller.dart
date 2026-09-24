@@ -1078,7 +1078,7 @@ class DetectedAccount {
   /// «ملت ۵۵۹۶» (برچسبِ پیش‌فرض).
   String get defaultLabel {
     final bank = bankId == null ? 'حساب' : bankNameById(bankId!).replaceFirst('بانک ', '');
-    final ref = cardLast4 ?? accountRef ?? '';
+    final ref = (cardLast4 ?? accountRef ?? '').replaceAll(RegExp(r'[^0-9]'), '');
     final tail = ref.length > 4 ? ref.substring(ref.length - 4) : ref;
     return '$bank $tail'.trim();
   }
