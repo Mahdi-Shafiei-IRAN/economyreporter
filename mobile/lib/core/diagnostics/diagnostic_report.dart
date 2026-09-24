@@ -12,6 +12,7 @@ import '../sms/bank_registry.dart';
 import '../sms/digit_utils.dart';
 import 'balance_breakdown.dart';
 import 'balance_chain.dart';
+import 'repair.dart';
 import 'sms_diagnosis.dart';
 
 final _idAfterKeyword = RegExp(
@@ -83,14 +84,20 @@ String buildDiagnosticReport({
   required DateTime now,
   String? scope,
   String? appVersion,
+  RepairResult? repair,
   int maxSms = 200,
 }) {
   final b = StringBuffer()
     ..writeln('گزارش عیب‌یابی «مالی خانواده» — ${_when(now)}')
     ..writeln('بازه: ${balance.period.title} • شخص: ${scope ?? 'همه'}'
         '${appVersion == null ? '' : ' • نسخه: $appVersion'}')
-    ..writeln('مبلغ‌ها به ریال. شماره‌ی کارت/حساب پوشانده شده؛ قبل از فرستادن یک بار بخوان.')
-    ..writeln();
+    ..writeln('مبلغ‌ها به ریال. شماره‌ی کارت/حساب پوشانده شده؛ قبل از فرستادن یک بار بخوان.');
+  if (repair != null) {
+    b.writeln('درست کردنِ خودکار (${_when(repair.at)}): وصل به پیامک ${repair.adopted} • '
+        'تکمیل از متن ${repair.backfilled} • کنار رفته ${repair.removed} • '
+        'واردشده ${repair.imported}');
+  }
+  b.writeln();
 
   // --- موجودی ---
   b
@@ -149,8 +156,8 @@ String buildDiagnosticReport({
     for (final v in SmsVerdict.values)
       if (sms.count(v) > 0) '${v.label}: ${sms.count(v)}',
   ].join(' • '));
-  b.writeln('با قانون پیشنهادی (سرشماره + شماره حساب/کارت + مبلغ + نوع) از جمع/فهرست '
-      'بیرون می‌روند: ${sms.droppedByStrictCount}');
+  b.writeln('ثبت‌شده‌هایی که با قانون (سرشماره + شماره حساب/کارت + مبلغ + نوع) نمی‌خوانند: '
+      '${sms.droppedByStrictCount}');
   if (sms.notAllowedWithAmount.isNotEmpty) {
     b.writeln('پیامکِ مبلغ‌دار از فرستنده‌های غیرمجاز: ${[
       for (final e in sms.notAllowedWithAmount.entries)
@@ -164,7 +171,7 @@ String buildDiagnosticReport({
         '${d.inInbox ? '' : ' (در صندوق نیست)'} ${d.verdict.label}'
         ' | پارس: ${_kind(p.kind.name)} ${p.amountRial == null ? '?' : _rial(p.amountRial!)}'
         ' مانده ${p.balanceAfterRial == null ? '-' : _rial(p.balanceAfterRial!)}'
-        ' | قانون جدید: $strict');
+        ' | قانون: $strict');
     b.writeln('    متن: ${_oneLine(d.body)}');
   }
   if (sms.items.length > maxSms) {

@@ -253,6 +253,13 @@ class _RootState extends State<_Root> with WidgetsBindingObserver {
 
       final granted = await s.smsInbox.requestPermission();
       if (granted) {
+        // یک بار بعد از نصبِ این نسخه: وصل کردنِ نسخه‌های سرور به پیامکشان، تکمیل از
+        // متن و قانونِ «شماره‌ی حساب/کارت» (قابل برگرداندن از صفحه‌ی عیب‌یابی).
+        try {
+          await s.dashboard.runRepairOnce();
+        } catch (_) {
+          // تعمیر نشد؛ از صفحه‌ی عیب‌یابی دوباره قابل اجراست.
+        }
         await s.smsInbox.importInbox();
         await s.dashboard.load();
         s.smsInbox.startListener();

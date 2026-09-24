@@ -137,7 +137,8 @@ DateTime? extractOccurredAt(String normalized) {
   if (tm != null) {
     final h = int.parse(tm.group(1)!);
     final m = int.parse(tm.group(2)!);
-    if (h <= 23 && m <= 59) {
+    // بعضی بانک‌ها (تجارت) پایانِ روز را «24:00» می‌نویسند = ۰۰:۰۰ روزِ بعد.
+    if ((h <= 23 && m <= 59) || (h == 24 && m == 0)) {
       hh = h;
       mi = m;
     }

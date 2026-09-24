@@ -60,13 +60,13 @@ void main() {
     expect(saved.bankId, 'mellat');
   });
 
-  test('فرستنده‌ی شماره‌ای بدون بانک/کارت (مثل دیجی‌پی): با تعیین صاحب نسبت داده می‌شود',
+  test('سرشماره‌ی عددیِ بی‌بانک: با تعیین صاحبِ فرستنده نسبت داده می‌شود',
       () async {
-    // دیجی‌پی: فرستنده شماره است، بانک تشخیص داده نمی‌شود، پیامک شماره‌ی کارت ندارد.
+    // فرستنده شماره است و بانک تشخیص داده نمی‌شود؛ پیامک شماره‌ی حساب دارد.
     await repo.addAllowedSender('982000123', ownerName: 'مهدی', ownerUserId: 'u-me');
     final tx = await SmsImporter(repo).importOne(RawSms(
       sender: '982000123',
-      body: 'پرداخت مبلغ 250,000 ریال با دیجی‌پی',
+      body: 'حساب 1000000005 پرداخت مبلغ 250,000 ریال',
       receivedAt: DateTime.utc(2026, 9, 1),
     ));
     expect(tx, isNotNull);
@@ -80,7 +80,7 @@ void main() {
     await repo.addAllowedSender('982000123'); // بدون صاحب
     final tx = await SmsImporter(repo).importOne(RawSms(
       sender: '982000123',
-      body: 'پرداخت مبلغ 90,000 ریال',
+      body: 'حساب 1000000005 پرداخت مبلغ 90,000 ریال',
       receivedAt: DateTime.utc(2026, 9, 2),
     ));
     expect((await repo.getById(tx!.id))!.ownerName, isNull);

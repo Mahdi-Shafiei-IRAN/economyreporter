@@ -4,7 +4,8 @@
 ///   ۱) موجودی: عددِ کارتِ خلاصه کارت به کارت، کنارِ موجودیِ آخرِ دوره طبق بانک.
 ///   ۲) زنجیره‌ی مانده: هر پیامک با «مانده‌ی قبلی ± مبلغ» سنجیده و علتِ ناجوری گفته می‌شود.
 ///   ۳) پیامک‌ها: سرنوشتِ هر پیامکِ فرستنده‌ی مجاز + پیش‌نمایشِ قانونِ پیشنهادی.
-/// فقط خواندنی است؛ با لمسِ یک تراکنش همان برگه‌ی جزئیات (ویرایش/حذف) باز می‌شود.
+/// کنارِ هر مشکل دکمه‌ی «درستش کن» هست (نوع، برگرداندن، حذف، یکی کردنِ حساب، ثبت)؛
+/// با لمسِ یک تراکنش هم برگه‌ی جزئیات (ویرایش/حذف) باز می‌شود.
 library;
 
 import 'package:flutter/material.dart';
@@ -16,6 +17,8 @@ import '../../core/diagnostics/diagnostic_report.dart';
 import '../../core/diagnostics/sms_diagnosis.dart';
 import '../../core/format/date_format.dart';
 import '../../core/format/money_format.dart';
+import '../../core/sms/models.dart';
+import '../../core/sms/sms_importer.dart';
 import '../../core/theme/app_theme.dart';
 import '../dashboard/dashboard_controller.dart';
 import '../senders/senders_screen.dart';
@@ -26,6 +29,11 @@ import '../transactions/transaction_details_sheet.dart';
 const kDiagCopyKey = Key('diag-copy');
 const kDiagBalanceDiffKey = Key('diag-balance-diff');
 const kDiagSmsListKey = Key('diag-sms-list');
+const kDiagRepairKey = Key('diag-repair');
+const kDiagImportAllKey = Key('diag-import-all');
+
+/// اجرای یک «درستش کن» با پیامِ نتیجه.
+typedef _Run = Future<void> Function(Future<void> Function() action, String done);
 
 String _fa(int n) => toPersianDigits('$n');
 
@@ -70,9 +78,26 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
     ));
   }
 
+  /// پیامک‌ها را دوباره بررسی کن (setState نباید Future برگرداند).
+  void _refreshSms() => setState(() {
+        _sms = _c.diagnoseSmsMessages();
+      });
+
+  Future<void> _run(Future<void> Function() action, String done) async {
+    try {
+      await action();
+      if (!mounted) return;
+      _refreshSms();
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(done)));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('نشد: $e')));
+    }
+  }
+
   Future<void> _openTx(TransactionRecord t) async {
     await showTransactionDetails(context, _c, t);
-    if (mounted) setState(() => _sms = _c.diagnoseSmsMessages());
+    if (mounted) _refreshSms();
   }
 
   @override
@@ -102,9 +127,13 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
           builder: (context, _) {
             final chains = _c.balanceChains();
             return TabBarView(children: [
-              _BalanceTab(controller: _c, breakdown: _c.balanceBreakdown(), chains: chains),
-              _ChainTab(controller: _c, report: chains, onOpen: _openTx),
-              _SmsTab(controller: _c, future: _sms, onOpen: _openTx),
+              _BalanceTab(
+                  controller: _c,
+                  breakdown: _c.balanceBreakdown(),
+                  chains: chains,
+                  run: _run),
+              _ChainTab(controller: _c, report: chains, onOpen: _openTx, run: _run),
+              _SmsTab(controller: _c, future: _sms, onOpen: _openTx, run: _run),
             ]);
           },
         ),
@@ -147,7 +176,8 @@ class _Intro extends StatelessWidget {
 
 class _Warning extends StatelessWidget {
   final String text;
-  const _Warning(this.text);
+  final Widget? action;
+  const _Warning(this.text, {this.action});
 
   @override
   Widget build(BuildContext context) {
@@ -161,7 +191,15 @@ class _Warning extends StatelessWidget {
           children: [
             Icon(Icons.warning_amber_rounded, color: fin.warning),
             const SizedBox(width: 8),
-            Expanded(child: Text(text, style: TextStyle(color: fin.warning))),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(text, style: TextStyle(color: fin.warning)),
+                  if (action != null) action!,
+                ],
+              ),
+            ),
           ],
         ),
       ),
@@ -215,12 +253,34 @@ class _Tag extends StatelessWidget {
   }
 }
 
-List<Widget> _splitWarnings(BalanceChainReport chains) => [
-      for (final h in chains.splitHints)
-        _Warning('«${_title(h.a.sample)}» و «${_title(h.b.sample)}» '
-            'احتمالاً یک حساب‌اند (مانده‌هایشان در ${_fa(h.consistent)} از '
-            '${_fa(h.switches)} جابه‌جایی دقیقاً پشتِ هم جور است). برنامه آن‌ها را '
-            'دو کارتِ جدا می‌شمارد، پس موجودیِ این حساب دو بار جمع می‌شود.'),
+/// یک دکمه‌ی کوچکِ «درستش کن».
+Widget _fixButton(String label, VoidCallback onPressed, {Key? key, IconData? icon}) =>
+    Align(
+      alignment: AlignmentDirectional.centerStart,
+      child: TextButton.icon(
+        key: key,
+        onPressed: onPressed,
+        icon: Icon(icon ?? Icons.build_circle_outlined, size: 18),
+        label: Text(label),
+      ),
+    );
+
+List<Widget> _splitWarnings(
+        BalanceChainReport chains, DashboardController c, _Run run) =>
+    [
+      for (final (i, h) in chains.splitHints.indexed)
+        _Warning(
+          '«${_title(h.a.sample)}» و «${_title(h.b.sample)}» '
+          'احتمالاً یک حساب‌اند (مانده‌هایشان در ${_fa(h.consistent)} از '
+          '${_fa(h.switches)} جابه‌جایی دقیقاً پشتِ هم جور است). برنامه آن‌ها را '
+          'دو کارتِ جدا می‌شمارد، پس موجودیِ این حساب دو بار جمع می‌شود.',
+          action: _fixButton(
+            'یکی کن: همه به «${_title(h.keep.sample)}»',
+            () => run(() => c.mergeAccounts(h), 'دو گروه یک حساب شدند'),
+            key: Key('diag-merge-$i'),
+            icon: Icons.merge_rounded,
+          ),
+        ),
     ];
 
 // ---------------------------------------------------------------------------
@@ -231,11 +291,13 @@ class _BalanceTab extends StatelessWidget {
   final DashboardController controller;
   final BalanceBreakdown breakdown;
   final BalanceChainReport chains;
+  final _Run run;
 
   const _BalanceTab({
     required this.controller,
     required this.breakdown,
     required this.chains,
+    required this.run,
   });
 
   @override
@@ -259,9 +321,11 @@ class _BalanceTab extends StatelessWidget {
         if (controller.hasActiveFilters)
           const _Warning('فیلترِ نوع/جستجو روشن است؛ کارتِ خلاصه با فیلتر حساب می‌شود ولی '
               'این جدول بدون فیلتر است.'),
+        _RepairCard(controller: controller, run: run),
         if (b.period.isAll)
-          const _Warning('برای «همه‌ی زمان‌ها» موجودیِ اول دوره نداریم؛ یک ماه را انتخاب کن.'),
-        ..._splitWarnings(chains),
+          const _Warning('برای «همه‌ی زمان‌ها» موجودیِ اول دوره صفر فرض می‌شود، پس «اختلاف» '
+              'یعنی پولی که از قبل در حساب بوده؛ برای عددِ معنادار یک ماه را انتخاب کن.'),
+        ..._splitWarnings(chains, controller, run),
         Card(
           child: Padding(
             padding: const EdgeInsets.all(14),
@@ -299,6 +363,58 @@ class _BalanceTab extends StatelessWidget {
   }
 }
 
+/// نتیجه‌ی تعمیرِ خودکار + «اعمال دوباره‌ی قانون‌ها».
+class _RepairCard extends StatelessWidget {
+  final DashboardController controller;
+  final _Run run;
+  const _RepairCard({required this.controller, required this.run});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final r = controller.lastRepair;
+    final lines = r == null
+        ? ['هنوز اجرا نشده.']
+        : [
+            'آخرین اجرا: ${formatJalaliNumeric(r.at)} ${formatClock(r.at)}',
+            if (r.adopted > 0)
+              '${_fa(r.adopted)} تراکنشِ برگشته از سرور (نصبِ قبلی) به پیامک و شماره‌ی حسابشان وصل شدند',
+            if (r.backfilled > 0)
+              '${_fa(r.backfilled)} تراکنش شماره‌ی حساب/مانده/تاریخشان از متنِ پیامک تکمیل شد',
+            if (r.removed > 0)
+              '${_fa(r.removed)} تراکنشِ بی‌شماره (اعتبار کیف پول، اطلاعیه، …) یا رمز پویا کنار رفتند؛ '
+                  'در «پیامک‌ها» ← «در جمع نیست» قابل برگرداندن‌اند',
+            if (r.imported > 0) '${_fa(r.imported)} پیامکِ تراکنشی که ثبت نشده بود وارد شد',
+            if (!r.changedAnything) 'چیزی برای درست کردن نبود ✓',
+          ];
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 12, 14, 4),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('درست کردنِ خودکار',
+                style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700)),
+            const SizedBox(height: 4),
+            Text(
+              'قانون: پیامک فقط وقتی تراکنش است که از سرشماره‌ی مجاز باشد و شماره‌ی '
+              'حساب/کارت + مبلغ + نوع داشته باشد.',
+              style: theme.textTheme.bodySmall,
+            ),
+            for (final l in lines) Text('• $l', style: theme.textTheme.bodySmall),
+            _fixButton(
+              r == null ? 'اجرا' : 'اعمال دوباره‌ی قانون‌ها',
+              () => run(controller.runRepair, 'قانون‌ها اعمال شد'),
+              key: kDiagRepairKey,
+              icon: Icons.auto_fix_high_rounded,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _CardBalanceTile extends StatelessWidget {
   final CardPeriodBalance card;
   final Period period;
@@ -327,6 +443,7 @@ class _CardBalanceTile extends StatelessWidget {
                 warn('اول دوره تخمینی (پیامکِ مانده‌دار نبود)'),
               if (c.closingIsEstimate) warn('مانده‌ای از بانک ندارد'),
               if (!c.hasId) warn('بدون شماره کارت/حساب'),
+              if (!c.hasId && c.sample.isRemote) warn('از سرور (نصبِ قبلی)'),
               if (c.uncounted.isNotEmpty)
                 warn('${_fa(c.uncounted.length)} تراکنش در جمع نیست (انتقال/بازبینی)'),
             ]),
@@ -357,8 +474,14 @@ class _ChainTab extends StatelessWidget {
   final DashboardController controller;
   final BalanceChainReport report;
   final Future<void> Function(TransactionRecord) onOpen;
+  final _Run run;
 
-  const _ChainTab({required this.controller, required this.report, required this.onOpen});
+  const _ChainTab({
+    required this.controller,
+    required this.report,
+    required this.onOpen,
+    required this.run,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -373,12 +496,12 @@ class _ChainTab extends StatelessWidget {
             '• اختلاف دو برابرِ مبلغ: نوع برعکس ثبت شده (واریز به‌جای برداشت یا برعکس)\n'
                 '• مانده عوض نشده: تکراری است یا اصلاً تراکنش نبوده\n'
                 '• بقیه: پیامکِ جاافتاده، کارمزد/سود، یا مبلغِ اشتباه',
-            'با لمسِ هر مورد، جزئیاتِ تراکنش باز می‌شود تا نوع را اصلاح یا حذفش کنی.',
+            'زیرِ هر مورد دکمه‌ی «درستش کن» هست؛ با لمسِ خودِ مورد هم جزئیاتِ تراکنش باز می‌شود.',
           ],
         ),
-        ..._splitWarnings(report),
+        ..._splitWarnings(report, controller, run),
         for (final a in report.accounts)
-          _AccountChainCard(chain: a, controller: controller, onOpen: onOpen),
+          _AccountChainCard(chain: a, controller: controller, onOpen: onOpen, run: run),
         if (report.accounts.isEmpty)
           const Padding(
             padding: EdgeInsets.all(24),
@@ -393,11 +516,13 @@ class _AccountChainCard extends StatefulWidget {
   final AccountChain chain;
   final DashboardController controller;
   final Future<void> Function(TransactionRecord) onOpen;
+  final _Run run;
 
   const _AccountChainCard({
     required this.chain,
     required this.controller,
     required this.onOpen,
+    required this.run,
   });
 
   @override
@@ -443,7 +568,11 @@ class _AccountChainCardState extends State<_AccountChainCard> {
                           : fin.expense),
             ),
             for (final l in shown)
-              _LinkTile(link: l, controller: widget.controller, onOpen: widget.onOpen),
+              _LinkTile(
+                  link: l,
+                  controller: widget.controller,
+                  onOpen: widget.onOpen,
+                  run: widget.run),
             if (a.links.length != problems.length)
               Align(
                 alignment: AlignmentDirectional.centerStart,
@@ -465,8 +594,54 @@ class _LinkTile extends StatelessWidget {
   final ChainLink link;
   final DashboardController controller;
   final Future<void> Function(TransactionRecord) onOpen;
+  final _Run run;
 
-  const _LinkTile({required this.link, required this.controller, required this.onOpen});
+  const _LinkTile({
+    required this.link,
+    required this.controller,
+    required this.onOpen,
+    required this.run,
+  });
+
+  /// دکمه‌ی درست کردنِ همین مورد (فقط برای صاحبِ تراکنش).
+  Widget? _fix() {
+    final l = link;
+    final t = l.tx;
+    if (!controller.canEdit(t)) return null;
+    final key = Key('diag-fix-${t.id}');
+    final restore = l.restoreCandidate;
+    if (restore != null) {
+      return _fixButton(
+        'برگرداندنِ ${_kindLabel(restore.kind)} ${formatToman(restore.amountRial ?? 0)} '
+        'که حذف شده بود',
+        () => run(() => controller.restoreTransaction(restore), 'تراکنش برگشت'),
+        key: key,
+        icon: Icons.restore_rounded,
+      );
+    }
+    switch (l.status) {
+      case ChainStatus.signFlipped:
+      case ChainStatus.kindSuggested:
+        final kind = l.suggestedKind!;
+        return _fixButton('ثبت به‌عنوانِ ${_kindLabel(kind)}',
+            () => run(() => controller.fixKind(t, kind), 'نوع اصلاح شد'),
+            key: key);
+      case ChainStatus.noEffect:
+        return _fixButton('حذف (تکراری/غیرتراکنش)',
+            () => run(() => controller.deleteTransaction(t.id), 'حذف شد'),
+            key: key, icon: Icons.delete_outline_rounded);
+      case ChainStatus.mismatch:
+        final diff = l.diffRial!;
+        return _fixButton(
+          'ثبتِ دستیِ ${diff < 0 ? 'برداشت' : 'واریزِ'} جاافتاده‌ی ${formatToman(diff.abs())}',
+          () => run(() => controller.addMissingBefore(t, diff), 'ثبت شد'),
+          key: key,
+          icon: Icons.add_circle_outline_rounded,
+        );
+      default:
+        return null;
+    }
+  }
 
   String _explain() {
     final l = link;
@@ -495,6 +670,7 @@ class _LinkTile extends StatelessWidget {
     final t = link.tx;
     final problem = link.status.isProblem;
     final color = problem ? fin.expense : fin.income;
+    final fix = problem ? _fix() : null;
     return InkWell(
       onTap: () => onOpen(t),
       child: Padding(
@@ -523,6 +699,7 @@ class _LinkTile extends StatelessWidget {
                         overflow: TextOverflow.ellipsis,
                         style: theme.textTheme.bodySmall
                             ?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+                  if (fix != null) fix,
                 ],
               ),
             ),
@@ -545,7 +722,7 @@ extension on _SmsFilter {
         _SmsFilter.counted => 'شمرده‌شده',
         _SmsFilter.notCounted => 'در جمع نیست',
         _SmsFilter.rejected => 'ردشده/ثبت‌نشده',
-        _SmsFilter.strictDrops => 'قانون جدید حذف می‌کند',
+        _SmsFilter.strictDrops => 'خلافِ قانون',
       };
 
   bool matches(SmsDiagnosis d) => switch (this) {
@@ -566,8 +743,14 @@ class _SmsTab extends StatefulWidget {
   final DashboardController controller;
   final Future<SmsDiagnosisReport> future;
   final Future<void> Function(TransactionRecord) onOpen;
+  final _Run run;
 
-  const _SmsTab({required this.controller, required this.future, required this.onOpen});
+  const _SmsTab({
+    required this.controller,
+    required this.future,
+    required this.onOpen,
+    required this.run,
+  });
 
   @override
   State<_SmsTab> createState() => _SmsTabState();
@@ -593,15 +776,27 @@ class _SmsTabState extends State<_SmsTab> {
             lines: [
               'فقط پیامکِ فرستنده‌های مجاز بررسی می‌شود. برای هر پیامک می‌بینی برنامه چه '
                   'خوانده (نوع، مبلغ، مانده، حساب) و آخرش چه شد.',
-              'قانونِ پیشنهادی: پیامک فقط وقتی تراکنش است که از سرشماره‌ی مجاز باشد و '
-                  'شماره حساب/کارت + مبلغ + نوع (واریز/برداشت) داشته باشد. این فعلاً فقط '
-                  'پیش‌نمایش است و چیزی را عوض نمی‌کند.',
+              'قانون: پیامک فقط وقتی تراکنش است که از سرشماره‌ی مجاز باشد و شماره حساب/کارت '
+                  '+ مبلغ + نوع (واریز/برداشت) داشته باشد. اگر پیامکی اشتباهی رد یا حذف شده، '
+                  'زیرش «برگرداندن» یا «ثبت کن» هست.',
             ],
           ),
           if (!r.inboxRead)
             const _Warning('صندوقِ پیامکِ گوشی خوانده نشد (مجوز؟)؛ فقط تراکنش‌هایی که قبلاً '
                 'ثبت شده‌اند بررسی شدند.'),
           _SmsSummary(report: r),
+          if (r.count(SmsVerdict.notImported) > 0)
+            _fixButton(
+              'واردکردنِ ${_fa(r.count(SmsVerdict.notImported))} پیامکِ تراکنشی که ثبت نشده',
+              () => widget.run(
+                  () => widget.controller.importMissing([
+                        for (final d in r.items)
+                          if (d.verdict == SmsVerdict.notImported) _raw(d),
+                      ]),
+                  'وارد شدند'),
+              key: kDiagImportAllKey,
+              icon: Icons.download_rounded,
+            ),
           if (r.notAllowedWithAmount.isNotEmpty)
             _NotAllowedCard(report: r, controller: widget.controller),
           Padding(
@@ -627,12 +822,18 @@ class _SmsTabState extends State<_SmsTab> {
           itemCount: header.length + items.length,
           itemBuilder: (context, i) => i < header.length
               ? header[i]
-              : _SmsTile(d: items[i - header.length], onOpen: widget.onOpen),
+              : _SmsTile(
+                  d: items[i - header.length],
+                  controller: widget.controller,
+                  onOpen: widget.onOpen,
+                  run: widget.run),
         );
       },
     );
   }
 }
+
+RawSms _raw(SmsDiagnosis d) => RawSms(sender: d.sender, body: d.body, receivedAt: d.at);
 
 class _SmsSummary extends StatelessWidget {
   final SmsDiagnosisReport report;
@@ -663,9 +864,9 @@ class _SmsSummary extends StatelessWidget {
             const SizedBox(height: 8),
             Text(
               drops == 0
-                  ? 'قانونِ پیشنهادی چیزی از جمع/فهرست بیرون نمی‌برد.'
-                  : 'با قانونِ پیشنهادی ${_fa(drops)} پیامک که الان ثبت شده بیرون می‌رود '
-                      '(فیلترِ «قانون جدید حذف می‌کند» را ببین).',
+                  ? 'همه‌ی تراکنش‌های ثبت‌شده با قانون می‌خوانند ✓'
+                  : '${_fa(drops)} تراکنشِ ثبت‌شده با قانون نمی‌خواند (پیش از قانون ثبت شده؛ '
+                      'فیلترِ «خلافِ قانون» را ببین یا در «موجودی» قانون‌ها را اعمال کن).',
               style: theme.textTheme.bodySmall
                   ?.copyWith(color: drops == 0 ? fin.income : fin.warning),
             ),
@@ -712,8 +913,44 @@ class _NotAllowedCard extends StatelessWidget {
 
 class _SmsTile extends StatelessWidget {
   final SmsDiagnosis d;
+  final DashboardController controller;
   final Future<void> Function(TransactionRecord) onOpen;
-  const _SmsTile({required this.d, required this.onOpen});
+  final _Run run;
+  const _SmsTile({
+    required this.d,
+    required this.controller,
+    required this.onOpen,
+    required this.run,
+  });
+
+  /// دکمه‌ی درست کردن برای این پیامک (اگر لازم باشد).
+  Widget? _fix() {
+    final stored = d.stored;
+    final key = Key('diag-sms-fix-${stored?.id ?? '${d.sender}|${d.at?.millisecondsSinceEpoch}'}');
+    switch (d.verdict) {
+      case SmsVerdict.deleted:
+        if (stored == null || !controller.canEdit(stored)) return null;
+        return _fixButton('برگرداندن',
+            () => run(() => controller.restoreTransaction(stored), 'تراکنش برگشت'),
+            key: key, icon: Icons.restore_rounded);
+      case SmsVerdict.notImported:
+        return _fixButton('ثبت',
+            () => run(() => controller.importMissing([_raw(d)]), 'ثبت شد'),
+            key: key, icon: Icons.download_rounded);
+      case SmsVerdict.noId || SmsVerdict.unknownKind || SmsVerdict.noAmount:
+        if (d.parsed.amountRial == null || d.parsed.kind == TxKind.unknown) return null;
+        return _fixButton('این تراکنش است؛ ثبت کن',
+            () => run(() => controller.saveAnyway(d), 'ثبت شد'),
+            key: key, icon: Icons.add_task_rounded);
+      default:
+        if (d.droppedByStrict && stored != null && controller.canEdit(stored)) {
+          return _fixButton('حذف (خلافِ قانون)',
+              () => run(() => controller.deleteTransaction(stored.id), 'حذف شد'),
+              key: key, icon: Icons.delete_outline_rounded);
+        }
+        return null;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -739,6 +976,7 @@ class _SmsTile extends StatelessWidget {
       if (p.cardLast4 != null) 'کارت ${toPersianDigits(p.cardLast4!)}',
       if (p.bankName != null) p.bankName!,
     ].join(' • ');
+    final fix = _fix();
     final storedDiffers = stored != null &&
         (stored.kind != p.kind.name || stored.amountRial != p.amountRial);
     return Card(
@@ -752,9 +990,8 @@ class _SmsTile extends StatelessWidget {
               Wrap(spacing: 6, runSpacing: 4, children: [
                 _Tag(d.verdict.label, color: vColor, background: vBg),
                 d.strict.accepts
-                    ? _Tag('قانون جدید: قبول',
-                        color: fin.income, background: fin.incomeContainer)
-                    : _Tag('قانون جدید: رد — ${d.strict.missing.join('، ')}',
+                    ? _Tag('قانون: قبول', color: fin.income, background: fin.incomeContainer)
+                    : _Tag('قانون: رد — ${d.strict.missing.join('، ')}',
                         color: fin.expense, background: fin.expenseContainer),
                 if (!d.inInbox)
                   _Tag('در صندوق نیست',
@@ -778,6 +1015,7 @@ class _SmsTile extends StatelessWidget {
                   '${stored.amountRial == null ? '' : formatToman(stored.amountRial!)}',
                   style: theme.textTheme.bodySmall?.copyWith(color: fin.transfer),
                 ),
+              if (fix != null) fix,
             ],
           ),
         ),

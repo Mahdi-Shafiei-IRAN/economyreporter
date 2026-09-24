@@ -33,7 +33,7 @@ void main() {
 
     final imported = await SmsImporter(repo).importOne(RawSms(
       sender: 'BankMellat',
-      body: 'خرید مبلغ 50,000 ریال',
+      body: 'خرید مبلغ 50,000 ریال از کارت 1234',
       receivedAt: DateTime.utc(2026, 9, 10),
     ));
     final fruit = (await repo.categories()).firstWhere((c) => c.name == 'میوه');

@@ -409,6 +409,23 @@ class FakeTransactionStore implements TransactionStore {
       [for (final t in _items) if (t.isDeleted && t.source == 'sms') t];
 
   @override
+  Future<void> applyPatches(List<TxPatch> patches) async {
+    final now = clock().toUtc();
+    for (final p in patches) {
+      final i = _indexOf(p.id);
+      if (i == -1) continue;
+      _items[i] = recordWith(_items[i], {
+        ...p.set,
+        'updated_at': now.toIso8601String(),
+        'sync_status': 'pending',
+        if (p.delete) 'deleted_at': now.toIso8601String(),
+        if (p.restore) 'deleted_at': null,
+      });
+    }
+    await reattributeLocal();
+  }
+
+  @override
   Future<List<AllowedSender>> allowedSenders() async => List.of(_senders);
 
   @override

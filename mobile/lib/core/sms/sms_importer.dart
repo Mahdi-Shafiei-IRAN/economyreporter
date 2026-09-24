@@ -2,7 +2,8 @@
 /// خواندن واقعی پیامک از سیستم‌عامل در features/sms انجام می‌شود.
 ///
 /// ترتیب (قاعده‌ی پروژه): اول فرستنده — فقط سرشماره/نامی که کاربر مجاز کرده —
-/// بعد پارس متن. پیامکِ هر فرستنده‌ی دیگری حتی اگر مبلغ داشته باشد ثبت نمی‌شود.
+/// بعد پارس متن. پیامکِ هر فرستنده‌ی دیگری حتی اگر مبلغ داشته باشد ثبت نمی‌شود؛
+/// از فرستنده‌ی مجاز هم فقط پیامکِ دارای شماره‌ی حساب/کارت + مبلغ + نوع.
 library;
 
 import '../../features/senders/data/allowed_sender.dart';
@@ -21,7 +22,7 @@ class RawSms {
 class ImportResult {
   final int created;
   final int duplicates;
-  final int skipped; // OTP، یادآوری یا غیرتراکنش (از فرستنده‌ی مجاز)
+  final int skipped; // OTP، یادآوری، بی‌شماره یا غیرتراکنش (از فرستنده‌ی مجاز)
   final int notAllowed; // فرستنده جزو فرستنده‌های مجاز نیست
 
   const ImportResult({
@@ -62,7 +63,7 @@ class SmsImporter {
     if (sender == null) return null; // فرستنده‌ی مجاز نیست
     final parsed =
         parser.parse(sender: sms.sender, body: sms.body, bankId: sender.bankId);
-    if (!parsed.looksLikeTransaction) return null; // OTP یا غیرتراکنش
+    if (!parsed.isCountable) return null; // OTP، بی‌شماره یا غیرتراکنش
     final outcome = await store.saveParsed(
       parsed,
       sender: sms.sender,
@@ -101,7 +102,7 @@ class SmsImporter {
       }
       final parsed =
           parser.parse(sender: sms.sender, body: sms.body, bankId: sender.bankId);
-      if (!parsed.looksLikeTransaction) {
+      if (!parsed.isCountable) {
         skipped++;
         continue;
       }

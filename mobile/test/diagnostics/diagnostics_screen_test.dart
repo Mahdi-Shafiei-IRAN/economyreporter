@@ -1,5 +1,6 @@
 import 'package:economy/core/format/money_format.dart';
 import 'package:economy/core/sms/sms_importer.dart';
+import 'package:economy/core/sms/sms_parser.dart';
 import 'package:economy/core/theme/app_theme.dart';
 import 'package:economy/features/dashboard/dashboard_controller.dart';
 import 'package:economy/features/diagnostics/diagnostics_screen.dart';
@@ -49,7 +50,9 @@ void main() {
     store.addRecord(_mellat('x',
         kind: 'expense', amount: 2000000, balance: 12000000, at: DateTime.utc(2026, 9, 23, 8)));
     inbox = [RawSms(sender: 'DigiPay', body: _digipayBody, receivedAt: _now)];
-    await SmsImporter(store).importAll(inbox);
+    // ثبتِ قدیمی (پیش از قانونِ «شماره حساب/کارت»)، مثلِ داده‌ی فعلیِ گوشی.
+    await store.saveParsed(const SmsParser().parse(sender: 'DigiPay', body: _digipayBody),
+        sender: 'DigiPay', receivedAt: _now);
 
     controller = DashboardController(store, clock: () => _now);
     controller.readInbox = () async => inbox;
@@ -101,8 +104,8 @@ void main() {
 
     expect(find.text(_digipayBody), findsOneWidget);
     expect(find.text('شمرده شد'), findsOneWidget);
-    expect(find.text('قانون جدید: رد — شماره حساب/کارت ندارد'), findsOneWidget);
-    expect(find.textContaining('با قانونِ پیشنهادی ۱ پیامک'), findsOneWidget);
+    expect(find.text('قانون: رد — شماره حساب/کارت ندارد'), findsOneWidget);
+    expect(find.textContaining('۱ تراکنشِ ثبت‌شده با قانون نمی‌خواند'), findsOneWidget);
 
     await tester.tap(find.text('شمرده‌شده').last);
     await tester.pumpAndSettle();
@@ -168,5 +171,68 @@ void main() {
     await tester.pumpWidget(card(onExplain: () => tapped++));
     await tester.tap(find.byKey(kSummaryExplainKey));
     expect(tapped, 1);
+  });
+
+  testWidgets('درستش کن (زنجیره): نوعِ برعکس با یک دکمه اصلاح می‌شود', (tester) async {
+    await tester.pumpWidget(app(DiagnosticsScreen(controller: controller, initialTab: 1)));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('نوع برعکس ثبت شده — '), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('diag-fix-x')));
+    await tester.pumpAndSettle();
+    expect(controller.cachedById('x')!.kind, 'income');
+    // ignore: avoid_print
+    expect(find.textContaining('نوع برعکس ثبت شده — '), findsNothing);
+    expect(find.text('نوع اصلاح شد'), findsOneWidget);
+  });
+
+  testWidgets('درستش کن (موجودی): اعمالِ قانون‌ها، بعد برگرداندن از «پیامک‌ها»', (tester) async {
+    await tester.pumpWidget(app(DiagnosticsScreen(controller: controller)));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('هنوز اجرا نشده'), findsOneWidget);
+
+    await tester.tap(find.byKey(kDiagRepairKey));
+    await tester.pumpAndSettle();
+    expect(controller.lastRepair!.removed, 1);
+    expect(find.textContaining('۱ تراکنشِ بی‌شماره'), findsOneWidget);
+    // دیجی‌پی دیگر در جمع نیست: اختلاف فقط همان نوعِ برعکس است.
+    expect(controller.balanceBreakdown().diffRial, 4000000);
+
+    await tester.tap(find.text('پیامک‌ها'));
+    await tester.pumpAndSettle();
+    expect(find.text('حذف شده'), findsOneWidget);
+    final id = controller.deletedSms.single.id;
+    await tester.tap(find.byKey(Key('diag-sms-fix-$id')));
+    await tester.pumpAndSettle();
+    expect(controller.cachedById(id), isNotNull);
+    expect(find.text('حذف (خلافِ قانون)'), findsOneWidget);
+  });
+
+  testWidgets('درستش کن (پیامک‌ها): «این تراکنش است؛ ثبت کن» برای پیامکِ ردشده', (tester) async {
+    final refund = RawSms(
+        sender: 'DigiPay',
+        body: 'بازگشت پول\nمبلغ 31,000 ریال به دیجی‌کارت شما واریز شد.',
+        receivedAt: _now.add(const Duration(minutes: 5)));
+    inbox = [...inbox, refund];
+    await tester.pumpWidget(app(DiagnosticsScreen(controller: controller, initialTab: 2)));
+    await tester.pumpAndSettle();
+    expect(find.text('رد: شماره حساب/کارت ندارد'), findsOneWidget);
+
+    await tester.tap(find.byKey(
+        Key('diag-sms-fix-DigiPay|${refund.receivedAt!.millisecondsSinceEpoch}')));
+    await tester.pumpAndSettle();
+    expect(
+        controller.itemsIn(const Period.all()).where((t) => t.amountRial == 31000), hasLength(1));
+  });
+
+  testWidgets('باز و بسته کردنِ جزئیاتِ تراکنش از عیب‌یابی خطا نمی‌دهد', (tester) async {
+    await tester.pumpWidget(app(DiagnosticsScreen(controller: controller, initialTab: 1)));
+    await tester.pumpAndSettle();
+    await tester.tap(find.textContaining('نوع برعکس ثبت شده — '));
+    await tester.pumpAndSettle();
+    Navigator.of(tester.element(find.byType(DiagnosticsScreen))).pop();
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(find.byType(DiagnosticsScreen), findsOneWidget);
   });
 }

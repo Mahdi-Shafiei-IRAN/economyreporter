@@ -72,9 +72,17 @@ class ParsedTransaction {
   /// یادآوری/سررسید است، نه تراکنشِ انجام‌شده.
   final bool isReminder;
 
-  /// آیا این پیامک واقعاً یک تراکنش است؟ (برای خواندن خودکار پیامک).
+  /// شکلِ تراکنش دارد؟ (مبلغ + نوع، و رمز/یادآوری نیست). برای پیشنهادِ فرستنده.
   bool get looksLikeTransaction =>
       !isOtp && !isReminder && amountRial != null && kind != TxKind.unknown;
+
+  /// شماره‌ی حساب یا کارت دارد؟
+  bool get hasAccountId => cardLast4 != null || accountRef != null;
+
+  /// قانونِ ثبتِ خودکار: از سرشماره‌ی مجاز (در SmsImporter) + **شماره‌ی حساب/کارت +
+  /// مبلغ + نوع**. پیامکِ بی‌شماره (اعتبار دیجی‌پی/دیما، تبلیغ، اطلاعیه‌ی کسرِ آینده،
+  /// بازگشت پول به کیف پول) پولی در حسابِ بانکی جابه‌جا نکرده و شمرده نمی‌شود.
+  bool get isCountable => looksLikeTransaction && hasAccountId;
 
   const ParsedTransaction({
     required this.rawSender,

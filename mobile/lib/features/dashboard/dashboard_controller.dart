@@ -12,6 +12,7 @@ import '../../core/dedup/duplicate_finder.dart';
 import '../../core/diagnostics/balance_breakdown.dart';
 import '../../core/diagnostics/balance_chain.dart';
 import '../../core/diagnostics/diagnostic_report.dart';
+import '../../core/diagnostics/repair.dart';
 import '../../core/diagnostics/sms_diagnosis.dart';
 import '../../core/reconcile/reconciliation.dart';
 import '../../core/transfer/transfer_finder.dart';
@@ -84,6 +85,12 @@ class DashboardController extends ChangeNotifier {
   List<DuplicateGroup> duplicateGroups = const [];
   List<TransferPair> transferPairs = const [];
   List<Wallet> wallets = const [];
+
+  /// تراکنش‌های پیامکیِ حذف‌شده (برای «برگرداندن» در عیب‌یابی).
+  List<TransactionRecord> deletedSms = const [];
+
+  /// نتیجه‌ی آخرین تعمیرِ خودکار (null یعنی هنوز اجرا نشده).
+  RepairResult? lastRepair;
   List<AllowedSender> allowedSenders = const [];
   List<FamilyMember> members = const [];
   String? meUserId;
@@ -148,7 +155,8 @@ class DashboardController extends ChangeNotifier {
       computeBalanceBreakdown(_scopedAll, period);
 
   /// زنجیره‌ی مانده‌ی هر حساب (شخصِ انتخاب‌شده اعمال می‌شود).
-  BalanceChainReport balanceChains() => auditBalanceChains(_scopedAll);
+  BalanceChainReport balanceChains() => auditBalanceChains(_scopedAll,
+      deleted: deletedSms.where((t) => person == null || personOf(t) == person));
 
   /// سرنوشتِ هر پیامکِ فرستنده‌های مجاز + پیش‌نمایشِ قانونِ پیشنهادی.
   Future<SmsDiagnosisReport> diagnoseSmsMessages() async {
@@ -165,11 +173,147 @@ class DashboardController extends ChangeNotifier {
     }
     return diagnoseSms(
       inbox: inbox,
-      stored: [..._byId.values, ...await repository.deletedSmsTransactions()],
+      stored: [..._byId.values, ...deletedSms],
       allowed: allowedSenders,
       parser: parser,
       inboxRead: inboxRead,
     );
+  }
+
+  // ---------------------------------------------------------------------------
+  // درست کردن (از صفحه‌ی عیب‌یابی)
+  // ---------------------------------------------------------------------------
+
+  static RepairResult? _decodeRepair(String? raw) {
+    if (raw == null || raw.isEmpty) return null;
+    try {
+      return RepairResult.fromJson(jsonDecode(raw) as Map<String, dynamic>);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<Set<String>> _kept() async {
+    final raw = await repository.getSetting(SettingKeys.keptTransactions);
+    if (raw == null) return {};
+    try {
+      return (jsonDecode(raw) as List).map((e) => e.toString()).toSet();
+    } catch (_) {
+      return {};
+    }
+  }
+
+  Future<List<RawSms>> _readInboxSafe() async {
+    final read = readInboxForDiagnosis ?? readInbox;
+    if (read == null) return const [];
+    try {
+      return await read();
+    } catch (_) {
+      return const []; // بدون مجوز پیامک
+    }
+  }
+
+  /// تعمیرِ خودکار با قانون‌های فعلی (نگاه کن به [planRepair]) و بعد واردکردنِ
+  /// پیامک‌های تراکنشیِ صندوق که هنوز ثبت نشده‌اند. نتیجه ذخیره می‌شود.
+  Future<RepairResult> runRepair() async {
+    await load();
+    final inbox = await _readInboxSafe();
+    final plan = planRepair(
+      records: _byId.values,
+      inbox: inbox,
+      allowed: allowedSenders,
+      now: _clock(),
+      kept: await _kept(),
+      parser: parser,
+    );
+    await repository.applyPatches(plan.patches);
+    var imported = 0;
+    if (inbox.isNotEmpty) {
+      final importer = SmsImporter(repository,
+          parser: parser, deviceId: await repository.getSetting(SettingKeys.deviceId));
+      imported = (await importer.importAll(inbox)).created;
+    }
+    final result = RepairResult(
+      at: plan.result.at,
+      adopted: plan.result.adopted,
+      backfilled: plan.result.backfilled,
+      removedIds: plan.result.removedIds,
+      imported: imported,
+    );
+    await repository.setSetting(SettingKeys.repairResult, jsonEncode(result.toJson()));
+    await _changed();
+    return result;
+  }
+
+  /// یک بار بعد از نصبِ این نسخه (بعدها از دکمه‌ی «اجرای دوباره»).
+  Future<RepairResult?> runRepairOnce() async {
+    if (await repository.getSetting(SettingKeys.repairResult) != null) return null;
+    return runRepair();
+  }
+
+  /// برگرداندنِ تراکنشِ حذف‌شده؛ تعمیرِ خودکار دیگر حذفش نمی‌کند.
+  Future<void> restoreTransaction(TransactionRecord t) async {
+    final kept = await _kept()..add(t.id);
+    await repository.setSetting(SettingKeys.keptTransactions, jsonEncode(kept.toList()));
+    await repository.applyPatches([TxPatch(t.id, restore: true)]);
+    await _changed();
+  }
+
+  /// نوعی که مانده‌ی بانک نشان می‌دهد (واریز/برداشت) + خروج از بازبینی.
+  Future<void> fixKind(TransactionRecord t, String kind) =>
+      updateTransaction(t.id, kind: kind, needsReview: false);
+
+  /// «این دو یک حساب‌اند»: تراکنش‌های [hint.merge] هویتِ [hint.keep] را می‌گیرند و
+  /// پیامک‌های بعدیِ آن کارت/حساب هم به همین حساب می‌روند.
+  Future<void> mergeAccounts(SplitAccountHint hint) async {
+    final target = AccountIdentity.of(hint.keep.sample);
+    final from = AccountIdentity.of(hint.merge.sample);
+    if (hint.merge.hasId) {
+      final aliases = AccountIdentity.decodeMap(
+          await repository.getSetting(SettingKeys.accountAliases))
+        ..[from.key] = target;
+      await repository.setSetting(
+          SettingKeys.accountAliases, AccountIdentity.encodeMap(aliases));
+    }
+    await repository.applyPatches([
+      for (final l in hint.merge.links)
+        if (canEdit(l.tx)) TxPatch(l.tx.id, set: target.columns),
+    ]);
+    await _changed();
+  }
+
+  /// ثبتِ دستیِ مبلغی که مانده‌ی بانک نشان می‌دهد ولی پیامکش نیست ([diffRial]:
+  /// منفی = برداشت، مثبت = واریز)، کمی پیش از [before] و روی همان حساب.
+  Future<void> addMissingBefore(TransactionRecord before, int diffRial) async {
+    await repository.addManual(
+      kind: diffRial < 0 ? 'expense' : 'income',
+      amountRial: diffRial.abs(),
+      at: before.effectiveTime.subtract(const Duration(minutes: 1)),
+      description: 'ثبت دستی: مانده‌ی بانک نشان می‌داد، پیامکش نبود',
+      bankId: before.bankId,
+      cardLast4: before.cardLast4,
+      accountRef: before.accountRef,
+    );
+    await _changed();
+  }
+
+  /// «این تراکنش است؛ ثبت کن» برای پیامکی که قانون ردش کرده (مثلاً بانکی که شماره‌ی
+  /// حساب نمی‌فرستد). تعمیرِ خودکار دیگر حذفش نمی‌کند.
+  Future<void> saveAnyway(SmsDiagnosis d) async {
+    final outcome =
+        await repository.saveParsed(d.parsed, sender: d.sender, receivedAt: d.at);
+    final kept = await _kept()..add(outcome.id);
+    await repository.setSetting(SettingKeys.keptTransactions, jsonEncode(kept.toList()));
+    await _changed();
+  }
+
+  /// واردکردنِ پیامک‌هایی که تراکنش‌اند ولی ثبت نشده‌اند.
+  Future<int> importMissing(List<RawSms> messages) async {
+    final importer = SmsImporter(repository,
+        parser: parser, deviceId: await repository.getSetting(SettingKeys.deviceId));
+    final created = (await importer.importAll(messages)).created;
+    await _changed();
+    return created;
   }
 
   /// گزارشِ عیب‌یابیِ متنی (شماره‌ی کارت/حساب پوشانده) برای کپی.
@@ -181,6 +325,7 @@ class DashboardController extends ChangeNotifier {
         now: now,
         scope: person,
         appVersion: appVersion,
+        repair: lastRepair,
       );
 
   /// گزارشِ به‌تفکیکِ کارت: هر کارت با موجودیِ واقعی و درآمد/هزینهٔ [p].
@@ -272,6 +417,8 @@ class DashboardController extends ChangeNotifier {
     reviewItems = all.where((t) => t.needsReview && canEdit(t)).toList();
     uncategorized = await repository.uncategorized(limit: 500);
     wallets = await repository.wallets();
+    deletedSms = await repository.deletedSmsTransactions();
+    lastRepair = _decodeRepair(await repository.getSetting(SettingKeys.repairResult));
     allowedSenders = await repository.allowedSenders();
     balanceGaps = const ReconciliationService()
         .findGaps(all, dismissed: await _dismissedGaps());

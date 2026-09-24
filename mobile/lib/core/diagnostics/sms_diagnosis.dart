@@ -1,10 +1,9 @@
 /// عیب‌یابیِ پیامک‌ها: هر پیامکِ فرستنده‌ی مجاز چه سرنوشتی داشت و چرا.
 ///
 /// برای هر پیامک (صندوق گوشی + پیامک‌های ثبت‌شده‌ای که دیگر در صندوق نیستند) می‌گوید
-/// شمرده شد، انتقال/بازبینی شد، حذف شد، یا چرا رد شد. کنارش «قانون پیشنهادی» را هم
-/// پیش‌نمایش می‌دهد: پیامک فقط وقتی تراکنش است که از سرشماره‌ی مجاز باشد و
-/// **شماره‌ی حساب/کارت + مبلغ + نوع (واریز/برداشت)** داشته باشد. این قانون هنوز
-/// اعمال نمی‌شود؛ فقط نشان می‌دهد اگر اعمال شود چه چیزی عوض می‌شود.
+/// شمرده شد، انتقال/بازبینی شد، حذف شد، یا چرا رد شد. قانونِ ثبت: پیامک فقط وقتی
+/// تراکنش است که از سرشماره‌ی مجاز باشد و **شماره‌ی حساب/کارت + مبلغ + نوع
+/// (واریز/برداشت)** داشته باشد ([ParsedTransaction.isCountable]).
 ///
 /// همه‌چیز روی گوشی می‌ماند؛ متن پیامک به سرور یا لاگ نمی‌رود.
 library;
@@ -47,6 +46,9 @@ enum SmsVerdict {
 
   /// معلوم نشد واریز است یا برداشت.
   unknownKind,
+
+  /// شماره‌ی حساب/کارت ندارد (اعتبار کیف پول، تبلیغ، اطلاعیه، …).
+  noId,
 }
 
 extension SmsVerdictInfo on SmsVerdict {
@@ -67,6 +69,7 @@ extension SmsVerdictInfo on SmsVerdict {
         SmsVerdict.reminder => 'رد: یادآوری/سررسید',
         SmsVerdict.noAmount => 'رد: مبلغ ندارد',
         SmsVerdict.unknownKind => 'رد: نوع نامعلوم',
+        SmsVerdict.noId => 'رد: شماره حساب/کارت ندارد',
       };
 }
 
@@ -162,6 +165,7 @@ SmsVerdict _verdictOfParsed(ParsedTransaction p) {
   if (p.isReminder) return SmsVerdict.reminder;
   if (p.amountRial == null) return SmsVerdict.noAmount;
   if (p.kind == TxKind.unknown) return SmsVerdict.unknownKind;
+  if (!p.hasAccountId) return SmsVerdict.noId;
   return SmsVerdict.notImported;
 }
 
@@ -177,9 +181,10 @@ SmsDiagnosisReport diagnoseSms({
     for (final t in stored)
       if (t.source == 'sms' && !t.isRemote && t.smsBody != null) t,
   ];
+  // نسخه‌ی سرورِ همین پیامک (بی‌متن) هم همان تراکنش است.
   final byHash = <String, TransactionRecord>{
-    for (final t in smsTx)
-      if (t.sourceMessageHash != null) t.sourceMessageHash!: t,
+    for (final t in stored)
+      if (t.source == 'sms' && t.sourceMessageHash != null) t.sourceMessageHash!: t,
   };
   final byContent = <String, List<TransactionRecord>>{};
   for (final t in smsTx) {

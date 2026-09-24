@@ -64,6 +64,94 @@ String balanceCardKey(TransactionRecord t) {
   return '$bank|u:${t.ownerUserId ?? t.walletLabel ?? 'unknown'}';
 }
 
+/// آیا [t] با مانده‌ی قبلیِ [prev] جور است؟ (واریز/برداشت: دقیقاً؛ انتقال/نامشخص:
+/// به اندازه‌ی مبلغ در هر جهت.)
+bool fitsAfter(int prev, TransactionRecord t) {
+  final bal = t.balanceAfterRial;
+  final amount = t.amountRial;
+  if (bal == null || amount == null) return false;
+  if (!t.needsReview && t.kind == 'income') return prev + amount == bal;
+  if (!t.needsReview && t.kind == 'expense') return prev - amount == bal;
+  return (bal - prev).abs() == amount;
+}
+
+int _byTime(TransactionRecord a, TransactionRecord b) {
+  var c = a.effectiveTime.compareTo(b.effectiveTime);
+  if (c != 0) return c;
+  final ar = a.smsReceivedAt, br = b.smsReceivedAt;
+  if (ar != null && br != null) {
+    c = ar.compareTo(br);
+    if (c != 0) return c;
+  }
+  c = a.createdAt.compareTo(b.createdAt);
+  return c != 0 ? c : a.id.compareTo(b.id);
+}
+
+/// مرتب‌سازیِ تراکنش‌های **یک حساب** برای موجودی: به‌ترتیبِ زمان؛ و پیامک‌هایی که
+/// زمانشان یکی است (پیامک فقط تا دقیقه زمان دارد و ترتیبِ رسیدنش هم قابل اعتماد
+/// نیست) به ترتیبی چیده می‌شوند که مانده‌هایشان پشتِ هم جور شود.
+void sortForBalance(List<TransactionRecord> list) {
+  list.sort(_byTime);
+  int? prev;
+  var i = 0;
+  while (i < list.length) {
+    var j = i + 1;
+    while (j < list.length && list[j].effectiveTime == list[i].effectiveTime) {
+      j++;
+    }
+    if (j - i > 1) {
+      list.setRange(i, j, _chainRun(list.sublist(i, j), prev));
+    }
+    for (var k = i; k < j; k++) {
+      final t = list[k];
+      if (t.balanceAfterRial != null) {
+        prev = t.balanceAfterRial;
+      } else if (prev != null) {
+        prev = prev + t.signedAmount;
+      }
+    }
+    i = j;
+  }
+}
+
+/// بهترین ترتیبِ یک دسته‌ی هم‌زمان: حریصانه از مانده‌ی قبلی؛ اگر مانده‌ی قبلی نبود،
+/// شروعی که بیشترین جور شدن را می‌دهد.
+List<TransactionRecord> _chainRun(List<TransactionRecord> run, int? prev) {
+  (List<TransactionRecord>, int) greedy(int? start, List<TransactionRecord> items) {
+    final rest = [...items];
+    final out = <TransactionRecord>[];
+    var p = start;
+    var fits = 0;
+    while (rest.isNotEmpty) {
+      var k = p == null ? -1 : rest.indexWhere((t) => fitsAfter(p!, t));
+      if (k == -1) {
+        k = 0;
+      } else {
+        fits++;
+      }
+      final t = rest.removeAt(k);
+      out.add(t);
+      p = t.balanceAfterRial ?? (p == null ? null : p + t.signedAmount);
+    }
+    return (out, fits);
+  }
+
+  if (prev != null) return greedy(prev, run).$1;
+  var best = run;
+  var bestFits = -1;
+  for (var s = 0; s < run.length; s++) {
+    final first = run[s];
+    if (first.balanceAfterRial == null) continue;
+    final (tail, fits) =
+        greedy(first.balanceAfterRial, [...run]..removeAt(s));
+    if (fits > bestFits) {
+      best = [first, ...tail];
+      bestFits = fits;
+    }
+  }
+  return best;
+}
+
 /// سهمِ یک کارت در [realBalanceRial] و اینکه عددش از کجا آمده.
 class CardBalance {
   final String key;
@@ -99,7 +187,7 @@ Map<String, CardBalance> realBalanceByCard(Iterable<TransactionRecord> all,
   }
   final result = <String, CardBalance>{};
   byCard.forEach((key, list) {
-    list.sort((a, b) => a.effectiveTime.compareTo(b.effectiveTime));
+    sortForBalance(list);
     // آخرین تراکنشی که مانده دارد.
     var anchor = -1;
     for (var i = list.length - 1; i >= 0; i--) {
@@ -136,6 +224,73 @@ int realBalanceRial(Iterable<TransactionRecord> all, {DateTime? asOf}) {
   return total;
 }
 
+/// تغییرِ یک ردیف در تعمیرِ دسته‌ای. [set] = ستون‌های تازه؛ [delete]/[restore] = حذف
+/// نرم/برگرداندن. هر وصله sync را pending می‌کند تا به سرور و گوشی‌های دیگر هم برسد.
+class TxPatch {
+  final String id;
+  final Map<String, Object?> set;
+  final bool delete;
+  final bool restore;
+
+  const TxPatch(this.id, {this.set = const {}, this.delete = false, this.restore = false});
+
+  @override
+  String toString() => 'TxPatch($id, set: ${set.keys}, delete: $delete, restore: $restore)';
+}
+
+/// نسخه‌ای از [t] با ستون‌های تازه (همان نام ستون‌های پایگاه‌داده).
+TransactionRecord recordWith(TransactionRecord t, Map<String, Object?> columns) =>
+    TransactionRecord.fromMap({
+      ...t.toMap(),
+      'pinned_wallet_id': t.pinnedWalletId,
+      ...columns,
+    }).copyWith(allocations: t.allocations);
+
+/// هویتِ حساب (بانک + کارت/حساب) برای «این دو یک حساب‌اند».
+class AccountIdentity {
+  final String? bankId;
+  final String? cardLast4;
+  final String? accountRef;
+
+  const AccountIdentity({this.bankId, this.cardLast4, this.accountRef});
+
+  factory AccountIdentity.of(TransactionRecord t) =>
+      AccountIdentity(bankId: t.bankId, cardLast4: t.cardLast4, accountRef: t.accountRef);
+
+  /// همان کلیدِ [balanceCardKey] (بدون صاحب؛ فقط برای شناسه‌دارها).
+  String get key {
+    final bank = bankId ?? '';
+    if (cardLast4?.isNotEmpty ?? false) return '$bank|c:$cardLast4';
+    if (accountRef?.isNotEmpty ?? false) return '$bank|a:$accountRef';
+    return '$bank|-';
+  }
+
+  Map<String, Object?> get columns =>
+      {'bank_id': bankId, 'card_last4': cardLast4, 'account_ref': accountRef};
+
+  Map<String, Object?> toJson() => {'bank': bankId, 'card': cardLast4, 'account': accountRef};
+
+  factory AccountIdentity.fromJson(Map<String, dynamic> j) => AccountIdentity(
+      bankId: j['bank'] as String?,
+      cardLast4: j['card'] as String?,
+      accountRef: j['account'] as String?);
+
+  static Map<String, AccountIdentity> decodeMap(String? raw) {
+    if (raw == null || raw.isEmpty) return {};
+    try {
+      return {
+        for (final e in (jsonDecode(raw) as Map<String, dynamic>).entries)
+          e.key: AccountIdentity.fromJson(e.value as Map<String, dynamic>),
+      };
+    } catch (_) {
+      return {};
+    }
+  }
+
+  static String encodeMap(Map<String, AccountIdentity> m) =>
+      jsonEncode({for (final e in m.entries) e.key: e.value.toJson()});
+}
+
 /// کلیدهای جدول تنظیمات.
 class SettingKeys {
   SettingKeys._();
@@ -170,6 +325,15 @@ class SettingKeys {
 
   /// نقشِ من در خانواده: 'owner' (مدیر) یا 'member' (عضو عادی).
   static const myRole = 'my_role';
+
+  /// JSON: کلیدِ حساب → حسابی که کاربر گفته همان است («یکی کن»).
+  static const accountAliases = 'account_aliases';
+
+  /// JSON: شناسه‌ی تراکنش‌هایی که کاربر برگردانده/نگه داشته؛ تعمیرِ خودکار حذفشان نمی‌کند.
+  static const keptTransactions = 'kept_transactions';
+
+  /// JSON: نتیجه‌ی آخرین تعمیرِ خودکار (زمان و شمارش‌ها).
+  static const repairResult = 'repair_result';
 
   /// cursor دریافتِ کیف‌ها از سرور.
   static const walletCursor = 'wallet_cursor';
@@ -245,6 +409,9 @@ abstract class TransactionStore {
 
   /// تراکنش‌های پیامکیِ حذف‌شده (برای عیب‌یابی: پیامکی که کاربر نامعتبر کرده).
   Future<List<TransactionRecord>> deletedSmsTransactions();
+
+  /// اعمالِ دسته‌ای وصله‌ها (تعمیر/یکی کردن/برگرداندن) + صف sync + انتسابِ دوباره.
+  Future<void> applyPatches(List<TxPatch> patches);
 
   /// انتسابِ دستیِ تراکنش به یک کیفِ مشخص (وقتی شخص چند حساب در یک بانک دارد و
   /// پیامک شماره نداشته). این انتساب پایدار است و با حدسِ خودکار بازنویسی نمی‌شود.
@@ -430,14 +597,20 @@ class TransactionRepository implements TransactionStore {
       if (dup != null) return TxInsertOutcome(TxInsertStatus.duplicate, dup);
     }
 
+    // «یکی کن»: اگر کاربر گفته این کارت/حساب همان حسابِ دیگری است، به همان برود.
+    final parsedId = AccountIdentity(
+        bankId: parsed.bankId, cardLast4: parsed.cardLast4, accountRef: parsed.accountRef);
+    final alias = AccountIdentity.decodeMap(
+        await getSetting(SettingKeys.accountAliases))[parsedId.key];
+    final ids = alias ?? parsedId;
     final a = await _attributionFor(
       sender: sender,
-      cardLast4: parsed.cardLast4,
-      accountRef: parsed.accountRef,
-      bankId: parsed.bankId,
+      cardLast4: ids.cardLast4,
+      accountRef: ids.accountRef,
+      bankId: ids.bankId,
     );
     final id = _uuid.v4();
-    final record = TransactionRecord.fromParsed(
+    var record = TransactionRecord.fromParsed(
       parsed,
       id: id,
       now: now,
@@ -449,6 +622,7 @@ class TransactionRepository implements TransactionStore {
       ownerName: a.ownerName,
       walletLabel: a.walletLabel,
     );
+    if (alias != null) record = recordWith(record, alias.columns);
     await _db.insert('transactions', record.toMap());
     await _enqueueOutbox(record);
     return TxInsertOutcome(TxInsertStatus.created, id);
@@ -1205,6 +1379,33 @@ class TransactionRepository implements TransactionStore {
   @override
   Future<List<TransactionRecord>> deletedSmsTransactions() =>
       _select(['t.deleted_at IS NOT NULL', "t.source = 'sms'"], const []);
+
+  @override
+  Future<void> applyPatches(List<TxPatch> patches) async {
+    if (patches.isEmpty) return;
+    final now = _nowIso();
+    await _db.transaction((txn) async {
+      for (final p in patches) {
+        await txn.update(
+          'transactions',
+          {
+            ...p.set,
+            'updated_at': now,
+            'sync_status': 'pending',
+            if (p.delete) 'deleted_at': now,
+            if (p.restore) 'deleted_at': null,
+          },
+          where: 'id = ?',
+          whereArgs: [p.id],
+        );
+      }
+    });
+    for (final p in patches) {
+      final record = await getById(p.id);
+      if (record != null) await _enqueueOutbox(record);
+    }
+    await reattributeLocal();
+  }
 
   @override
   Future<List<TransactionRecord>> uncategorized({int? limit}) async {

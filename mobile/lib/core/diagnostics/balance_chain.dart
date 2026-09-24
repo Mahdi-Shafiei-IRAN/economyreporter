@@ -79,6 +79,9 @@ class ChainLink {
   /// برای [ChainStatus.kindSuggested]/[ChainStatus.signFlipped]: نوعی که مانده نشان می‌دهد.
   final String? suggestedKind;
 
+  /// تراکنشی **حذف‌شده** که دقیقاً همین ناجوری را توضیح می‌دهد (به‌اشتباه حذف شده).
+  final TransactionRecord? restoreCandidate;
+
   const ChainLink({
     required this.tx,
     required this.status,
@@ -87,6 +90,7 @@ class ChainLink {
     this.actualBalanceRial,
     this.bankDeltaRial,
     this.suggestedKind,
+    this.restoreCandidate,
   });
 
   /// واقعی − انتظار (منفی: برداشتِ ثبت‌نشده/کارمزد؛ مثبت: واریزِ ثبت‌نشده/سود).
@@ -137,6 +141,17 @@ class SplitAccountHint {
   /// در چندتا از آن جابه‌جایی‌ها مانده با فرضِ «یک حساب» دقیقاً جور بود.
   final int consistent;
 
+  /// گروهی که هویتش می‌ماند (شماره‌دار، ترجیحاً شماره‌حساب، وگرنه پرتراکنش‌تر).
+  AccountChain get keep => _rank(a) >= _rank(b) ? a : b;
+
+  /// گروهی که در [keep] ادغام می‌شود.
+  AccountChain get merge => identical(keep, a) ? b : a;
+
+  static int _rank(AccountChain c) =>
+      (c.hasId ? 1000000 : 0) +
+      (c.sample.accountRef != null ? 100000 : 0) +
+      c.links.length;
+
   const SplitAccountHint({
     required this.a,
     required this.b,
@@ -178,17 +193,28 @@ int _chronological(TransactionRecord a, TransactionRecord b) {
   return c != 0 ? c : a.id.compareTo(b.id);
 }
 
-/// زنجیره‌ی مانده‌ی همه‌ی حساب‌ها (تراکنش‌های حذف‌شده کنار می‌روند).
-BalanceChainReport auditBalanceChains(Iterable<TransactionRecord> all) {
+/// زنجیره‌ی مانده‌ی همه‌ی حساب‌ها. حذف‌شده‌ها در زنجیره نیستند؛ ولی اگر یکی از
+/// [deleted] دقیقاً یک ناجوری را توضیح دهد، به‌عنوانِ «برگرداندنی» پیشنهاد می‌شود.
+BalanceChainReport auditBalanceChains(Iterable<TransactionRecord> all,
+    {Iterable<TransactionRecord> deleted = const []}) {
   final byKey = <String, List<TransactionRecord>>{};
+  final deletedByKey = <String, List<TransactionRecord>>{};
   for (final t in all) {
-    if (t.isDeleted) continue;
+    if (t.isDeleted) {
+      deletedByKey.putIfAbsent(balanceCardKey(t), () => []).add(t);
+      continue;
+    }
     byKey.putIfAbsent(balanceCardKey(t), () => []).add(t);
+  }
+  for (final t in deleted) {
+    final list = deletedByKey.putIfAbsent(balanceCardKey(t), () => []);
+    if (!list.any((d) => d.id == t.id)) list.add(t);
   }
   final accounts = <AccountChain>[];
   byKey.forEach((key, list) {
-    list.sort(_chronological);
-    accounts.add(AccountChain(key: key, sample: list.last, links: _walk(list)));
+    sortForBalance(list);
+    accounts.add(AccountChain(
+        key: key, sample: list.last, links: _walk(list, deletedByKey[key] ?? const [])));
   });
   accounts.sort((x, y) {
     final c = y.problems.length.compareTo(x.problems.length);
@@ -200,7 +226,7 @@ BalanceChainReport auditBalanceChains(Iterable<TransactionRecord> all) {
   );
 }
 
-List<ChainLink> _walk(List<TransactionRecord> list) {
+List<ChainLink> _walk(List<TransactionRecord> list, List<TransactionRecord> deleted) {
   final links = <ChainLink>[];
   int? prev; // مانده‌ی واقعیِ آخرین پیامکِ مانده‌دار
   var pending = 0; // جمعِ علامت‌دارِ تراکنش‌های بی‌مانده بعد از prev
@@ -262,6 +288,15 @@ List<ChainLink> _walk(List<TransactionRecord> list) {
     }
 
     final status = _judge(t, signed, delta);
+    TransactionRecord? restore;
+    if (status == ChainStatus.mismatch || status == ChainStatus.noEffect) {
+      for (final d in deleted) {
+        if (d.balanceAfterRial != null && fitsAfter(base, d) && fitsAfter(d.balanceAfterRial!, t)) {
+          restore = d;
+          break;
+        }
+      }
+    }
     links.add(ChainLink(
       tx: t,
       status: status,
@@ -274,6 +309,7 @@ List<ChainLink> _walk(List<TransactionRecord> list) {
           delta > 0 ? 'income' : 'expense',
         _ => null,
       },
+      restoreCandidate: restore,
     ));
     prev = actual;
     pending = 0;

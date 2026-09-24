@@ -6,6 +6,7 @@
 library;
 
 import '../../features/transactions/data/transaction_record.dart';
+import '../../features/transactions/data/transaction_repository.dart';
 
 class BalanceGap {
   final String? bankId;
@@ -67,7 +68,8 @@ class ReconciliationService {
 
     final gaps = <BalanceGap>[];
     for (final list in byKey.values) {
-      list.sort((a, b) => a.effectiveTime.compareTo(b.effectiveTime));
+      // پیامک‌های هم‌دقیقه به ترتیبی که مانده‌ها جور شوند (نه تصادفی).
+      sortForBalance(list);
       int? running; // مانده‌ی موردانتظار تا این لحظه
       TransactionRecord? checkpoint; // آخرین تراکنشی که مانده داشت
       for (final t in list) {

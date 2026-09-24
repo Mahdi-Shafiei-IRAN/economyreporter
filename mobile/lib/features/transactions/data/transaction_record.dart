@@ -89,6 +89,9 @@ class TransactionRecord {
   /// سهم دسته‌ها (خالی یعنی دسته‌بندی‌نشده).
   final List<Allocation> allocations;
 
+  /// کیفی که کاربر دستی به این تراکنش چسبانده («تعیین کارت»)؛ null یعنی حدسِ خودکار.
+  final String? pinnedWalletId;
+
   const TransactionRecord({
     required this.id,
     required this.kind,
@@ -121,6 +124,7 @@ class TransactionRecord {
     this.walletLabel,
     this.origin = 'local',
     this.allocations = const [],
+    this.pinnedWalletId,
   });
 
   /// ساخت از خروجی پارسر پیامک.
@@ -267,6 +271,7 @@ class TransactionRecord {
       walletLabel: clearWalletLabel ? null : (walletLabel ?? this.walletLabel),
       origin: origin,
       allocations: allocations ?? this.allocations,
+      pinnedWalletId: pinnedWalletId,
     );
   }
 
@@ -337,6 +342,7 @@ class TransactionRecord {
       walletLabel: map['wallet_label'] as String?,
       origin: (map['origin'] as String?) ?? 'local',
       allocations: _parseAllocations(map['alloc'] as String?),
+      pinnedWalletId: map['pinned_wallet_id'] as String?,
     );
   }
 

@@ -1,5 +1,8 @@
 import 'package:economy/core/diagnostics/sms_diagnosis.dart';
+import 'package:economy/core/sms/sms_fingerprint.dart';
 import 'package:economy/core/sms/sms_importer.dart';
+import 'package:economy/core/sms/sms_parser.dart';
+import 'package:economy/features/transactions/data/transaction_record.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import '../helpers/fake_transaction_store.dart';
@@ -50,23 +53,51 @@ void main() {
     expect(d.droppedByStrict, isFalse);
   });
 
-  test('شارژ اعتبار دیجی‌پی: الان به‌اشتباه هزینه شمرده می‌شود، قانونِ پیشنهادی ردش می‌کند',
-      () async {
+  test('شارژ اعتبار دیجی‌پی: با قانون ثبت نمی‌شود («شماره حساب/کارت ندارد»)', () async {
     final (store, importer) = await _setup();
     final inbox = [_sms(_digipaySender, _digipayBody, 0)];
     await importer.importAll(inbox);
 
     final report = await _diagnose(store, inbox);
     final d = report.items.single;
-    // وضعیتِ فعلی (باگ): «پرداخت» → هزینه‌ی ۵ میلیون تومانی
-    expect(d.verdict, SmsVerdict.counted);
-    expect(d.stored!.kind, 'expense');
-    expect(d.stored!.amountRial, 50000000);
-    // قانونِ پیشنهادی: شماره حساب/کارت ندارد → رد
-    expect(d.strict.accepts, isFalse);
+    expect(d.verdict, SmsVerdict.noId);
+    expect(d.stored, isNull);
     expect(d.strict.missing, [StrictCheck.noId]);
+    expect(d.droppedByStrict, isFalse);
+    expect(report.droppedByStrictCount, 0);
+  });
+
+  test('تراکنشِ بی‌شماره‌ای که پیش از قانون ثبت شده «خلافِ قانون» است', () async {
+    final (store, _) = await _setup();
+    final sms = _sms(_digipaySender, _digipayBody, 0);
+    // ثبتِ قدیمی (پیش از قانون): «پرداخت» → هزینه‌ی ۵ میلیون تومانی
+    await store.saveParsed(const SmsParser().parse(sender: sms.sender, body: sms.body),
+        sender: sms.sender, receivedAt: sms.receivedAt);
+
+    final report = await _diagnose(store, [sms]);
+    final d = report.items.single;
+    expect(d.verdict, SmsVerdict.counted);
+    expect(d.stored!.amountRial, 50000000);
     expect(d.droppedByStrict, isTrue);
     expect(report.droppedByStrictCount, 1);
+  });
+
+  test('نسخه‌ی سرورِ همین پیامک (بی‌متن) «ثبت نشده» حساب نمی‌شود', () async {
+    final (store, _) = await _setup();
+    final sms = _sms(_mellatSender, _mellatBody, 0);
+    store.addRecord(TransactionRecord(
+      id: 'remote-1',
+      kind: 'expense',
+      amountRial: 1250000,
+      origin: 'remote',
+      sourceMessageHash: smsFingerprint(
+          sender: sms.sender, body: sms.body, receivedAt: sms.receivedAt),
+      createdAt: _t0,
+      updatedAt: _t0,
+    ));
+    final d = (await _diagnose(store, [sms])).items.single;
+    expect(d.verdict, SmsVerdict.counted);
+    expect(d.stored!.id, 'remote-1');
   });
 
   test('رمز پویا رد می‌شود و دلیلش گفته می‌شود', () async {
@@ -95,13 +126,14 @@ void main() {
 
   test('پیامکی که کاربر حذف کرده «حذف شده» است، نه «ثبت نشده»', () async {
     final (store, importer) = await _setup();
-    final inbox = [_sms(_digipaySender, _digipayBody, 0)];
+    final inbox = [_sms(_mellatSender, _mellatBody, 0)];
     await importer.importAll(inbox);
     await store.deleteTransaction((await store.getAll()).single.id);
 
     final d = (await _diagnose(store, inbox)).items.single;
     expect(d.verdict, SmsVerdict.deleted);
     expect(d.droppedByStrict, isFalse); // از قبل در جمع نیست
+    expect(d.strict.accepts, isTrue); // یعنی به‌اشتباه حذف شده؛ «برگرداندن» دارد
   });
 
   test('پیامکِ تراکنشی که هنوز وارد نشده «ثبت نشده» است', () async {

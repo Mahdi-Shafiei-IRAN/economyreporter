@@ -164,29 +164,32 @@ void _repaintAll(WidgetTester tester) {
 
 /// داده‌ی صفحه‌ی عیب‌یابی: همان الگوی مشکلاتِ واقعیِ کاربر (اعداد ساختگی).
 final _diagNow = DateTime.utc(2026, 9, 24, 9); // ۲ مهر ۱۴۰۵
+const _digipayBody = 'پرداخت بدهی و شارژ اعتبار دیجی‌پی\nاعتبار قابل مصرف: ۵۰٬۰۰۰٬۰۰۰ ریال';
 final _diagInbox = [
   RawSms(
       sender: '9830001234',
       body: 'حساب1000000009\nواریز5,000,000\nمانده30,000,000\n05/06/25-10:00',
       receivedAt: DateTime.utc(2026, 9, 16, 6, 30)),
+  // برداشتِ واقعی که کاربر به‌اشتباه «تکراری» حذف کرد.
   RawSms(
       sender: '9830001234',
-      body: 'حساب1000000009\nبرداشت1,250,000\nمانده28,750,000\n05/07/01-15:40',
+      body: 'حساب1000000009\nبرداشت2,500,000\nمانده27,500,000\n05/07/01-11:40',
+      receivedAt: DateTime.utc(2026, 9, 23, 8, 10)),
+  RawSms(
+      sender: '9830001234',
+      body: 'حساب1000000009\nبرداشت1,250,000\nمانده26,250,000\n05/07/01-15:40',
       receivedAt: DateTime.utc(2026, 9, 23, 12, 10)),
   // واریزِ حقوق که به‌خاطرِ «قابل برداشت» برداشت خوانده می‌شود.
   RawSms(
       sender: '9830001234',
-      body: 'واریز حقوق 45,000,000 ریال به حساب1000000009\nمانده:73,750,000 ریال (قابل برداشت)\n05/07/02-08:00',
+      body: 'واریز حقوق 45,000,000 ریال به حساب1000000009\nمانده:71,250,000 ریال (قابل برداشت)\n05/07/02-08:00',
       receivedAt: DateTime.utc(2026, 9, 24, 4, 30)),
   // همان حساب، این بار با شماره‌ی کارت.
   RawSms(
       sender: '9830001234',
-      body: 'بانک ملت\nخرید از کارت 1234\nمبلغ: 750,000 ریال\nمانده: 73,000,000 ریال\n1405/07/02 11:00',
+      body: 'بانک ملت\nخرید از کارت 1234\nمبلغ: 750,000 ریال\nمانده: 70,500,000 ریال\n1405/07/02 11:00',
       receivedAt: DateTime.utc(2026, 9, 24, 7, 30)),
-  RawSms(
-      sender: 'DigiPay',
-      body: 'پرداخت بدهی و شارژ اعتبار دیجی‌پی\nاعتبار قابل مصرف: ۵۰٬۰۰۰٬۰۰۰ ریال',
-      receivedAt: DateTime.utc(2026, 9, 23, 16)),
+  RawSms(sender: 'DigiPay', body: _digipayBody, receivedAt: DateTime.utc(2026, 9, 23, 16)),
   RawSms(
       sender: '9830001234',
       body: 'رمز پویا: 482913\nمبلغ 1,000,000 ریال\nاعتبار 120 ثانیه',
@@ -198,8 +201,14 @@ Future<DashboardController> _diagController() async {
   await store.addAllowedSender('9830001234', bankId: 'mellat', ownerName: 'مهدی');
   await store.addAllowedSender('DigiPay', ownerName: 'مهدی');
   await SmsImporter(store).importAll(_diagInbox);
+  // پیش از قانون، اعتبارِ دیجی‌پی هزینه ثبت شده بود.
+  await store.saveParsed(const SmsParser().parse(sender: 'DigiPay', body: _digipayBody),
+      sender: 'DigiPay', receivedAt: DateTime.utc(2026, 9, 23, 16));
+  final wrong = (await store.getAll()).firstWhere((t) => t.amountRial == 2500000);
+  await store.deleteTransaction(wrong.id);
   final c = DashboardController(store, clock: () => _diagNow)..readInbox = () async => _diagInbox;
   await c.load();
+  await c.runRepair(); // همان کاری که گوشی یک بار بعد از نصب می‌کند
   return c;
 }
 

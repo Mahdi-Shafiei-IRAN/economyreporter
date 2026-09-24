@@ -60,7 +60,7 @@ void main() {
     expect(text, contains('== موجودی'));
     expect(text, contains('== زنجیره‌ی مانده'));
     expect(text, contains('== پیامک‌های فرستنده‌های مجاز'));
-    expect(text, contains('بیرون می‌روند: 1'));
+    expect(text, contains('نمی‌خوانند: 0'));
     expect(text, contains('رد: شماره حساب/کارت ندارد'));
     expect(text, contains('حساب ******0009'));
     expect(text, isNot(contains('1000000009')));

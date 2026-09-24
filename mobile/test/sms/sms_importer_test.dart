@@ -30,7 +30,7 @@ void main() {
       const RawSms(sender: 'Ad', body: 'فروش ویژه تخفیف!'),
       // مبلغ دارد ولی فرستنده بانک نیست — قبلاً اشتباهی هزینه ثبت می‌شد
       const RawSms(sender: 'Digikala', body: 'خرید مبلغ 990,000 ریال با کد تخفیف'),
-      const RawSms(sender: 'ملی', body: 'واریز مبلغ 10,000,000 ریال به حساب شما'),
+      const RawSms(sender: 'ملی', body: 'واریز مبلغ 10,000,000 ریال به حساب 0101234567'),
     ];
 
     final result = await importer.importAll(messages);
@@ -39,6 +39,27 @@ void main() {
     expect(result.skipped, 1); // OTP از فرستنده‌ی مجاز
     expect(result.notAllowed, 2); // تبلیغ + فروشگاهِ مبلغ‌دار
     expect(await store.getAll().then((l) => l.length), 2);
+  });
+
+  test('قانون: از فرستنده‌ی مجاز هم فقط پیامکِ دارای شماره‌ی حساب/کارت ثبت می‌شود',
+      () async {
+    await store.addAllowedSender('DigiPay');
+    final result = await importer.importAll(const [
+      // اعتبارِ کیف پول/وام: پولی در حسابِ بانکی جابه‌جا نشده
+      RawSms(
+          sender: 'DigiPay',
+          body: 'پرداخت بدهی و شارژ اعتبار دیجی‌پی\nاعتبار قابل مصرف: ۱۰۰٬۰۰۰٬۰۰۰ ریال'),
+      RawSms(sender: 'DigiPay', body: 'بازگشت پول\nمبلغ 31,000 ریال به دیجی‌کارت شما واریز شد.'),
+      // اطلاعیه‌ی کسرِ آینده، بی‌شماره
+      RawSms(
+          sender: 'BankMellat',
+          body: 'بانک ملت\nبسته پیامکی تمدید و مبلغ 300,000 ریال کسر خواهد شد.'),
+      // تراکنشِ واقعی
+      RawSms(sender: 'BankMellat', body: 'حساب1000000001\nبرداشت12,345,000\nمانده6,000,000'),
+    ]);
+    expect(result.created, 1);
+    expect(result.skipped, 3);
+    expect((await store.getAll()).single.accountRef, '1000000001');
   });
 
   test('تا فرستنده‌ای مجاز نشده هیچ پیامکی ثبت نمی‌شود', () async {
