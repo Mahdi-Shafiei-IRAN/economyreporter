@@ -17,6 +17,7 @@ import '../../core/diagnostics/sms_diagnosis.dart';
 import '../../core/reconcile/reconciliation.dart';
 import '../../core/transfer/transfer_finder.dart';
 import '../budgets/data/budget.dart';
+import '../../core/sms/bank_registry.dart';
 import '../../core/sms/sms_importer.dart';
 import '../../core/sms/sms_parser.dart';
 import '../../core/sync/sync_service.dart';
@@ -144,6 +145,25 @@ class DashboardController extends ChangeNotifier {
     final o = openingBalance;
     if (o == null) return null;
     return o + summary.balanceRial;
+  }
+
+  ({int? bank, int? diff})? _balanceCache;
+
+  /// موجودیِ آخرِ دوره **طبق مانده‌ی بانک**: جمعِ آخرین مانده‌ی هر حساب/کارت (برای هر
+  /// تعداد حساب). درست است حتی اگر پیامکی جا افتاده یا اشتباه خوانده شده باشد.
+  /// null یعنی هیچ پیامکِ مانده‌داری نداریم.
+  int? get bankBalance => (_balanceCache ??= _computeBalances()).bank;
+
+  /// مغایرت = بانک − (اولِ دوره + درآمد − هزینه)، بدون فیلترِ نوع/جستجو. غیرِ صفر یعنی
+  /// تراکنش‌های دوره با بانک نمی‌خوانند (جزئیات در عیب‌یابی). null برای «همه»/بی‌مانده.
+  int? get balanceDiscrepancy => (_balanceCache ??= _computeBalances()).diff;
+
+  ({int? bank, int? diff}) _computeBalances() {
+    if (!hasRealBalance) return (bank: null, diff: null);
+    final end = period.to;
+    final bank = realBalanceRial(_scopedAll,
+        asOf: end?.subtract(const Duration(microseconds: 1)));
+    return (bank: bank, diff: period.isAll ? null : balanceBreakdown().diffRial);
   }
 
   // ---------------------------------------------------------------------------
@@ -394,7 +414,10 @@ class DashboardController extends ChangeNotifier {
   List<TransactionRecord> get selectedRecords =>
       [for (final id in selected) if (_byId[id] != null) _byId[id]!];
 
-  void _invalidate() => _visibleCache = null;
+  void _invalidate() {
+    _visibleCache = null;
+    _balanceCache = null;
+  }
 
   Future<void> load() async {
     if (!_loadedOnce) {
@@ -655,6 +678,90 @@ class DashboardController extends ChangeNotifier {
 
   Future<void> addWallet(Wallet wallet) async {
     await repository.addWallet(wallet);
+    await _changed();
+  }
+
+  /// حساب/کارت‌هایی که در پیامک‌ها هست ولی هنوز کارتی برایشان ثبت نشده (برای پیشنهاد در
+  /// فرمِ افزودنِ کارت؛ پرتراکنش‌ترها اول).
+  List<DetectedAccount> detectedAccounts() {
+    final groups = <String, List<TransactionRecord>>{};
+    for (final t in _byId.values) {
+      if (t.isDeleted || (t.cardLast4 == null && t.accountRef == null)) continue;
+      final key = balanceCardKey(t);
+      groups.putIfAbsent(key, () => []).add(t);
+    }
+    final out = <DetectedAccount>[];
+    groups.forEach((_, list) {
+      final s = list.first;
+      final known = wallets.any((w) =>
+          w.matches(cardLast4: s.cardLast4, accountRef: s.accountRef, bankId: s.bankId));
+      if (known) return;
+      sortForBalance(list);
+      int? balance;
+      for (final t in list.reversed) {
+        if (t.balanceAfterRial != null) {
+          balance = t.balanceAfterRial;
+          break;
+        }
+      }
+      out.add(DetectedAccount(
+        bankId: s.bankId,
+        cardLast4: s.cardLast4,
+        accountRef: s.accountRef,
+        count: list.length,
+        lastBalanceRial: balance,
+      ));
+    });
+    out.sort((a, b) => b.count.compareTo(a.count));
+    return out;
+  }
+
+  /// افزودنِ کارت + (اختیاری) سرشماره‌ی پیامکش + (اختیاری) موجودیِ دستی.
+  ///
+  /// [smsSender]: سرشماره‌ی پیامکِ این بانک؛ با همین بانک و صاحب «مجاز» می‌شود و پیامک‌های
+  /// قبلیِ صندوق هم خوانده می‌شوند. [currentBalanceRial]: برای حسابی که پیامکِ مانده ندارد
+  /// (مثلاً حسابِ قدیمی بی‌سرویسِ پیامک)؛ همین عدد در «موجودی» جمع می‌شود.
+  Future<void> addWalletWithExtras(
+    Wallet wallet, {
+    String? smsSender,
+    int? currentBalanceRial,
+  }) async {
+    await repository.addWallet(wallet);
+    if (currentBalanceRial != null) {
+      await repository.addManual(
+        kind: 'transfer',
+        amountRial: 0,
+        at: _clock(),
+        description: 'موجودیِ دستیِ «${wallet.label}»',
+        bankId: wallet.bankId,
+        cardLast4: wallet.cardLast4,
+        accountRef: wallet.accountRef,
+        balanceAfterRial: currentBalanceRial,
+      );
+    }
+    final sender = smsSender?.trim() ?? '';
+    if (sender.isNotEmpty) {
+      await addAllowedSender(sender,
+          bankId: wallet.bankId,
+          ownerName: wallet.ownerName,
+          ownerUserId: wallet.ownerUserId);
+      return; // addAllowedSender خودش load می‌کند
+    }
+    await _changed();
+  }
+
+  /// ثبتِ «موجودیِ دستی» برای یک کارتِ موجود (حسابی که پیامکِ مانده ندارد).
+  Future<void> setManualBalance(Wallet wallet, int balanceRial) async {
+    await repository.addManual(
+      kind: 'transfer',
+      amountRial: 0,
+      at: _clock(),
+      description: 'موجودیِ دستیِ «${wallet.label}»',
+      bankId: wallet.bankId,
+      cardLast4: wallet.cardLast4,
+      accountRef: wallet.accountRef,
+      balanceAfterRial: balanceRial,
+    );
     await _changed();
   }
 
@@ -925,5 +1032,30 @@ class DashboardController extends ChangeNotifier {
     await repository.setSetting(
         SettingKeys.categorizeFrom, from.toUtc().toIso8601String());
     await load();
+  }
+}
+
+/// حساب/کارتی که در پیامک‌ها دیده شده (پیشنهاد برای ثبتِ کارت).
+class DetectedAccount {
+  final String? bankId;
+  final String? cardLast4;
+  final String? accountRef;
+  final int count;
+  final int? lastBalanceRial;
+
+  const DetectedAccount({
+    this.bankId,
+    this.cardLast4,
+    this.accountRef,
+    required this.count,
+    this.lastBalanceRial,
+  });
+
+  /// «ملت ۵۵۹۶» (برچسبِ پیش‌فرض).
+  String get defaultLabel {
+    final bank = bankId == null ? 'حساب' : bankNameById(bankId!).replaceFirst('بانک ', '');
+    final ref = cardLast4 ?? accountRef ?? '';
+    final tail = ref.length > 4 ? ref.substring(ref.length - 4) : ref;
+    return '$bank $tail'.trim();
   }
 }

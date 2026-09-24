@@ -374,7 +374,8 @@ abstract class TransactionStore {
     DateTime? receivedAt,
   });
 
-  /// ثبت دستی (مثلاً تراکنشِ جاافتاده‌ای که پیامکش نرسیده).
+  /// ثبت دستی (مثلاً تراکنشِ جاافتاده‌ای که پیامکش نرسیده). [balanceAfterRial] برای
+  /// «موجودیِ دستی» (حسابی که پیامکِ مانده ندارد): نوعِ انتقال با مبلغِ صفر + مانده.
   Future<String> addManual({
     required String kind,
     required int amountRial,
@@ -383,6 +384,7 @@ abstract class TransactionStore {
     String? bankId,
     String? cardLast4,
     String? accountRef,
+    int? balanceAfterRial,
   });
   Future<List<TransactionRecord>> getAll({
     int? limit,
@@ -653,6 +655,7 @@ class TransactionRepository implements TransactionStore {
     String? bankId,
     String? cardLast4,
     String? accountRef,
+    int? balanceAfterRial,
   }) async {
     final now = _clock().toUtc();
     final a = await _attributionFor(
@@ -661,6 +664,7 @@ class TransactionRepository implements TransactionStore {
       id: _uuid.v4(),
       kind: kind,
       amountRial: amountRial,
+      balanceAfterRial: balanceAfterRial,
       transactionDate: at.toUtc(),
       clientCreatedAt: now,
       createdAt: now,

@@ -134,6 +134,34 @@ class SyncApiTests(ApiTestCase):
         )
         self.assertEqual(Transaction.objects.count(), 2)
 
+    def test_one_crashing_item_does_not_fail_the_batch(self):
+        """خطای پیش‌بینی‌نشده در یک آیتم → فقط همان «error»؛ بقیه ثبت (نه ۵۰۰ برای همه)."""
+        from unittest import mock
+
+        from .views import SyncView as TransactionSyncView
+
+        bad = str(uuid.uuid4())
+        good = str(uuid.uuid4())
+        real = TransactionSyncView._process_item
+
+        def crash_on_bad(view, item, ctx):
+            if item.get("id") == bad:
+                raise RuntimeError("boom")
+            return real(view, item, ctx)
+
+        with mock.patch.object(TransactionSyncView, "_process_item", crash_on_bad):
+            resp = self.client.post(
+                self.url,
+                {"device_id": "d", "transactions": [
+                    {"id": bad, "kind": "expense", "amount_rial": 1},
+                    {"id": good, "kind": "income", "amount_rial": 2},
+                ]},
+                format="json",
+            )
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual([r["status"] for r in resp.data["results"]], ["error", "created"])
+        self.assertTrue(Transaction.objects.filter(id=good).exists())
+
     def test_sync_dedup_by_hash(self):
         a, b = str(uuid.uuid4()), str(uuid.uuid4())
         items = [

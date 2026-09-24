@@ -141,4 +141,22 @@ void main() {
       expect(mine!.promptCategorize, isTrue);
     });
   });
+
+  test('رمزِ انتقالِ سپه (رمز: … اعتبار …) تراکنش نیست؛ حتی از فرستنده‌ی مجاز', () async {
+    await store.addAllowedSender('+989100000000', bankId: 'sepah');
+    final result = await importer.importAll(const [
+      RawSms(
+        sender: '+989100000000',
+        body: 'بانک سپه\n 502229*5524  انتقال\nمبلغ 1,000,000 ريال\nرمز: 928517\n'
+            'اعتبار 22:10:05\nZwFQsa9kcO+',
+      ),
+      RawSms(
+        sender: '+989100000000',
+        body: 'بانک سپه\n 610433*9635  انتقال\nمبلغ 2,800,000 ريال\nرمز: 891630\n'
+            'اعتبار 11:19:34\nZwFQsa9kcO+',
+      ),
+    ]);
+    expect(result.created, 0);
+    expect(result.skipped, 2);
+  });
 }

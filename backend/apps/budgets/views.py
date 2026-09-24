@@ -7,6 +7,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.common.family import resolve_family
+from apps.common.sync import upsert_each
 
 from .models import Budget
 from .serializers import BudgetSerializer
@@ -63,7 +64,7 @@ class BudgetSyncView(APIView):
         items = request.data.get("budgets")
         if not isinstance(items, list):
             raise ValidationError({"budgets": "باید یک لیست باشد"})
-        results = [self._upsert(item, family, request.user) for item in items]
+        results = upsert_each(items, lambda item: self._upsert(item, family, request.user))
         return Response({"success": True, "results": results})
 
     def _upsert(self, item, family, user):
@@ -93,4 +94,4 @@ class BudgetSyncView(APIView):
                 setattr(existing, k, v)
             existing.save()
             budget = existing
-        return BudgetSerializer(budget).data
+        return BudgetSerializer(budget).data, existing is None

@@ -376,6 +376,23 @@ void main() {
     await _shot(tester, '17_diag_sms_light');
   });
 
+  testWidgets('wallet form with suggestions', (tester) async {
+    _phone(tester, height: 1700);
+    final c = await _diagController();
+    await tester.pumpWidget(_app(WalletsScreen(controller: c)));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(kWalletAddFabKey));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('wallet-suggest-0')));
+    await _shot(tester, '18_wallet_form_light');
+  });
+
+  testWidgets('home with bank balance + discrepancy', (tester) async {
+    _phone(tester, height: 1200);
+    await tester.pumpWidget(_app(DashboardScreen(controller: await _diagController())));
+    await _shot(tester, '19_home_bank_balance_light');
+  });
+
   testWidgets('login', (tester) async {
     _phone(tester, height: 900);
     final tokens = InMemoryTokenStore();

@@ -9,6 +9,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:sqflite/sqflite.dart';
 
 import '../helpers/db_test_helper.dart';
+import '../helpers/network_errors.dart';
 
 /// سرور جعلیِ باحالت: idهای ساخته‌شده را به‌خاطر می‌سپارد و برای تکراری‌ها
 /// already_exists برمی‌گرداند — دقیقاً مثل idempotency واقعی سرور.
@@ -28,7 +29,7 @@ class StatefulFakeServer implements RemoteTransactionApi {
     required List<Map<String, dynamic>> transactions,
   }) async {
     callCount++;
-    if (!online) throw Exception('network down');
+    if (!online) throw networkDown();
     final results = <Map<String, dynamic>>[];
     for (final t in transactions) {
       final id = t['id'].toString();
@@ -46,29 +47,33 @@ class StatefulFakeServer implements RemoteTransactionApi {
 
   @override
   Future<PullPage> pull({String? since, int limit = 500}) async {
-    if (!online) throw Exception('network down');
+    if (!online) throw networkDown();
     return PullPage.empty;
   }
 
   @override
-  Future<void> syncWallets({required List<Map<String, dynamic>> wallets}) async {
-    if (!online) throw Exception('network down');
+  Future<List<Map<String, dynamic>>> syncWallets(
+      {required List<Map<String, dynamic>> wallets}) async {
+    if (!online) throw networkDown();
+    return const [];
   }
 
   @override
   Future<PullPage> pullWallets({String? since}) async {
-    if (!online) throw Exception('network down');
+    if (!online) throw networkDown();
     return PullPage.empty;
   }
 
   @override
-  Future<void> syncBudgets({required List<Map<String, dynamic>> budgets}) async {
-    if (!online) throw Exception('network down');
+  Future<List<Map<String, dynamic>>> syncBudgets(
+      {required List<Map<String, dynamic>> budgets}) async {
+    if (!online) throw networkDown();
+    return const [];
   }
 
   @override
   Future<PullPage> pullBudgets({String? since}) async {
-    if (!online) throw Exception('network down');
+    if (!online) throw networkDown();
     return PullPage.empty;
   }
 }

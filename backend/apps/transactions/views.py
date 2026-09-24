@@ -1,3 +1,4 @@
+import logging
 import uuid
 from collections import defaultdict
 from datetime import datetime, time
@@ -24,6 +25,8 @@ from apps.common.family import (
 
 from .models import Transaction
 from .serializers import TransactionSerializer
+
+logger = logging.getLogger(__name__)
 
 # فقط صاحب تراکنش (عضوی که کارت مال اوست) این‌ها را تغییر می‌دهد.
 CONTENT_FIELDS = frozenset(
@@ -208,8 +211,19 @@ class SyncView(APIView):
                 Category.objects.filter(family=family).values_list("id", flat=True)
             ),
         }
-        results = [self._process_item(item, ctx) for item in items]
+        results = [self._process_item_safe(item, ctx) for item in items]
         return Response({"success": True, "results": results})
+
+    def _process_item_safe(self, item, ctx):
+        """یک تراکنشِ خراب نباید کلِ دسته را با ۵۰۰ رد کند (گوشی آن را هر بار دوباره
+        می‌فرستاد و همگام‌سازی برای همیشه گیر می‌کرد)."""
+        try:
+            with db_transaction.atomic():
+                return self._process_item(item, ctx)
+        except Exception:
+            logger.exception("transaction sync item failed")
+            tid = item.get("id") if isinstance(item, dict) else None
+            return {"id": str(tid) if tid else None, "status": "error", "detail": "خطای سرور در این آیتم"}
 
     def _process_item(self, item, ctx):
         if not isinstance(item, dict):

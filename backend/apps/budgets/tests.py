@@ -61,3 +61,16 @@ class BudgetSyncTests(ApiTestCase):
         self._push([self._budget(bid, deleted=True)])
         pull = self.client.get(reverse("budget-sync"))
         self.assertTrue(pull.data["results"][0]["is_deleted"])
+
+    def test_one_bad_budget_does_not_reject_the_batch(self):
+        self.auth(self.owner)
+        good = "12121212-1212-1212-1212-121212121212"
+        bad = "34343434-3434-3434-3434-343434343434"
+        item = self._budget(bad)
+        item["period"] = "yearly-ish"  # مقدارِ نامعتبر
+        r = self._push([item, self._budget(good)])
+        self.assertEqual(r.status_code, 200, r.data)
+        statuses = {x["id"]: x["status"] for x in r.data["results"]}
+        self.assertEqual(statuses[bad], "error")
+        self.assertEqual(statuses[good], "created")
+

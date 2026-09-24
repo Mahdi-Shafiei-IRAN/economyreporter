@@ -81,6 +81,14 @@ void main() {
     expect(b.diffRial, 4000000);
   });
 
+  test('کارتِ خلاصه: موجودی طبقِ بانک و مغایرت از همان جدولِ عیب‌یابی', () {
+    final b = controller.balanceBreakdown();
+    expect(controller.bankBalance, b.bankClosingRial);
+    expect(controller.balanceDiscrepancy, 4000000);
+    controller.setPerson('کسی که نیست');
+    expect(controller.balanceDiscrepancy, 0);
+  });
+
   testWidgets('زبانه‌ی موجودی: اختلافِ کارتِ خلاصه با بانک', (tester) async {
     await tester.pumpWidget(app(DiagnosticsScreen(controller: controller)));
     await tester.pumpAndSettle();

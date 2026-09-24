@@ -28,14 +28,15 @@ abstract class RemoteTransactionApi {
   /// تغییرات تراکنش‌های خانواده بعد از [since] (همه‌ی اعضا).
   Future<PullPage> pull({String? since, int limit = 500});
 
-  /// آپلود دسته‌ای کیف‌ها (کارت/حساب)؛ upsert با شناسه‌ی گوشی.
-  Future<void> syncWallets({required List<Map<String, dynamic>> wallets});
+  /// آپلود دسته‌ای کیف‌ها (کارت/حساب)؛ upsert با شناسه‌ی گوشی. نتیجه‌ی هر آیتم به همان
+  /// ترتیب: `{id, status}` (created/updated/conflict/error)؛ سرورِ قدیمی خودِ کیف را.
+  Future<List<Map<String, dynamic>>> syncWallets({required List<Map<String, dynamic>> wallets});
 
   /// دریافت تغییرات کیف‌های خانواده بعد از [since].
   Future<PullPage> pullWallets({String? since});
 
-  /// آپلود دسته‌ای بودجه‌ها؛ upsert با شناسه‌ی گوشی.
-  Future<void> syncBudgets({required List<Map<String, dynamic>> budgets});
+  /// آپلود دسته‌ای بودجه‌ها؛ upsert با شناسه‌ی گوشی (نتیجه مثلِ [syncWallets]).
+  Future<List<Map<String, dynamic>>> syncBudgets({required List<Map<String, dynamic>> budgets});
 
   /// دریافت تغییرات بودجه‌های خانواده بعد از [since].
   Future<PullPage> pullBudgets({String? since});
@@ -46,6 +47,16 @@ class DioRemoteTransactionApi implements RemoteTransactionApi {
 
   DioRemoteTransactionApi(this.dio);
 
+  /// همگام‌سازی ممکن است دسته‌ی بزرگ باشد و سرور کند؛ ۱۰ ثانیه‌ی پیش‌فرض کم است.
+  static final _slow = Options(
+    sendTimeout: const Duration(seconds: 60),
+    receiveTimeout: const Duration(seconds: 60),
+  );
+
+  static List<Map<String, dynamic>> _results(Object? data) => data is Map && data['results'] is List
+      ? [for (final e in data['results'] as List) if (e is Map) Map<String, dynamic>.from(e)]
+      : const [];
+
   @override
   Future<List<Map<String, dynamic>>> syncBatch({
     required String deviceId,
@@ -54,6 +65,7 @@ class DioRemoteTransactionApi implements RemoteTransactionApi {
     final resp = await dio.post(
       '/sync/transactions/',
       data: {'device_id': deviceId, 'transactions': transactions},
+      options: _slow,
     );
     final results = (resp.data['results'] as List)
         .map((e) => Map<String, dynamic>.from(e as Map))
@@ -66,13 +78,16 @@ class DioRemoteTransactionApi implements RemoteTransactionApi {
     final resp = await dio.get(
       '/sync/transactions/',
       queryParameters: {if (since != null) 'since': since, 'limit': limit},
+      options: _slow,
     );
     return _pageFrom(resp.data);
   }
 
   @override
-  Future<void> syncWallets({required List<Map<String, dynamic>> wallets}) async {
-    await dio.post('/wallets/sync/', data: {'wallets': wallets});
+  Future<List<Map<String, dynamic>>> syncWallets(
+      {required List<Map<String, dynamic>> wallets}) async {
+    final resp = await dio.post('/wallets/sync/', data: {'wallets': wallets}, options: _slow);
+    return _results(resp.data);
   }
 
   @override
@@ -85,8 +100,10 @@ class DioRemoteTransactionApi implements RemoteTransactionApi {
   }
 
   @override
-  Future<void> syncBudgets({required List<Map<String, dynamic>> budgets}) async {
-    await dio.post('/budgets/sync/', data: {'budgets': budgets});
+  Future<List<Map<String, dynamic>>> syncBudgets(
+      {required List<Map<String, dynamic>> budgets}) async {
+    final resp = await dio.post('/budgets/sync/', data: {'budgets': budgets}, options: _slow);
+    return _results(resp.data);
   }
 
   @override

@@ -9,6 +9,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:sqflite/sqflite.dart';
 
 import '../helpers/db_test_helper.dart';
+import '../helpers/network_errors.dart';
 
 /// API جعلی: نتیجه‌ی هر آیتم قابل‌تنظیم؛ می‌تواند خطای شبکه شبیه‌سازی کند.
 class FakeRemoteTransactionApi implements RemoteTransactionApi {
@@ -19,6 +20,12 @@ class FakeRemoteTransactionApi implements RemoteTransactionApi {
   final List<PullPage> pages = [];
   final List<String?> pullSinces = [];
 
+  /// تراکنشی که سرور با آن کلِ درخواست را با ۵۰۰ رد می‌کند.
+  String? poisonId;
+
+  /// خطایی که دریافت (pull) می‌دهد.
+  Object? pullError;
+
   FakeRemoteTransactionApi({this.throwNetwork = false, this.status = 'created'});
 
   @override
@@ -27,7 +34,10 @@ class FakeRemoteTransactionApi implements RemoteTransactionApi {
     required List<Map<String, dynamic>> transactions,
   }) async {
     sentBatches.add(transactions);
-    if (throwNetwork) throw Exception('network down');
+    if (throwNetwork) throw networkDown();
+    if (transactions.any((t) => t['id'] == poisonId)) {
+      throw httpError(500, '<h1>Server Error (500)</h1>');
+    }
     return [
       for (final t in transactions)
         resultOverrides[t['id']] ?? {'id': t['id'], 'status': status},
@@ -37,22 +47,30 @@ class FakeRemoteTransactionApi implements RemoteTransactionApi {
   @override
   Future<PullPage> pull({String? since, int limit = 500}) async {
     pullSinces.add(since);
-    if (throwNetwork) throw Exception('network down');
+    if (throwNetwork) throw networkDown();
+    if (pullError != null) throw pullError!;
     return pages.isEmpty ? PullPage.empty : pages.removeAt(0);
   }
 
   final List<List<Map<String, dynamic>>> sentWallets = [];
   final List<PullPage> walletPages = [];
 
+  /// پاسخِ دلخواه به آپلودِ کیف‌ها (برای شبیه‌سازیِ سرورِ قدیمی/خطای آیتم).
+  Future<List<Map<String, dynamic>>> Function(List<Map<String, dynamic>>)? walletResponder;
+
   @override
-  Future<void> syncWallets({required List<Map<String, dynamic>> wallets}) async {
-    if (throwNetwork) throw Exception('network down');
+  Future<List<Map<String, dynamic>>> syncWallets(
+      {required List<Map<String, dynamic>> wallets}) async {
+    if (throwNetwork) throw networkDown();
     sentWallets.add(wallets);
+    final r = walletResponder;
+    if (r != null) return r(wallets);
+    return [for (final w in wallets) {'id': w['id'], 'status': 'created'}];
   }
 
   @override
   Future<PullPage> pullWallets({String? since}) async {
-    if (throwNetwork) throw Exception('network down');
+    if (throwNetwork) throw networkDown();
     return walletPages.isEmpty ? PullPage.empty : walletPages.removeAt(0);
   }
 
@@ -60,14 +78,16 @@ class FakeRemoteTransactionApi implements RemoteTransactionApi {
   final List<PullPage> budgetPages = [];
 
   @override
-  Future<void> syncBudgets({required List<Map<String, dynamic>> budgets}) async {
-    if (throwNetwork) throw Exception('network down');
+  Future<List<Map<String, dynamic>>> syncBudgets(
+      {required List<Map<String, dynamic>> budgets}) async {
+    if (throwNetwork) throw networkDown();
     sentBudgets.add(budgets);
+    return [for (final b in budgets) {'id': b['id'], 'status': 'created'}];
   }
 
   @override
   Future<PullPage> pullBudgets({String? since}) async {
-    if (throwNetwork) throw Exception('network down');
+    if (throwNetwork) throw networkDown();
     return budgetPages.isEmpty ? PullPage.empty : budgetPages.removeAt(0);
   }
 }
@@ -389,7 +409,7 @@ void main() {
     await seedTwo();
     final s = await serviceWith(FakeRemoteTransactionApi(throwNetwork: true)).sync();
     expect(s.offline, isTrue);
-    expect(s.message, contains('سرور در دسترس نبود'));
+    expect(s.message, contains('به سرور وصل نشد'));
 
     final info = await SyncStatusInfo.load(repo);
     expect(info.last!.offline, isTrue);
@@ -403,5 +423,87 @@ void main() {
     final service = serviceWith(api);
     await Future.wait([service.sync(), service.sync()]);
     expect(api.sentBatches, hasLength(1));
+  });
+
+  group('خطاها دقیق و ایزوله', () {
+    test('یک تراکنشِ خراب (۵۰۰) بقیه را گیر نمی‌اندازد', () async {
+      await seedTwo();
+      final bad = (await repo.getAll()).first.id;
+      final api = FakeRemoteTransactionApi()..poisonId = bad;
+      final s = await serviceWith(api).sync(force: true);
+
+      expect(s.synced, 1);
+      expect(s.failed, 1);
+      expect(s.offline, isFalse);
+      expect(s.error, 'http');
+      expect(s.failure!.status, 500);
+      expect(s.message, contains('خطای ۵۰۰'));
+      expect(s.message, contains('ارسال تراکنش‌ها'));
+      expect(await outboxCount(), 1); // فقط خودش در صف ماند
+    });
+
+    test('خطای سرور در دریافت «شبکه» نیست و مرحله‌ی کارت‌ها باز هم انجام می‌شود', () async {
+      await repo.addWallet(const Wallet(id: '', ownerName: 'من', label: 'ملت', bankId: 'mellat'));
+      final api = FakeRemoteTransactionApi()..pullError = httpError(502, 'Bad Gateway');
+      final s = await serviceWith(api).sync(force: true);
+
+      expect(s.offline, isFalse);
+      expect(s.failure!.stage, 'pull');
+      expect(s.failure!.status, 502);
+      expect(s.message, contains('دریافت تراکنش‌ها'));
+      expect(api.sentWallets, hasLength(1));
+      expect(await repo.pendingWallets(), isEmpty);
+    });
+
+    test('باگِ برنامه «خطای برنامه» گزارش می‌شود، نه «وصل نشد»', () async {
+      final api = FakeRemoteTransactionApi()..pullError = const FormatException('bad json');
+      final s = await serviceWith(api).sync(force: true);
+      expect(s.error, 'app');
+      expect(s.message, contains('خطای برنامه'));
+      expect(s.message, isNot(contains('وصل نشد')));
+    });
+
+    test('سرورِ قدیمی: کارتِ مالِ خانواده‌ی دیگر (۴۰۴) شناسه‌ی تازه می‌گیرد و بقیه می‌روند',
+        () async {
+      await repo.addWallet(const Wallet(id: '', ownerName: 'من', label: 'قدیمی', bankId: 'mellat'));
+      await repo.addWallet(const Wallet(id: '', ownerName: 'من', label: 'تازه', bankId: 'tejarat'));
+      final old = (await repo.wallets()).firstWhere((w) => w.label == 'قدیمی').id;
+      final api = FakeRemoteTransactionApi()
+        ..walletResponder = (items) async {
+          if (items.any((w) => w['id'] == old)) throw httpError(404, {'detail': 'Not found.'});
+          return [for (final w in items) {...w}]; // سرورِ قدیمی: خودِ کیف، بی‌status
+        };
+      final s = await serviceWith(api).sync(force: true);
+
+      expect(s.error, isNull);
+      final wallets = await repo.wallets();
+      expect(wallets.map((w) => w.id), isNot(contains(old)));
+      // کیفِ «قدیمی» با شناسه‌ی تازه pending ماند تا دفعه‌ی بعد برود؛ «تازه» رفت.
+      final pending = await repo.pendingWallets();
+      expect(pending.single['label'], 'قدیمی');
+
+      await serviceWith(api).sync(force: true);
+      expect(await repo.pendingWallets(), isEmpty);
+    });
+
+    test('کارتِ نامعتبر (خطای آیتم) «ناموفق» می‌شود و همگام‌سازی را قفل نمی‌کند', () async {
+      await repo.addWallet(const Wallet(id: '', ownerName: 'من', label: 'بد', bankId: 'mellat'));
+      await repo.addWallet(const Wallet(id: '', ownerName: 'من', label: 'خوب', bankId: 'tejarat'));
+      final api = FakeRemoteTransactionApi()
+        ..walletResponder = (items) async => [
+              for (final w in items)
+                w['label'] == 'بد'
+                    ? {'id': w['id'], 'status': 'error', 'detail': {'label': ['too long']}}
+                    : {'id': w['id'], 'status': 'created'},
+            ];
+      final s = await serviceWith(api).sync(force: true);
+      expect(s.failure!.stage, 'wallets');
+      expect(s.message, contains('کارت‌ها'));
+      expect(await repo.pendingWallets(), isEmpty);
+
+      // دفعه‌ی بعد دیگر همان کیفِ بد فرستاده نمی‌شود و خطایی نیست.
+      final again = await serviceWith(api).sync(force: true);
+      expect(again.error, isNull);
+    });
   });
 }

@@ -165,6 +165,7 @@ class FakeTransactionStore implements TransactionStore {
     String? bankId,
     String? cardLast4,
     String? accountRef,
+    int? balanceAfterRial,
   }) async {
     final now = clock().toUtc();
     final a = _attribution(cardLast4: cardLast4, accountRef: accountRef, bankId: bankId);
@@ -173,6 +174,7 @@ class FakeTransactionStore implements TransactionStore {
       id: id,
       kind: kind,
       amountRial: amountRial,
+      balanceAfterRial: balanceAfterRial,
       transactionDate: at.toUtc(),
       clientCreatedAt: now,
       createdAt: now,

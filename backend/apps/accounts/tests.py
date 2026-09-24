@@ -197,3 +197,36 @@ class WalletSyncTests(ApiTestCase):
         self._push([self._wallet(wid, owner_user_id=str(self.owner.id), deleted=True)])
         pull = self.client.get(reverse("wallet-sync"))
         self.assertTrue(pull.data["results"][0]["is_deleted"])
+
+    def test_one_bad_wallet_does_not_reject_the_batch(self):
+        """یک کیفِ نامعتبر فقط خودش «error» می‌گیرد؛ بقیه ذخیره می‌شوند (نه ۴۰۰ برای همه)."""
+        self.auth(self.owner)
+        good = "88888888-8888-8888-8888-888888888888"
+        bad = "99999999-9999-9999-9999-999999999999"
+        resp = self._push([
+            self._wallet(bad, label="x" * 150),  # بیش از ۱۰۰ نویسه
+            self._wallet(good, label="خوب"),
+        ])
+        self.assertEqual(resp.status_code, 200, resp.data)
+        statuses = {r["id"]: r["status"] for r in resp.data["results"]}
+        self.assertEqual(statuses[bad], "error")
+        self.assertEqual(statuses[good], "created")
+        from .models import Wallet
+        self.assertTrue(Wallet.objects.filter(id=good).exists())
+        self.assertFalse(Wallet.objects.filter(id=bad).exists())
+
+    def test_wallet_of_other_family_is_conflict_not_404(self):
+        """شناسه‌ای که مالِ خانواده‌ی دیگری است (مثلاً بعد از عوض کردنِ حساب) → conflict."""
+        other = self.create_user("09120000009", full_name="دیگری")
+        self.create_family_with(other)
+        wid = "abababab-abab-abab-abab-abababababab"
+        self.auth(other)
+        self._push([self._wallet(wid, label="مالِ دیگری")])
+
+        self.auth(self.owner)
+        resp = self._push([self._wallet(wid, label="همان شناسه")])
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(resp.data["results"][0]["status"], "conflict")
+        from .models import Wallet
+        self.assertEqual(Wallet.objects.get(id=wid).label, "مالِ دیگری")
+

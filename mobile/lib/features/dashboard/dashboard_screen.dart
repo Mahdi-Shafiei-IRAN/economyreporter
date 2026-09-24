@@ -376,6 +376,8 @@ class _TransactionsTabState extends State<_TransactionsTab> {
                             filtered: c.hasActiveFilters,
                             scope: c.person == null ? null : _personLabel(c.person!),
                             openingBalance: c.openingBalance,
+                            bankBalance: c.bankBalance,
+                            discrepancy: c.balanceDiscrepancy,
                             onExplain: () => _push(DiagnosticsScreen(controller: c)),
                           ),
                         ),

@@ -41,4 +41,36 @@ void main() {
     expect(find.text(formatToman(2000000)), findsOneWidget); // خالص = ۳م − ۱م
     expect(find.textContaining('خالص'), findsOneWidget);
   });
+
+  testWidgets('با مانده‌ی بانک: عددِ اصلی طبقِ بانک است و مغایرت برچسب دارد', (tester) async {
+    var tapped = 0;
+    await tester.pumpWidget(_wrap(SummaryCard(
+      summary: const FinanceSummary(incomeRial: 3000000, expenseRial: 1000000),
+      period: const Period.month(1405, 6),
+      count: 5,
+      openingBalance: 5000000,
+      bankBalance: 6500000, // بانک ۶٫۵م می‌گوید، تراکنش‌ها ۷م
+      discrepancy: -500000,
+      onExplain: () => tapped++,
+    )));
+    expect(find.text(formatToman(6500000)), findsOneWidget);
+    expect(find.text(formatToman(7000000)), findsNothing);
+    expect(find.textContaining('طبق مانده‌ی بانک'), findsOneWidget);
+    expect(find.textContaining('مغایرت با تراکنش‌ها: ${formatToman(-500000)}'), findsOneWidget);
+
+    await tester.tap(find.byKey(kSummaryDiscrepancyKey));
+    expect(tapped, 1);
+  });
+
+  testWidgets('مغایرتِ صفر برچسب ندارد', (tester) async {
+    await tester.pumpWidget(_wrap(const SummaryCard(
+      summary: FinanceSummary(incomeRial: 0, expenseRial: 0),
+      period: Period.month(1405, 6),
+      count: 0,
+      openingBalance: 5000000,
+      bankBalance: 5000000,
+      discrepancy: 0,
+    )));
+    expect(find.byKey(kSummaryDiscrepancyKey), findsNothing);
+  });
 }

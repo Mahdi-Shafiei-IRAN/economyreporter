@@ -12,6 +12,7 @@ from apps.common.family import (
     resolve_family,
     user_family_ids,
 )
+from apps.common.sync import upsert_each
 from apps.families.models import FamilyMembership
 
 from .models import BankAccount, Card, Wallet
@@ -111,7 +112,9 @@ class WalletSyncView(APIView):
                 "user_id", flat=True
             )
         )
-        results = [self._upsert(item, family, member_ids, request.user) for item in items]
+        results = upsert_each(
+            items, lambda item: self._upsert(item, family, member_ids, request.user)
+        )
         return Response({"success": True, "results": results})
 
     def _upsert(self, item, family, member_ids, user):
@@ -148,4 +151,4 @@ class WalletSyncView(APIView):
                 setattr(existing, k, v)
             existing.save()
             wallet = existing
-        return WalletSerializer(wallet).data
+        return WalletSerializer(wallet).data, existing is None

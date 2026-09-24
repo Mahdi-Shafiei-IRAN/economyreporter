@@ -15,6 +15,7 @@ const kOpeningValueKey = Key('summary-opening');
 const kRangeLabelKey = Key('summary-range');
 const kSummaryTitleKey = Key('summary-title');
 const kSummaryExplainKey = Key('summary-explain');
+const kSummaryDiscrepancyKey = Key('summary-discrepancy');
 
 class SummaryCard extends StatelessWidget {
   final FinanceSummary summary;
@@ -32,6 +33,13 @@ class SummaryCard extends StatelessWidget {
   /// «این عدد از کجا آمده؟» (صفحه‌ی عیب‌یابی)؛ null یعنی دکمه نشان داده نشود.
   final VoidCallback? onExplain;
 
+  /// موجودیِ آخرِ دوره طبق مانده‌ی بانک (جمعِ آخرین مانده‌ی هر حساب). اگر باشد، همین
+  /// عددِ اصلی است (چون با بانک یکی است، حتی وقتی پیامکی جا افتاده).
+  final int? bankBalance;
+
+  /// بانک − (اولِ دوره + درآمد − هزینه). غیرِ صفر → برچسبِ «مغایرت» که عیب‌یابی را باز می‌کند.
+  final int? discrepancy;
+
   const SummaryCard({
     super.key,
     required this.summary,
@@ -41,11 +49,16 @@ class SummaryCard extends StatelessWidget {
     this.scope,
     this.openingBalance,
     this.onExplain,
+    this.bankBalance,
+    this.discrepancy,
   });
 
   bool get _hasBalance => openingBalance != null;
 
   String get _title {
+    if (bankBalance != null) {
+      return scope != null ? 'موجودی $scope (طبق بانک)' : 'موجودی (طبق مانده‌ی بانک)';
+    }
     if (_hasBalance) return scope != null ? 'موجودی نهایی $scope' : 'موجودی نهایی';
     if (scope != null) return 'خالص $scope • ${period.title}';
     return period.isAll ? 'خالص (درآمد − هزینه)' : 'خالص ${period.title}';
@@ -58,8 +71,9 @@ class SummaryCard extends StatelessWidget {
     const onHero = Colors.white;
     final muted = Colors.white.withOpacity(0.78);
     final net = summary.balanceRial;
-    // موجودیِ نهایی = اولِ دوره + (درآمد − هزینه)؛ وگرنه فقط خالص.
-    final headline = _hasBalance ? openingBalance! + net : net;
+    // طبق بانک اگر داریم؛ وگرنه اولِ دوره + (درآمد − هزینه)؛ وگرنه فقط خالص.
+    final headline = bankBalance ?? (_hasBalance ? openingBalance! + net : net);
+    final d = discrepancy;
 
     return Container(
       padding: const EdgeInsets.fromLTRB(20, 18, 20, 16),
@@ -126,6 +140,35 @@ class SummaryCard extends StatelessWidget {
               'موجودیِ اولِ ${period.title}: ${formatToman(openingBalance!)}',
               key: kOpeningValueKey,
               style: theme.textTheme.bodySmall?.copyWith(color: muted),
+            ),
+          ],
+          if (d != null && d != 0) ...[
+            const SizedBox(height: 8),
+            InkWell(
+              key: kSummaryDiscrepancyKey,
+              onTap: onExplain,
+              borderRadius: BorderRadius.circular(10),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.16),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.error_outline_rounded, size: 16, color: Color(0xFFFFD48A)),
+                    const SizedBox(width: 6),
+                    Flexible(
+                      child: Text(
+                        'مغایرت با تراکنش‌ها: ${formatToman(d)}'
+                        '${onExplain == null ? '' : ' — ببین کجاست'}',
+                        style: theme.textTheme.bodySmall?.copyWith(color: onHero),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ),
           ],
           const SizedBox(height: 14),

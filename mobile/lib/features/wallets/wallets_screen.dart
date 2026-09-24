@@ -1,8 +1,9 @@
 /// کارت‌ها و حساب‌های اعضا: هر کارت به صاحبش وصل می‌شود تا تراکنش‌ها زیر نام او
 /// بیایند؛ اگر صاحب در اپ حساب دارد، فقط خودش تراکنش‌های آن کارت را ویرایش می‌کند.
 ///
-/// پیامکِ بیشتر بانک‌ها شماره‌ی کارت ندارد (حساب دارد یا هیچ)؛ پس کارت را می‌شود فقط
-/// با بانک هم ثبت کرد تا همه‌ی پیامک‌های بی‌شماره‌ی آن بانک مال همین کارت شود.
+/// فرمِ افزودن: حساب‌هایی که در پیامک‌ها پیدا شده با یک لمس پر می‌شوند؛ برچسب اختیاری
+/// است؛ سرشماره‌ی پیامکِ همان بانک و «موجودیِ دستی» (برای حسابی که پیامکِ مانده ندارد)
+/// هم همین‌جا ثبت می‌شود.
 library;
 
 import 'package:flutter/material.dart';
@@ -22,6 +23,11 @@ const kWalletAccountFieldKey = Key('wallet-account');
 const kWalletSaveKey = Key('wallet-save');
 const kWalletsEmptyKey = Key('wallets-empty');
 const kWalletErrorKey = Key('wallet-error');
+const kWalletSenderFieldKey = Key('wallet-sender');
+const kWalletBalanceFieldKey = Key('wallet-balance');
+
+/// خروجیِ فرم: کارت + (اختیاری) سرشماره‌ی پیامک + (اختیاری) موجودیِ دستی به ریال.
+typedef _WalletFormResult = ({Wallet wallet, String? sender, int? balanceRial});
 
 /// فرم افزودن/ویرایش کارت. [bankId]/[cardLast4]/[accountRef] برای پیش‌پرکردن
 /// از روی یک کارتِ بی‌صاحب.
@@ -33,7 +39,7 @@ Future<void> showWalletForm(
   String? cardLast4,
   String? accountRef,
 }) async {
-  final result = await showModalBottomSheet<Wallet>(
+  final result = await showModalBottomSheet<_WalletFormResult>(
     context: context,
     isScrollControlled: true,
     useSafeArea: true,
@@ -53,9 +59,20 @@ Future<void> showWalletForm(
   );
   if (result == null) return;
   if (wallet == null) {
-    await controller.addWallet(result);
-  } else {
-    await controller.updateWallet(result);
+    await controller.addWalletWithExtras(result.wallet,
+        smsSender: result.sender, currentBalanceRial: result.balanceRial);
+    return;
+  }
+  await controller.updateWallet(result.wallet);
+  if (result.balanceRial != null) {
+    await controller.setManualBalance(result.wallet, result.balanceRial!);
+  }
+  final sender = result.sender?.trim() ?? '';
+  if (sender.isNotEmpty) {
+    await controller.addAllowedSender(sender,
+        bankId: result.wallet.bankId,
+        ownerName: result.wallet.ownerName,
+        ownerUserId: result.wallet.ownerUserId);
   }
 }
 
@@ -198,7 +215,12 @@ class _WalletForm extends StatefulWidget {
 }
 
 class _WalletFormState extends State<_WalletForm> {
-  late final _owner = TextEditingController(text: widget.initial.ownerName);
+  late final _owner = TextEditingController(
+      text: widget.initial.ownerName.isEmpty && widget.isNew
+          ? (widget.controller.meName ?? '')
+          : widget.initial.ownerName);
+  final _sender = TextEditingController();
+  final _balance = TextEditingController();
   late final _label = TextEditingController(text: widget.initial.label);
   late final _card = TextEditingController(text: widget.initial.cardLast4 ?? '');
   late final _account = TextEditingController(text: widget.initial.accountRef ?? '');
@@ -222,7 +244,26 @@ class _WalletFormState extends State<_WalletForm> {
     _label.dispose();
     _card.dispose();
     _account.dispose();
+    _sender.dispose();
+    _balance.dispose();
     super.dispose();
+  }
+
+  /// پر کردن از حسابی که در پیامک‌ها پیدا شده.
+  void _useDetected(DetectedAccount d) => setState(() {
+        _bankId = d.bankId ?? _bankId;
+        _card.text = d.cardLast4 ?? '';
+        _account.text = d.accountRef ?? '';
+        if (_label.text.trim().isEmpty) _label.text = d.defaultLabel;
+        _error = null;
+      });
+
+  /// برچسبِ پیش‌فرض وقتی کاربر خالی گذاشته: «ملت ۵۵۹۶».
+  String _autoLabel(String card, String account) {
+    final bank = _bankId == null ? 'حساب' : bankNameById(_bankId!).replaceFirst('بانک ', '');
+    final ref = card.isNotEmpty ? card : account;
+    final tail = ref.length > 4 ? ref.substring(ref.length - 4) : ref;
+    return '$bank $tail'.trim();
   }
 
   void _save() {
@@ -232,31 +273,38 @@ class _WalletFormState extends State<_WalletForm> {
       if (m.id == _memberId) memberName = m.name;
     }
     final owner = memberName ?? _owner.text.trim();
-    final label = _label.text.trim();
     final card = normalizeDigits(_card.text.trim());
-    final account = normalizeDigits(_account.text.trim());
+    final account = normalizeDigits(_account.text.trim()).replaceAll(RegExp(r'[\s-]'), '');
+    final label = _label.text.trim().isEmpty ? _autoLabel(card, account) : _label.text.trim();
+    final balanceText =
+        normalizeDigits(_balance.text.trim()).replaceAll(RegExp(r'[,٬\s]'), '');
+    final balanceToman = balanceText.isEmpty ? null : int.tryParse(balanceText);
     String? error;
     if (owner.isEmpty) {
       error = 'صاحب کارت را انتخاب یا نامش را وارد کن.';
-    } else if (label.isEmpty) {
-      error = 'یک برچسب بده (مثلاً «کارت حقوق»).';
     } else if (card.isEmpty && account.isEmpty && _bankId == null) {
       error = 'بانک را انتخاب کن (یا ۴ رقم آخر کارت / شماره حساب را بنویس).';
     } else if (card.isNotEmpty && !RegExp(r'^\d{4}$').hasMatch(card)) {
       error = 'از شماره کارت فقط ۴ رقم آخر را وارد کن.';
+    } else if (balanceText.isNotEmpty && balanceToman == null) {
+      error = 'موجودی را فقط با عدد (به تومان) بنویس.';
     }
     if (error != null) {
       setState(() => _error = error);
       return;
     }
-    Navigator.of(context).pop(Wallet(
-      id: widget.initial.id,
-      ownerName: owner,
-      ownerUserId: memberName == null ? null : _memberId,
-      label: label,
-      bankId: _bankId,
-      cardLast4: card.isEmpty ? null : card,
-      accountRef: account.isEmpty ? null : account,
+    Navigator.of(context).pop((
+      wallet: Wallet(
+        id: widget.initial.id,
+        ownerName: owner,
+        ownerUserId: memberName == null ? null : _memberId,
+        label: label,
+        bankId: _bankId,
+        cardLast4: card.isEmpty ? null : card,
+        accountRef: account.isEmpty ? null : account,
+      ),
+      sender: _sender.text.trim().isEmpty ? null : _sender.text.trim(),
+      balanceRial: balanceToman == null ? null : balanceToman * 10,
     ));
   }
 
@@ -264,6 +312,7 @@ class _WalletFormState extends State<_WalletForm> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final members = widget.controller.members;
+    final detected = widget.isNew ? widget.controller.detectedAccounts() : const <DetectedAccount>[];
     final bottom = MediaQuery.of(context).viewInsets.bottom;
     final showNameField = members.isEmpty || _memberId == null;
 
@@ -275,7 +324,41 @@ class _WalletFormState extends State<_WalletForm> {
         children: [
           Text(widget.isNew ? 'افزودن کارت/حساب' : 'ویرایش کارت/حساب',
               style: theme.textTheme.titleLarge),
-          const SizedBox(height: 16),
+          const SizedBox(height: 12),
+          if (widget.isNew && detected.isNotEmpty) ...[
+            Text('پیدا شده در پیامک‌ها (لمس کن تا پر شود)', style: theme.textTheme.titleSmall),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final (i, d) in detected.take(6).indexed)
+                  // دو خط (عنوان/جزئیات): دو عدد کنارِ هم در متنِ راست‌به‌چپ جابه‌جا خوانده می‌شدند.
+                  OutlinedButton.icon(
+                    key: Key('wallet-suggest-$i'),
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    icon: const Icon(Icons.auto_awesome_rounded, size: 18),
+                    label: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(toPersianDigits(d.defaultLabel)),
+                        Text(
+                          toPersianDigits('${d.count} تراکنش'
+                              '${d.lastBalanceRial == null ? '' : '، مانده ${formatToman(d.lastBalanceRial!, persianDigits: false)}'}'),
+                          style: theme.textTheme.bodySmall,
+                        ),
+                      ],
+                    ),
+                    onPressed: () => _useDetected(d),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 16),
+          ],
           Text('صاحب کارت', style: theme.textTheme.titleSmall),
           const SizedBox(height: 8),
           if (members.isNotEmpty) ...[
@@ -314,7 +397,10 @@ class _WalletFormState extends State<_WalletForm> {
           TextField(
             key: kWalletLabelFieldKey,
             controller: _label,
-            decoration: const InputDecoration(labelText: 'برچسب (مثلاً کارت حقوق)'),
+            decoration: const InputDecoration(
+              labelText: 'برچسب (اختیاری، مثلاً کارت حقوق)',
+              helperText: 'خالی بماند، از بانک و شماره ساخته می‌شود (مثلاً «ملت ۵۵۹۶»).',
+            ),
           ),
           const SizedBox(height: 12),
           DropdownButtonFormField<String?>(
@@ -354,6 +440,32 @@ class _WalletFormState extends State<_WalletForm> {
             keyboardType: TextInputType.number,
             decoration: const InputDecoration(
               labelText: 'شماره حساب (اگر در پیامک هست، همان‌طور که آمده)',
+            ),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            key: kWalletSenderFieldKey,
+            controller: _sender,
+            keyboardType: TextInputType.text,
+            textDirection: TextDirection.ltr,
+            decoration: const InputDecoration(
+              labelText: 'سرشماره‌ی پیامکِ این بانک (اختیاری)',
+              hintText: '+98200012345 یا BankMellat',
+              helperText: 'پیامک‌های همین شماره با همین بانک و صاحب خوانده می‌شوند. '
+                  'پیامکِ «رمز پویا / رمز: … اعتبار …» تراکنش نیست و ثبت نمی‌شود.',
+              helperMaxLines: 3,
+            ),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            key: kWalletBalanceFieldKey,
+            controller: _balance,
+            keyboardType: TextInputType.number,
+            decoration: const InputDecoration(
+              labelText: 'موجودیِ فعلی به تومان (اختیاری)',
+              helperText: 'برای حسابی که پیامکِ مانده ندارد (مثلاً حسابِ قدیمی)؛ همین عدد در '
+                  '«موجودی» جمع می‌شود. هر وقت عوض شد، دوباره واردش کن.',
+              helperMaxLines: 3,
             ),
           ),
           if (_error != null) ...[

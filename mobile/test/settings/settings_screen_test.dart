@@ -55,8 +55,8 @@ void main() {
     await controller.load();
     await pump(tester);
 
-    await tester.scrollUntilVisible(find.textContaining('سرور در دسترس نبود'), 300);
-    expect(find.textContaining('سرور در دسترس نبود'), findsOneWidget);
+    await tester.scrollUntilVisible(find.textContaining('به سرور وصل نشد'), 300);
+    expect(find.textContaining('به سرور وصل نشد'), findsOneWidget);
     expect(find.textContaining('۱۰۷ تراکنش در صف ماند'), findsOneWidget);
   });
 

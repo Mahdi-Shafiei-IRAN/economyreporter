@@ -1,6 +1,7 @@
 import 'package:economy/core/family/family_api.dart';
 import 'package:economy/core/theme/app_theme.dart';
 import 'package:economy/features/dashboard/dashboard_controller.dart';
+import 'package:economy/features/transactions/data/transaction_record.dart';
 import 'package:economy/features/transactions/data/transaction_repository.dart';
 import 'package:economy/features/wallets/data/wallet.dart';
 import 'package:economy/features/wallets/wallets_screen.dart';
@@ -143,5 +144,64 @@ void main() {
     expect(find.byKey(kWalletErrorKey), findsNothing);
     expect(controller.wallets.single.bankId, 'mellat');
     expect(controller.wallets.single.cardLast4, isNull);
+  });
+
+  testWidgets('پیشنهاد از پیامک‌ها: با یک لمس پر می‌شود و برچسب اختیاری است', (tester) async {
+    store.addRecord(TransactionRecord(
+      id: 't1',
+      kind: 'expense',
+      amountRial: 100000,
+      balanceAfterRial: 20559559,
+      bankId: 'mellat',
+      accountRef: '1000005596',
+      transactionDate: DateTime.utc(2026, 9, 23),
+      createdAt: DateTime.utc(2026, 9, 23),
+      updatedAt: DateTime.utc(2026, 9, 23),
+    ));
+    await controller.load();
+    expect(controller.detectedAccounts().single.defaultLabel, 'ملت 5596');
+
+    await pump(tester);
+    await tester.tap(find.byKey(kWalletAddFabKey));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(kWalletOwnerFieldKey), 'مهدی');
+    await tester.tap(find.byKey(const Key('wallet-suggest-0')));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byKey(kWalletSaveKey));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(kWalletSaveKey));
+    await tester.pumpAndSettle();
+
+    final w = controller.wallets.single;
+    expect(w.bankId, 'mellat');
+    expect(w.accountRef, '1000005596');
+    expect(w.label, 'ملت 5596');
+    expect(controller.detectedAccounts(), isEmpty); // دیگر پیشنهاد نمی‌شود
+  });
+
+  testWidgets('حسابِ قدیمیِ بی‌پیامک: سرشماره + موجودیِ دستی در همان فرم', (tester) async {
+    await pump(tester);
+    await tester.tap(find.byKey(kWalletAddFabKey));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(kWalletOwnerFieldKey), 'مهدی');
+    await tester.enterText(find.byKey(kWalletLabelFieldKey), 'سپه قدیمی');
+    await tester.tap(find.text('نامشخص').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('بانک سپه').last);
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(kWalletSenderFieldKey), '+98 9100 0000');
+    await tester.enterText(find.byKey(kWalletBalanceFieldKey), '۴۰۰٬۰۰۰');
+    await tester.ensureVisible(find.byKey(kWalletSaveKey));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(kWalletSaveKey));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(kWalletErrorKey), findsNothing);
+    expect(controller.wallets.single.bankId, 'sepah');
+    final sender = controller.allowedSenders.single;
+    expect(sender.bankId, 'sepah');
+    expect(sender.ownerName, 'مهدی');
+    // موجودیِ دستی در «موجودی» جمع می‌شود.
+    expect(controller.bankBalance, 4000000);
   });
 }
