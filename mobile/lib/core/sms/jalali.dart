@@ -116,10 +116,15 @@ List<int> jalaliToGregorian(int jy, int jm, int jd) {
 final _dateRe = RegExp(r'(\d{2,4})/(\d{1,2})/(\d{1,2})');
 final _timeRe = RegExp(r'(\d{1,2}):(\d{2})');
 
+/// پاسارگاد: «05/27_12:50» = ماه/روز_ساعت، بدونِ سال.
+final _monthDayTimeRe = RegExp(r'(?<![0-9/])(\d{1,2})/(\d{1,2})_(\d{1,2}):(\d{2})(?![0-9])');
+
 /// تاریخِ رخداد را از متنِ نرمال‌شده استخراج و به UTC برمی‌گرداند (اگر پیدا نشد null).
-DateTime? extractOccurredAt(String normalized) {
+/// [reference] (زمانِ رسیدنِ پیامک؛ پیش‌فرض اکنون) فقط برای تاریخِ بی‌سال است: همان سال،
+/// مگر اینکه تاریخ بعد از [reference] بیفتد (پیامکِ اسفند که فروردین خوانده می‌شود).
+DateTime? extractOccurredAt(String normalized, {DateTime? reference}) {
   final dm = _dateRe.firstMatch(normalized);
-  if (dm == null) return null;
+  if (dm == null) return _monthDayTime(normalized, reference ?? DateTime.now());
 
   var jy = int.parse(dm.group(1)!);
   final jm = int.parse(dm.group(2)!);
@@ -147,4 +152,36 @@ DateTime? extractOccurredAt(String normalized) {
   // زمانِ محلی ایران را می‌سازیم و به UTC تبدیل می‌کنیم (UTC+3:30).
   final iranWallClock = DateTime.utc(g[0], g[1], g[2], hh, mi);
   return iranWallClock.subtract(const Duration(hours: 3, minutes: 30));
+}
+
+DateTime? _monthDayTime(String normalized, DateTime reference) {
+  final m = _monthDayTimeRe.firstMatch(normalized);
+  if (m == null) return null;
+  final jm = int.parse(m.group(1)!), jd = int.parse(m.group(2)!);
+  final hh = int.parse(m.group(3)!), mi = int.parse(m.group(4)!);
+  if (jm < 1 || jm > 12 || jd < 1 || jd > 31 || hh > 23 || mi > 59) return null;
+  final local = reference.toUtc().add(kIranOffset);
+  final jy = gregorianToJalali(local.year, local.month, local.day)[0];
+  DateTime at(int y) {
+    final g = jalaliToGregorian(y, jm, jd);
+    return DateTime.utc(g[0], g[1], g[2], hh, mi).subtract(kIranOffset);
+  }
+
+  final sameYear = at(jy);
+  return sameYear.isAfter(reference.toUtc().add(const Duration(days: 1))) ? at(jy - 1) : sameYear;
+}
+
+/// متن ساعت دارد؟ (اگر نه، [extractOccurredAt] ساعتِ ۰۰:۰۰ می‌گذارد.)
+bool hasClockTime(String normalized) => _timeRe.hasMatch(normalized);
+
+/// متنی که فقط تاریخ دارد (ساعتِ ۰۰:۰۰) و پیامک همان روز رسیده: زمانِ رسیدن دقیق‌تر است
+/// (وگرنه همه‌ی پیامک‌های آن روز «اولِ روز» می‌افتادند و زنجیره‌ی مانده به هم می‌ریخت).
+DateTime? refineDateOnly(DateTime? occurredAt, DateTime? receivedAt) {
+  if (occurredAt == null) return receivedAt;
+  if (receivedAt == null) return occurredAt;
+  final local = occurredAt.toUtc().add(kIranOffset);
+  final dateOnly = local.hour == 0 && local.minute == 0;
+  final sameDay = !receivedAt.isBefore(occurredAt) &&
+      receivedAt.difference(occurredAt) < const Duration(days: 1);
+  return dateOnly && sameDay ? receivedAt.toUtc() : occurredAt;
 }

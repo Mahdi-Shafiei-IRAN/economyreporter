@@ -339,6 +339,10 @@ class SettingKeys {
   /// همراهِ تراکنش‌هایش). اگر بعداً با قانون بخوانند خودکار برمی‌گردند؛ حذفِ دستیِ کاربر نه.
   static const autoRemoved = 'auto_removed';
 
+  /// JSON: شناسه‌ی تراکنش‌هایی که **کاربر** دستی حذف کرده (از نسخه‌ی ۱٫۰٫۲۱). حتی اگر مانده‌ی
+  /// بانک ثابتشان کند، خودکار برنمی‌گردند.
+  static const userDeleted = 'user_deleted';
+
   /// زمانِ جدیدترین پیامکی که از صندوق خوانده شد (واردکردنِ بعدی فقط از همین‌جا).
   static const inboxWatermark = 'inbox_watermark';
 
@@ -580,15 +584,18 @@ class TransactionRepository implements TransactionStore {
     if (hash != null) {
       final existing = await _db.query(
         'transactions',
-        columns: ['id', 'sms_body'],
+        columns: ['id', 'sms_body', 'account_ref', 'card_last4', 'bank_id', 'balance_after_rial'],
         where: 'source_message_hash = ?',
         whereArgs: [hash],
         limit: 1,
       );
       if (existing.isNotEmpty) {
-        final id = existing.first['id'] as String;
-        if (existing.first['sms_body'] == null) {
-          // ردیفِ نسخه‌ی قبل: متن و زمان پیامک را تکمیل کن (ترتیب زمانی درست می‌شود).
+        final row = existing.first;
+        final id = row['id'] as String;
+        if (row['sms_body'] == null) {
+          // ردیفِ نسخه‌ی قبل یا نسخه‌ی سرور (بعد از نصبِ دوباره؛ شماره‌ی حساب و متن به سرور
+          // نمی‌روند): متن، زمان و شماره‌ی حساب/کارت از همین پیامک تکمیل می‌شود و ردیف مالِ
+          // همین گوشی است. قبلاً شماره تکمیل نمی‌شد و حساب «بدون شماره» می‌ماند.
           await _db.update(
             'transactions',
             {
@@ -596,6 +603,14 @@ class TransactionRepository implements TransactionStore {
               'sms_body': body,
               'sms_received_at': receivedAt?.toUtc().toIso8601String(),
               'sms_content_hash': contentHash,
+              if (row['account_ref'] == null && parsed.accountRef != null)
+                'account_ref': parsed.accountRef,
+              if (row['card_last4'] == null && parsed.cardLast4 != null)
+                'card_last4': parsed.cardLast4,
+              if (row['bank_id'] == null && parsed.bankId != null) 'bank_id': parsed.bankId,
+              if (row['balance_after_rial'] == null && parsed.balanceAfterRial != null)
+                'balance_after_rial': parsed.balanceAfterRial,
+              'origin': 'local',
             },
             where: 'id = ?',
             whereArgs: [id],

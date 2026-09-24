@@ -34,4 +34,25 @@ void main() {
       expect(extractOccurredAt('کد 2023/06/19'), isNull);
     });
   });
+
+  group('پاسارگاد: «ماه/روز_ساعت» بی‌سال', () {
+    // ۱ مهر ۱۴۰۵ ساعتِ ۱۲ تهران.
+    final received = DateTime.utc(2026, 9, 23, 8, 30);
+
+    test('سالِ زمانِ رسیدن', () {
+      final at = extractOccurredAt('777.888.10000001.1 -1,850,000 05/27 12:50', reference: received);
+      expect(at, isNull); // بدونِ «_» قالبِ پاسارگاد نیست
+      final t = extractOccurredAt('777.888.10000001.1 -1,850,000 05/27_12:50 مانده: 1',
+          reference: received)!;
+      final local = t.add(kIranOffset);
+      expect(gregorianToJalali(local.year, local.month, local.day), [1405, 5, 27]);
+      expect([local.hour, local.minute], [12, 50]);
+    });
+
+    test('تاریخِ بعد از زمانِ رسیدن → سالِ قبل (پیامکِ اسفند در فروردین)', () {
+      final t = extractOccurredAt('-500,000 12/29_23:10', reference: received)!;
+      final local = t.add(kIranOffset);
+      expect(gregorianToJalali(local.year, local.month, local.day), [1404, 12, 29]);
+    });
+  });
 }

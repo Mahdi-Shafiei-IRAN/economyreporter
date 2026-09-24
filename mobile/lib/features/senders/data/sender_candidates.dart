@@ -79,7 +79,8 @@ List<SenderCandidate> findSenderCandidates({
         findAllowedSender(allowed, sms.sender) != null) {
       continue;
     }
-    final parsed = parser.parse(sender: sms.sender, body: sms.body);
+    final parsed =
+        parser.parse(sender: sms.sender, body: sms.body, receivedAt: sms.receivedAt);
     if (!parsed.looksLikeTransaction) continue;
     final g = groupFor(sms.sender)
       ..inboxCount += 1

@@ -17,7 +17,8 @@ import 'models.dart';
 /// (قالبِ بانکِ تازه و …) بالا برود: بازشدنِ بعدیِ اپ یک بار کلِ صندوق را دوباره می‌خواند.
 /// ۲: نویسه‌های نامرئی، پاسارگاد (مبلغِ علامت‌دار، حسابِ نقطه‌دار)، سپه (حساب بعد از «به:»).
 /// ۳: همه‌ی نویسه‌های قالب/اعراب/کشیده، «ى» عربی، جداکننده‌ی هزارگانِ «،»/«.»/«’».
-const int kParserVersion = 3;
+/// ۴: «موجودی حساب دیجیتال: X» مانده است و «باقی مانده:0» (تعداد قسط) نه.
+const int kParserVersion = 4;
 
 class SmsParser {
   const SmsParser();
@@ -69,7 +70,10 @@ class SmsParser {
   static const _expenseKeywords = ['برداشت', 'خرید', 'پرداخت', 'کسر', 'انتقالوجه', 'انتقال'];
   static const _incomeKeywords = ['واریز', 'عودت', 'افزایش'];
 
-  static final _balanceRe = RegExp(r'(?:مانده|موجودی)\s*:?\s*([0-9][0-9,]*)');
+  // «مانده: X»، «موجودی X» و «موجودی حساب دیجیتال (پاد): X» (پاسارگاد)؛ ولی نه «تعداد
+  // اقساط باقی مانده:0» (تعداد قسط، نه مانده).
+  static final _balanceRe = RegExp(
+      r'(?<!باقی\s?)(?:مانده|موجودی)(?:\s+حساب(?:\s+[^\s:0-9]+){0,2}\s*:|\s*:?)\s*([0-9][0-9,]*)');
   static final _amountLabeledRe = RegExp(r'مبلغ\s*:?\s*([0-9][0-9,]*)');
   static final _currencyRe = RegExp(r'([0-9][0-9,]*)\s*(ریال|تومان)');
   // مبلغِ چسبیده به فعل، بدون واحد و بدون «مبلغ» (مثل «برداشت13,625,000»).
@@ -103,10 +107,12 @@ class SmsParser {
   static final _sepahFromRe = RegExp(r'از\s*:\s*([0-9]{8,20})(?![0-9])');
 
   /// [bankId]: بانکی که کاربر برای این فرستنده تعیین کرده (فرستنده‌های مجاز).
+  /// [receivedAt] (زمانِ رسیدنِ پیامک) فقط برای سالِ تاریخ‌های بی‌سال (پاسارگاد) است.
   ParsedTransaction parse({
     required String sender,
     required String body,
     String? bankId,
+    DateTime? receivedAt,
   }) {
     // قدم ۱: تشخیص بانک از فرستنده — اول بانکی که کاربر برای این سرشماره تعیین
     // کرده، بعد از نام فرستنده، و اگر نشد از داخل متن (بعضی بانک‌ها نامشان را در
@@ -154,7 +160,10 @@ class SmsParser {
           accountRef = kind == TxKind.expense ? (from ?? to) : (to ?? from);
         }
     }
-    final occurredAt = extractOccurredAt(normalized);
+    // متنِ فقط‌تاریخ (سودِ ملت، واریزِ وامِ پاسارگاد): زمانِ رسیدنِ همان روز، نه «اولِ روز».
+    final extracted = extractOccurredAt(normalized, reference: receivedAt);
+    final occurredAt =
+        hasClockTime(normalized) ? extracted : refineDateOnly(extracted, receivedAt);
     final counterparty = _extractCounterparty(normalized, kind);
 
     // بانکِ ناشناخته دلیل بازبینی نیست؛ فقط ابهام واقعی در مبلغ/نوع/موفقیت.

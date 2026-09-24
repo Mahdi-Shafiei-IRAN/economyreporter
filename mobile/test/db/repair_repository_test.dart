@@ -147,4 +147,67 @@ void main() {
     expect(await repo.deletedSmsTransactions(), isEmpty);
     expect((await SmsImporter(repo).importAll(inbox)).created, 0);
   });
+
+  test('نصبِ دوباره روی پایگاه‌داده‌ی واقعی: نسخه‌ی سرور با پیامکش شماره و متن می‌گیرد', () async {
+    final sms = RawSms(
+        sender: 'Bank Mellat',
+        body: 'حساب4900000002\nواریز485\nمانده1,040,193\n05/06/15-10:39',
+        receivedAt: now.subtract(const Duration(days: 18)));
+    final interest = RawSms(
+        sender: 'Bank Mellat',
+        body: 'واریز سود کوتاه مدت\nحساب4900000002\nمبلغ4,033\n05/07/01',
+        receivedAt: now.subtract(const Duration(days: 1)));
+    String hash(RawSms s) =>
+        smsFingerprint(sender: s.sender, body: s.body, receivedAt: s.receivedAt);
+    // همان چیزی که بعد از ورود از سرور می‌آید: بدونِ متن و شماره‌ی حساب؛ یکی حذف‌شده.
+    await repo.applyRemote({
+      'id': 'srv-1',
+      'kind': 'income',
+      'amount_rial': 485,
+      'balance_after_rial': 1040193,
+      'bank_id': 'mellat',
+      'transaction_date': sms.receivedAt!.toIso8601String(),
+      'source_message_hash': hash(sms),
+      'is_deleted': false,
+    });
+    await repo.applyRemote({
+      'id': 'srv-2',
+      'kind': 'income',
+      'amount_rial': 4033,
+      'bank_id': 'mellat',
+      'transaction_date': interest.receivedAt!.toIso8601String(),
+      'source_message_hash': hash(interest),
+      'is_deleted': true,
+    });
+
+    expect((await SmsImporter(repo).importAll([sms, interest])).created, 0);
+    final live = (await repo.getById('srv-1'))!;
+    expect(live.accountRef, '4900000002');
+    expect(live.origin, 'local');
+    expect(live.smsBody, sms.body);
+    final deleted = (await repo.getById('srv-2'))!;
+    expect(deleted.isDeleted, isTrue);
+    expect(deleted.smsBody, interest.body); // حالا در عیب‌یابی دیده و برگردانده می‌شود
+  });
+
+  test('کارمزدِ بی‌شماره‌ی پاسارگاد روی پایگاه‌داده‌ی واقعی با مانده به حساب وصل می‌شود', () async {
+    await repo.addAllowedSender('B.Pasargad', bankId: 'pasargad');
+    final t0 = now.subtract(const Duration(days: 3));
+    final r = await SmsImporter(repo).importAll([
+      RawSms(
+          sender: 'B.Pasargad',
+          body: '777.888.10000001.1\n-200,000\n06/07_21:11\nمانده: 209,374,231',
+          receivedAt: t0),
+      RawSms(
+          sender: 'B.Pasargad',
+          body: 'کارمزد ارائه خدمات با شناسه 7000000001 به مبلغ 1,200,000 ریال جهت عضویت در حساب '
+              'پشتوانه با موفقیت پرداخت گردید.\nموجودی حساب دیجیتال: 208,174,231 ریال',
+          receivedAt: t0.add(const Duration(minutes: 1))),
+    ]);
+    expect(r.created, 2);
+    expect(r.proven, 1);
+    final fee = (await repo.getAll()).firstWhere((t) => t.amountRial == 1200000);
+    expect(fee.accountRef, '777.888.10000001.1');
+    expect(fee.balanceAfterRial, 208174231);
+  });
 }

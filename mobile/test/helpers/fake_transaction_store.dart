@@ -83,8 +83,24 @@ class FakeTransactionStore implements TransactionStore {
         ? smsFingerprint(sender: sender, body: parsed.rawBody, receivedAt: receivedAt)
         : null;
     final content = hasBody ? smsContentHash(sender: sender, body: parsed.rawBody) : null;
-    for (final item in _items) {
+    for (var i = 0; i < _items.length; i++) {
+      final item = _items[i];
       if (hash != null && item.sourceMessageHash == hash) {
+        if (item.smsBody == null) {
+          // مثلِ مخزنِ واقعی: نسخه‌ی سرور متن و شماره را از همین پیامک می‌گیرد.
+          _items[i] = recordWith(item, {
+            'sms_sender': sender,
+            'sms_body': parsed.rawBody,
+            'sms_received_at': receivedAt?.toUtc().toIso8601String(),
+            'sms_content_hash': content,
+            if (item.accountRef == null && parsed.accountRef != null) 'account_ref': parsed.accountRef,
+            if (item.cardLast4 == null && parsed.cardLast4 != null) 'card_last4': parsed.cardLast4,
+            if (item.bankId == null && parsed.bankId != null) 'bank_id': parsed.bankId,
+            if (item.balanceAfterRial == null && parsed.balanceAfterRial != null)
+              'balance_after_rial': parsed.balanceAfterRial,
+            'origin': 'local',
+          });
+        }
         return TxInsertOutcome(TxInsertStatus.duplicate, item.id);
       }
       if (content != null &&

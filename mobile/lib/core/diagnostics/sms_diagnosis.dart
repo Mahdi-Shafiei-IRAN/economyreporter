@@ -78,7 +78,10 @@ class StrictCheck {
   /// چیزهایی که پیامک کم دارد (خالی = قبول).
   final List<String> missing;
 
-  const StrictCheck(this.missing);
+  /// پیامک شماره‌ی حساب/کارت ندارد ولی مانده‌ی بانک حسابش را ثابت کرده (ثبت‌شده با شماره).
+  final bool byBalance;
+
+  const StrictCheck(this.missing, {this.byBalance = false});
 
   bool get accepts => missing.isEmpty;
 
@@ -87,12 +90,19 @@ class StrictCheck {
   static const noKind = 'نوعش (واریز/برداشت) معلوم نیست';
   static const notTx = 'رمز پویا/یادآوری است';
 
-  factory StrictCheck.of(ParsedTransaction p) => StrictCheck([
-        if (p.isOtp || p.isReminder) notTx,
-        if (p.cardLast4 == null && p.accountRef == null) noId,
-        if (p.amountRial == null) noAmount,
-        if (p.kind == TxKind.unknown) noKind,
-      ]);
+  /// [stored]: اگر ثبت‌شده‌ی زنده شماره دارد (از مانده‌ی بانک)، نداشتنِ شماره در متن اشکال نیست.
+  factory StrictCheck.of(ParsedTransaction p, {TransactionRecord? stored}) {
+    final textHasId = p.cardLast4 != null || p.accountRef != null;
+    final storedHasId = stored != null &&
+        !stored.isDeleted &&
+        (stored.cardLast4 != null || stored.accountRef != null);
+    return StrictCheck([
+      if (p.isOtp || p.isReminder) notTx,
+      if (!textHasId && !storedHasId) noId,
+      if (p.amountRial == null) noAmount,
+      if (p.kind == TxKind.unknown) noKind,
+    ], byBalance: !textHasId && storedHasId);
+  }
 }
 
 class SmsDiagnosis {
@@ -209,8 +219,8 @@ SmsDiagnosisReport diagnoseSms({
       }
       continue;
     }
-    final parsed =
-        parser.parse(sender: sms.sender, body: sms.body, bankId: sender.bankId);
+    final parsed = parser.parse(
+        sender: sms.sender, body: sms.body, bankId: sender.bankId, receivedAt: sms.receivedAt);
 
     TransactionRecord? match = byHash[smsFingerprint(
         sender: sms.sender, body: sms.body, receivedAt: sms.receivedAt)];
@@ -240,7 +250,7 @@ SmsDiagnosisReport diagnoseSms({
       stored: match,
       inInbox: true,
       verdict: verdict,
-      strict: StrictCheck.of(parsed),
+      strict: StrictCheck.of(parsed, stored: match),
     ));
   }
 
@@ -251,7 +261,10 @@ SmsDiagnosisReport diagnoseSms({
     final allowedSender = findAllowedSender(allowed, sender) ??
         AllowedSender(id: '', address: sender, bankId: t.bankId);
     final parsed = parser.parse(
-        sender: sender, body: t.smsBody!, bankId: allowedSender.bankId);
+        sender: sender,
+        body: t.smsBody!,
+        bankId: allowedSender.bankId,
+        receivedAt: t.smsReceivedAt);
     items.add(SmsDiagnosis(
       sender: sender,
       body: t.smsBody!,
@@ -261,7 +274,7 @@ SmsDiagnosisReport diagnoseSms({
       stored: t,
       inInbox: false,
       verdict: _verdictOfStored(t),
-      strict: StrictCheck.of(parsed),
+      strict: StrictCheck.of(parsed, stored: t),
     ));
   }
 

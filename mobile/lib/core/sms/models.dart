@@ -104,6 +104,28 @@ class ParsedTransaction {
     this.isReminder = false,
   });
 
+  /// همین پیامک با هویتِ حسابی که مانده‌ی بانک ثابت کرده (پیامکِ بی‌شماره).
+  ParsedTransaction withAccount({String? bankId, String? cardLast4, String? accountRef}) =>
+      ParsedTransaction(
+        rawSender: rawSender,
+        rawBody: rawBody,
+        kind: kind,
+        needsReview: needsReview,
+        bankId: bankId ?? this.bankId,
+        bankName: bankName,
+        amountRial: amountRial,
+        rawAmount: rawAmount,
+        rawUnit: rawUnit,
+        balanceAfterRial: balanceAfterRial,
+        cardLast4: cardLast4 ?? this.cardLast4,
+        accountRef: accountRef ?? this.accountRef,
+        counterparty: counterparty,
+        occurredAt: occurredAt,
+        reviewReasons: reviewReasons,
+        isOtp: isOtp,
+        isReminder: isReminder,
+      );
+
   @override
   String toString() =>
       'ParsedTransaction(bank: $bankId, kind: $kind, amountRial: $amountRial, '

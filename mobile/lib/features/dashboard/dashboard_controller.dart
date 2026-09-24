@@ -14,6 +14,7 @@ import '../../core/diagnostics/balance_chain.dart';
 import '../../core/diagnostics/diagnostic_report.dart';
 import '../../core/diagnostics/repair.dart';
 import '../../core/diagnostics/sms_diagnosis.dart';
+import '../../core/reconcile/balance_proof.dart';
 import '../../core/reconcile/reconciliation.dart';
 import '../../core/transfer/transfer_finder.dart';
 import '../budgets/data/budget.dart';
@@ -256,6 +257,25 @@ class DashboardController extends ChangeNotifier {
   Future<void> _saveAutoRemoved(Set<String> ids) =>
       repository.setSetting(SettingKeys.autoRemoved, jsonEncode(ids.toList()));
 
+  Future<Set<String>> _userDeleted() async {
+    final raw = await repository.getSetting(SettingKeys.userDeleted);
+    if (raw == null) return {};
+    try {
+      return (jsonDecode(raw) as List).map((e) => e.toString()).toSet();
+    } catch (_) {
+      return {};
+    }
+  }
+
+  /// حذفِ دستیِ کاربر ([add]) یا برگرداندن/حذفِ سیستمی (نه [add]).
+  Future<void> _markUserDeleted(Iterable<String> ids, {required bool add}) async {
+    if (ids.isEmpty) return;
+    final current = await _userDeleted();
+    final next = add ? {...current, ...ids} : current.difference(ids.toSet());
+    if (next.length == current.length && next.containsAll(current)) return;
+    await repository.setSetting(SettingKeys.userDeleted, jsonEncode(next.toList()));
+  }
+
   Future<void> _rememberAutoRemoved(Iterable<String> ids) async {
     if (ids.isEmpty) return;
     await _saveAutoRemoved({...await _autoRemoved(), ...ids});
@@ -303,11 +323,27 @@ class DashboardController extends ChangeNotifier {
     );
     await repository.applyPatches(plan.patches);
     await _rememberAutoRemoved(plan.result.removedIds);
+
+    // حذف‌شده‌هایی که مانده‌ی بانک ثابت می‌کند واقعاً انجام شده‌اند.
+    await load();
+    final proof = planBalanceRevival(
+      live: _byId.values,
+      deleted: await repository.deletedSmsTransactions(),
+      allowed: allowedSenders,
+      userDeleted: await _userDeleted(),
+      parser: parser,
+    );
+    await repository.applyPatches(proof);
+    await _forgetAutoRemoved([for (final p in proof) p.id]);
+
     var imported = 0;
+    var provenImported = 0;
     if (inbox.isNotEmpty) {
       final importer = SmsImporter(repository,
           parser: parser, deviceId: await repository.getSetting(SettingKeys.deviceId));
-      imported = (await importer.importAll(inbox)).created;
+      final r = await importer.importAll(inbox);
+      imported = r.created;
+      provenImported = r.proven;
     }
     final result = RepairResult(
       at: plan.result.at,
@@ -316,6 +352,7 @@ class DashboardController extends ChangeNotifier {
       removedIds: plan.result.removedIds,
       imported: imported,
       revived: revived,
+      proven: proof.length + provenImported,
       parserVersion: kParserVersion,
     );
     await repository.setSetting(SettingKeys.repairResult, jsonEncode(result.toJson()));
@@ -334,11 +371,45 @@ class DashboardController extends ChangeNotifier {
   /// برگرداندنِ تراکنشِ حذف‌شده؛ تعمیرِ خودکار دیگر حذفش نمی‌کند.
   Future<void> restoreTransaction(TransactionRecord t) => restoreMany([t]);
 
+  /// حذف‌شده‌هایی که با قانون می‌خوانند و **تکراری نیستند** (برای «برگرداندنِ همه»). تکراری:
+  /// همان متن که بانک دوباره فرستاده، یا همان تراکنش (همان حساب و مبلغ، و همان مانده یا ۱۰
+  /// دقیقه فاصله) که ثبت‌شده است.
+  List<TransactionRecord> restorableDeleted(SmsDiagnosisReport report) {
+    final live = [for (final t in _byId.values) if (!t.isDeleted) t];
+    final contents = {for (final t in live) t.smsContentHash};
+    bool duplicate(SmsDiagnosis d) {
+      final s = d.stored!, p = d.parsed;
+      if (s.smsContentHash != null && contents.contains(s.smsContentHash)) return true;
+      final bank = p.bankId ?? s.bankId;
+      final at = proofTime(p.occurredAt, s.smsReceivedAt) ?? s.effectiveTime;
+      return live.any((t) =>
+          t.bankId == bank &&
+          ((p.cardLast4 != null && t.cardLast4 == p.cardLast4) ||
+              (p.accountRef != null && t.accountRef == p.accountRef)) &&
+          t.amountRial == p.amountRial &&
+          t.kind == p.kind.name &&
+          (p.balanceAfterRial != null
+              ? t.balanceAfterRial == p.balanceAfterRial
+              : t.effectiveTime.difference(at).abs() <= const Duration(minutes: 10)));
+    }
+
+    return [
+      for (final d in report.items)
+        if (d.verdict == SmsVerdict.deleted &&
+            d.strict.accepts &&
+            d.stored != null &&
+            canEdit(d.stored!) &&
+            !duplicate(d))
+          d.stored!,
+    ];
+  }
+
   /// برگرداندنِ چند تراکنشِ حذف‌شده با هم (دکمه‌ی «برگرداندنِ همه» در عیب‌یابی).
   Future<void> restoreMany(Iterable<TransactionRecord> records) async {
     final ids = [for (final t in records) if (t.isDeleted && canEdit(t)) t.id];
     if (ids.isEmpty) return;
     await _forgetAutoRemoved(ids);
+    await _markUserDeleted(ids, add: false);
     final kept = await _kept()..addAll(ids);
     await repository.setSetting(SettingKeys.keptTransactions, jsonEncode(kept.toList()));
     await repository.applyPatches([for (final id in ids) TxPatch(id, restore: true)]);
@@ -643,6 +714,8 @@ class DashboardController extends ChangeNotifier {
   Future<void> deleteSelected() async {
     final ids = selected.toList();
     selected.clear();
+    await _forgetAutoRemoved(ids);
+    await _markUserDeleted(ids, add: true);
     for (final id in ids) {
       await repository.deleteTransaction(id);
     }
@@ -658,6 +731,7 @@ class DashboardController extends ChangeNotifier {
       ids.add(t.id);
     }
     await _forgetAutoRemoved(ids);
+    await _markUserDeleted(ids, add: true);
     for (final id in ids) {
       await repository.deleteTransaction(id);
       selected.remove(id);
@@ -723,6 +797,7 @@ class DashboardController extends ChangeNotifier {
   /// «نامعتبر»: تراکنش انجام‌نشده یا پیامکِ رمزِ اشتباهی ثبت‌شده (حذف نرم).
   Future<void> deleteTransaction(String id) async {
     await _forgetAutoRemoved([id]);
+    await _markUserDeleted([id], add: true);
     await repository.deleteTransaction(id);
     selected.remove(id);
     await _changed();
@@ -915,7 +990,9 @@ class DashboardController extends ChangeNotifier {
       final txs = transactionsOfSender(sender.address).where(canEdit).toList();
       await invalidateMany(txs);
       // حذفِ «خودکار»: اگر فرستنده دوباره مجاز شود، همین تراکنش‌ها برمی‌گردند.
-      await _rememberAutoRemoved([for (final t in txs) t.id]);
+      final ids = [for (final t in txs) t.id];
+      await _markUserDeleted(ids, add: false);
+      await _rememberAutoRemoved(ids);
     }
     await load();
   }
@@ -1094,8 +1171,11 @@ class DashboardController extends ChangeNotifier {
 
   /// حذفِ تکراری‌ها: قدیمی‌ترین می‌ماند، بقیه حذف (نامعتبر) می‌شوند.
   Future<void> resolveDuplicate(DuplicateGroup group) async {
-    for (final t in group.extras) {
-      if (canEdit(t)) await repository.deleteTransaction(t.id);
+    final ids = [for (final t in group.extras) if (canEdit(t)) t.id];
+    await _forgetAutoRemoved(ids);
+    await _markUserDeleted(ids, add: true);
+    for (final id in ids) {
+      await repository.deleteTransaction(id);
     }
     await _changed();
   }

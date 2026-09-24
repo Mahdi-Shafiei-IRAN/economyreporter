@@ -100,7 +100,7 @@ String buildDiagnosticReport({
   if (repair != null) {
     b.writeln('درست کردنِ خودکار (${_when(repair.at)}): وصل به پیامک ${repair.adopted} • '
         'تکمیل از متن ${repair.backfilled} • کنار رفته ${repair.removed} • '
-        'واردشده ${repair.imported} • برگشته ${repair.revived}'
+        'واردشده ${repair.imported} • برگشته ${repair.revived} • ثابت با مانده ${repair.proven}'
         '${repair.parserVersion == null ? '' : ' • پارسر ${repair.parserVersion}'}');
   }
   b.writeln();
@@ -172,7 +172,9 @@ String buildDiagnosticReport({
   }
   for (final d in sms.items.take(maxSms)) {
     final p = d.parsed;
-    final strict = d.strict.accepts ? 'قبول' : 'رد: ${d.strict.missing.join('، ')}';
+    final strict = d.strict.accepts
+        ? (d.strict.byBalance ? 'قبول (حساب از مانده‌ی بانک)' : 'قبول')
+        : 'رد: ${d.strict.missing.join('، ')}';
     b.writeln('- ${_when(d.at)} [${maskSensitive(d.sender)}]'
         '${d.inInbox ? '' : ' (در صندوق نیست)'} ${d.verdict.label}'
         ' | پارس: ${_kind(p.kind.name)} ${p.amountRial == null ? '?' : _rial(p.amountRial!)}'

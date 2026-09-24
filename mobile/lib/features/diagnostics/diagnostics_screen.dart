@@ -388,6 +388,9 @@ class _RepairCard extends StatelessWidget {
             if (r.imported > 0) '${_fa(r.imported)} پیامکِ تراکنشی که ثبت نشده بود وارد شد',
             if (r.revived > 0)
               '${_fa(r.revived)} تراکنشی که قبلاً خودکار کنار رفته بود، حالا با قانون می‌خواند و برگشت',
+            if (r.proven > 0)
+              '${_fa(r.proven)} تراکنش (کارمزد، وام، قسط، …) که شماره‌ی حساب نداشت یا حذف شده بود، '
+                  'با مانده‌ی بانک ثابت شد و در همان حساب شمرده شد',
             if (!r.changedAnything) 'چیزی برای درست کردن نبود ✓',
           ];
     return Card(
@@ -773,16 +776,9 @@ class _SmsTabState extends State<_SmsTab> {
         if (!snap.hasData) return const Center(child: CircularProgressIndicator());
         final r = snap.data!;
         final items = [for (final d in r.items) if (_filter.matches(d)) d];
-        // حذف‌شده‌هایی که شماره حساب/کارت + مبلغ + نوع دارند (مثلاً با «بردار و
-        // تراکنش‌هایش را حذف کن» در نسخه‌های قبل رفته بودند).
-        final restorable = [
-          for (final d in r.items)
-            if (d.verdict == SmsVerdict.deleted &&
-                d.strict.accepts &&
-                d.stored != null &&
-                widget.controller.canEdit(d.stored!))
-              d.stored!,
-        ];
+        // حذف‌شده‌هایی که شماره حساب/کارت + مبلغ + نوع دارند و تکراری نیستند (مثلاً با
+        // «بردار و تراکنش‌هایش را حذف کن» در نسخه‌های قبل رفته بودند).
+        final restorable = widget.controller.restorableDeleted(r);
         final header = <Widget>[
           const _Intro(
             title: 'هر پیامک چرا شمرده شد یا نشد',
@@ -1011,7 +1007,8 @@ class _SmsTile extends StatelessWidget {
               Wrap(spacing: 6, runSpacing: 4, children: [
                 _Tag(d.verdict.label, color: vColor, background: vBg),
                 d.strict.accepts
-                    ? _Tag('قانون: قبول', color: fin.income, background: fin.incomeContainer)
+                    ? _Tag(d.strict.byBalance ? 'قانون: قبول (حساب از مانده‌ی بانک)' : 'قانون: قبول',
+                        color: fin.income, background: fin.incomeContainer)
                     : _Tag('قانون: رد — ${d.strict.missing.join('، ')}',
                         color: fin.expense, background: fin.expenseContainer),
                 if (!d.inInbox)

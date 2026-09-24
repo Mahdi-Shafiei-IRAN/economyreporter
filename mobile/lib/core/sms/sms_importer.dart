@@ -3,11 +3,15 @@
 ///
 /// ترتیب (قاعده‌ی پروژه): اول فرستنده — فقط سرشماره/نامی که کاربر مجاز کرده —
 /// بعد پارس متن. پیامکِ هر فرستنده‌ی دیگری حتی اگر مبلغ داشته باشد ثبت نمی‌شود؛
-/// از فرستنده‌ی مجاز هم فقط پیامکِ دارای شماره‌ی حساب/کارت + مبلغ + نوع.
+/// از فرستنده‌ی مجاز هم فقط پیامکِ دارای شماره‌ی حساب/کارت + مبلغ + نوع — یا پیامکِ
+/// بی‌شماره‌ای که مانده‌ی بانکِ دقیقاً یک حساب ثابتش کند ([proveByBalance]).
 library;
 
 import '../../features/senders/data/allowed_sender.dart';
+import '../../features/transactions/data/transaction_record.dart';
 import '../../features/transactions/data/transaction_repository.dart';
+import '../reconcile/balance_proof.dart';
+import 'models.dart';
 import 'sms_parser.dart';
 
 /// یک پیامک خام (فرستنده + متن + زمان دریافت).
@@ -25,11 +29,15 @@ class ImportResult {
   final int skipped; // OTP، یادآوری، بی‌شماره یا غیرتراکنش (از فرستنده‌ی مجاز)
   final int notAllowed; // فرستنده جزو فرستنده‌های مجاز نیست
 
+  /// از [created]: پیامک‌های بی‌شماره که مانده‌ی بانک به یک حساب وصلشان کرد.
+  final int proven;
+
   const ImportResult({
     required this.created,
     required this.duplicates,
     required this.skipped,
     this.notAllowed = 0,
+    this.proven = 0,
   });
 }
 
@@ -61,9 +69,16 @@ class SmsImporter {
   Future<ImportedTx?> importOne(RawSms sms) async {
     final sender = findAllowedSender(await store.allowedSenders(), sms.sender);
     if (sender == null) return null; // فرستنده‌ی مجاز نیست
-    final parsed =
-        parser.parse(sender: sms.sender, body: sms.body, bankId: sender.bankId);
-    if (!parsed.isCountable) return null; // OTP، بی‌شماره یا غیرتراکنش
+    var parsed = parser.parse(
+        sender: sms.sender, body: sms.body, bankId: sender.bankId, receivedAt: sms.receivedAt);
+    if (!parsed.isCountable) {
+      if (!_provable(parsed, sender)) return null; // OTP، غیرتراکنش یا بی‌بانک
+      final account = proveByBalance(
+          live: await store.getAll(),
+          candidates: [_candidate('0', sms, parsed, sender)])['0'];
+      if (account == null) return null; // بی‌شماره و مانده هم ثابتش نکرد
+      parsed = _withAccount(parsed, account);
+    }
     final outcome = await store.saveParsed(
       parsed,
       sender: sms.sender,
@@ -117,6 +132,28 @@ class SmsImporter {
     return result;
   }
 
+  /// فقط شماره‌ی حساب/کارت کم دارد (مبلغ و واریز/برداشت دارد، رمز/یادآوری نیست) و بانکش
+  /// معلوم است (پیامکِ بی‌بانک مثلِ اعتبارِ دیجی‌پی هرگز نامزد نیست).
+  static bool _provable(ParsedTransaction p, AllowedSender sender) =>
+      p.looksLikeTransaction &&
+      !p.hasAccountId &&
+      (p.kind == TxKind.income || p.kind == TxKind.expense) &&
+      (sender.bankId ?? p.bankId) != null;
+
+  static ProofCandidate _candidate(
+          String key, RawSms sms, ParsedTransaction p, AllowedSender sender) =>
+      ProofCandidate(
+        key: key,
+        bankId: sender.bankId ?? p.bankId,
+        signedAmount: p.kind == TxKind.income ? p.amountRial! : -p.amountRial!,
+        balanceAfterRial: p.balanceAfterRial,
+        at: proofTime(p.occurredAt, sms.receivedAt) ?? DateTime.now(),
+      );
+
+  static ParsedTransaction _withAccount(ParsedTransaction p, TransactionRecord account) =>
+      p.withAccount(
+          bankId: account.bankId, cardLast4: account.cardLast4, accountRef: account.accountRef);
+
   /// فهرستی از پیامک‌ها را وارد می‌کند و آمار می‌دهد.
   Future<ImportResult> importAll(List<RawSms> messages) async {
     final allowed = await store.allowedSenders();
@@ -124,16 +161,21 @@ class SmsImporter {
     var duplicates = 0;
     var skipped = 0;
     var notAllowed = 0;
+    final idless = <(RawSms, ParsedTransaction, AllowedSender)>[];
     for (final sms in messages) {
       final sender = findAllowedSender(allowed, sms.sender);
       if (sender == null) {
         notAllowed++;
         continue;
       }
-      final parsed =
-          parser.parse(sender: sms.sender, body: sms.body, bankId: sender.bankId);
+      final parsed = parser.parse(
+          sender: sms.sender, body: sms.body, bankId: sender.bankId, receivedAt: sms.receivedAt);
       if (!parsed.isCountable) {
-        skipped++;
+        if (_provable(parsed, sender)) {
+          idless.add((sms, parsed, sender));
+        } else {
+          skipped++;
+        }
         continue;
       }
       final outcome = await store.saveParsed(
@@ -148,11 +190,41 @@ class SmsImporter {
         duplicates++;
       }
     }
+
+    // دورِ دوم: پیامک‌های بی‌شماره در برابرِ زنجیره‌ی مانده‌ی حساب‌ها (بعد از ثبتِ بقیه).
+    var proven = 0;
+    if (idless.isNotEmpty) {
+      final byProof = proveByBalance(live: await store.getAll(), candidates: [
+        for (var i = 0; i < idless.length; i++)
+          _candidate('$i', idless[i].$1, idless[i].$2, idless[i].$3),
+      ]);
+      for (var i = 0; i < idless.length; i++) {
+        final account = byProof['$i'];
+        if (account == null) {
+          skipped++;
+          continue;
+        }
+        final (sms, parsed, _) = idless[i];
+        final outcome = await store.saveParsed(
+          _withAccount(parsed, account),
+          sender: sms.sender,
+          deviceId: deviceId,
+          receivedAt: sms.receivedAt,
+        );
+        if (outcome.isCreated) {
+          created++;
+          proven++;
+        } else {
+          duplicates++;
+        }
+      }
+    }
     return ImportResult(
       created: created,
       duplicates: duplicates,
       skipped: skipped,
       notAllowed: notAllowed,
+      proven: proven,
     );
   }
 }

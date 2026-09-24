@@ -1,10 +1,13 @@
 import 'dart:convert';
 
 import 'package:economy/core/diagnostics/repair.dart';
+import 'package:economy/core/diagnostics/sms_diagnosis.dart';
+import 'package:economy/core/sms/sms_fingerprint.dart';
 import 'package:economy/core/sms/sms_importer.dart';
 import 'package:economy/core/sms/sms_parser.dart';
 import 'package:economy/features/dashboard/dashboard_controller.dart';
 import 'package:economy/features/senders/data/allowed_sender.dart';
+import 'package:economy/features/transactions/data/transaction_record.dart';
 import 'package:economy/features/transactions/data/transaction_repository.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -145,5 +148,69 @@ void main() {
     await c.load();
     await c.restoreTransaction((await store.getById(id))!);
     expect(jsonDecode(store.settings[SettingKeys.autoRemoved]!), isEmpty);
+  });
+
+  group('نصبِ دوباره: نسخه‌های سرور (بدونِ متن و شماره‌ی حساب)', () {
+    TransactionRecord serverCopy(String id, RawSms sms,
+            {required int amount, int? balance, bool deleted = false, bool withBody = false}) =>
+        TransactionRecord(
+          id: id,
+          kind: 'income',
+          bankId: 'mellat',
+          amountRial: amount,
+          balanceAfterRial: balance,
+          transactionDate: sms.receivedAt,
+          sourceMessageHash: smsFingerprint(
+              sender: sms.sender, body: sms.body, receivedAt: sms.receivedAt),
+          origin: 'remote',
+          deletedAt: deleted ? now.subtract(const Duration(days: 2)) : null,
+          smsSender: withBody ? sms.sender : null,
+          smsBody: withBody ? sms.body : null,
+          smsReceivedAt: withBody ? sms.receivedAt : null,
+          createdAt: now,
+          updatedAt: now,
+        );
+
+    test('پیامکِ همان تراکنش شماره‌ی حساب را پر می‌کند و ردیف «محلی» می‌شود', () async {
+      store.addRecord(serverCopy('srv-deposit', deposit, amount: 485, balance: 1040193));
+      await SmsImporter(store).importAll(inbox);
+      final t = (await store.getById('srv-deposit'))!;
+      expect(t.accountRef, '4900000002');
+      expect(t.origin, 'local');
+      expect(t.smsBody, deposit.body);
+    });
+
+    test('ردیفِ متن‌دارِ بی‌شماره (نسخه‌های قبل) در تعمیر شماره می‌گیرد', () async {
+      store.addRecord(
+          serverCopy('srv-deposit', deposit, amount: 485, balance: 1040193, withBody: true));
+      final r = await c.runRepair();
+      expect(r.backfilled, greaterThanOrEqualTo(1));
+      final t = (await store.getById('srv-deposit'))!;
+      expect(t.accountRef, '4900000002');
+      expect(t.origin, 'local');
+    });
+
+    test('حذف‌شده‌ی سرور در «برگرداندنِ همه» هست؛ پیامکِ تکراری نه', () async {
+      store.addRecord(serverCopy('srv-interest', interest, amount: 86184, deleted: true));
+      store.addRecord(serverCopy('srv-deposit', deposit, amount: 485, balance: 1040193));
+      // بانک همان پیامکِ واریز را ۳۰ دقیقه بعد دوباره فرستاده و آن نسخه حذف شده.
+      final again = RawSms(
+          sender: mellat,
+          body: deposit.body,
+          receivedAt: deposit.receivedAt!.add(const Duration(minutes: 30)));
+      final all = [...inbox, again];
+      await SmsImporter(store).importAll(all);
+      final dup = [for (final t in await store.getAll()) if (t.smsReceivedAt == again.receivedAt!.toUtc()) t];
+      await store.deleteTransaction(dup.single.id);
+      await c.load();
+
+      final report = diagnoseSms(
+          inbox: all, stored: [...await store.getAll(), ...c.deletedSms], allowed: c.allowedSenders);
+      final restorable = c.restorableDeleted(report);
+      expect([for (final t in restorable) t.id], ['srv-interest']);
+      await c.restoreMany(restorable);
+      expect(await alive('srv-interest'), isTrue);
+      expect((await store.getById('srv-interest'))!.accountRef, '4900000002');
+    });
   });
 }
