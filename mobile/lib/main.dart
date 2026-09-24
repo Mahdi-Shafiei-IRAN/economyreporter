@@ -155,6 +155,7 @@ class _BootstrapState extends State<_Bootstrap> {
     // خواندن دوباره‌ی صندوق تا پیامک‌های قبلیِ همان فرستنده هم ثبت شوند.
     dashboard
       ..readInbox = smsInbox.readInbox
+      ..readInboxForDiagnosis = (() => smsInbox.readInbox(limit: 2000))
       ..onSendersChanged = smsInbox.importInbox;
 
     return _Services(

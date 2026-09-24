@@ -14,6 +14,7 @@ const kBalanceValueKey = Key('summary-balance');
 const kOpeningValueKey = Key('summary-opening');
 const kRangeLabelKey = Key('summary-range');
 const kSummaryTitleKey = Key('summary-title');
+const kSummaryExplainKey = Key('summary-explain');
 
 class SummaryCard extends StatelessWidget {
   final FinanceSummary summary;
@@ -28,6 +29,9 @@ class SummaryCard extends StatelessWidget {
   /// وقتی معلوم باشد: موجودیِ نهایی = اولِ دوره + درآمد − هزینه (منطقی و هم‌خوان).
   final int? openingBalance;
 
+  /// «این عدد از کجا آمده؟» (صفحه‌ی عیب‌یابی)؛ null یعنی دکمه نشان داده نشود.
+  final VoidCallback? onExplain;
+
   const SummaryCard({
     super.key,
     required this.summary,
@@ -36,6 +40,7 @@ class SummaryCard extends StatelessWidget {
     this.filtered = false,
     this.scope,
     this.openingBalance,
+    this.onExplain,
   });
 
   bool get _hasBalance => openingBalance != null;
@@ -69,10 +74,34 @@ class SummaryCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            _title,
-            key: kSummaryTitleKey,
-            style: theme.textTheme.labelLarge?.copyWith(color: muted),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  _title,
+                  key: kSummaryTitleKey,
+                  style: theme.textTheme.labelLarge?.copyWith(color: muted),
+                ),
+              ),
+              if (onExplain != null)
+                InkWell(
+                  key: kSummaryExplainKey,
+                  onTap: onExplain,
+                  borderRadius: BorderRadius.circular(12),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.help_outline_rounded, size: 16, color: muted),
+                        const SizedBox(width: 4),
+                        Text('چرا این عدد؟',
+                            style: theme.textTheme.labelSmall?.copyWith(color: muted)),
+                      ],
+                    ),
+                  ),
+                ),
+            ],
           ),
           const SizedBox(height: 4),
           Row(

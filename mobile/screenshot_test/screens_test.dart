@@ -17,6 +17,7 @@ import 'package:economy/features/auth/auth_controller.dart';
 import 'package:economy/features/auth/login_screen.dart';
 import 'package:economy/features/dashboard/dashboard_controller.dart';
 import 'package:economy/features/dashboard/dashboard_screen.dart';
+import 'package:economy/features/diagnostics/diagnostics_screen.dart';
 import 'package:economy/features/review/reconciliation_screen.dart';
 import 'package:economy/features/review/review_screen.dart';
 import 'package:economy/features/senders/senders_screen.dart';
@@ -41,7 +42,11 @@ Future<void> _loadFonts() async {
     ..addFont(rootBundle.load('assets/fonts/Vazirmatn-Regular.ttf'));
   await vazir.load();
   final root = Platform.environment['FLUTTER_ROOT'] ?? 'C:/flutter';
-  final iconsFile = File('$root/bin/cache/artifacts/material_fonts/materialicons-regular.otf');
+  // نامِ فایل روی لینوکس به بزرگی/کوچکیِ حروف حساس است.
+  final iconsFile = [
+    File('$root/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf'),
+    File('$root/bin/cache/artifacts/material_fonts/materialicons-regular.otf'),
+  ].firstWhere((f) => f.existsSync());
   final icons = FontLoader('MaterialIcons')
     ..addFont(Future.value(iconsFile.readAsBytesSync().buffer.asByteData()));
   await icons.load();
@@ -155,6 +160,47 @@ Future<void> _shot(WidgetTester tester, String name) async {
 void _repaintAll(WidgetTester tester) {
   final root = tester.binding.rootElement;
   if (root != null) tester.binding.buildOwner!.reassemble(root);
+}
+
+/// داده‌ی صفحه‌ی عیب‌یابی: همان الگوی مشکلاتِ واقعیِ کاربر (اعداد ساختگی).
+final _diagNow = DateTime.utc(2026, 9, 24, 9); // ۲ مهر ۱۴۰۵
+final _diagInbox = [
+  RawSms(
+      sender: '9830001234',
+      body: 'حساب1000000009\nواریز5,000,000\nمانده30,000,000\n05/06/25-10:00',
+      receivedAt: DateTime.utc(2026, 9, 16, 6, 30)),
+  RawSms(
+      sender: '9830001234',
+      body: 'حساب1000000009\nبرداشت1,250,000\nمانده28,750,000\n05/07/01-15:40',
+      receivedAt: DateTime.utc(2026, 9, 23, 12, 10)),
+  // واریزِ حقوق که به‌خاطرِ «قابل برداشت» برداشت خوانده می‌شود.
+  RawSms(
+      sender: '9830001234',
+      body: 'واریز حقوق 45,000,000 ریال به حساب1000000009\nمانده:73,750,000 ریال (قابل برداشت)\n05/07/02-08:00',
+      receivedAt: DateTime.utc(2026, 9, 24, 4, 30)),
+  // همان حساب، این بار با شماره‌ی کارت.
+  RawSms(
+      sender: '9830001234',
+      body: 'بانک ملت\nخرید از کارت 1234\nمبلغ: 750,000 ریال\nمانده: 73,000,000 ریال\n1405/07/02 11:00',
+      receivedAt: DateTime.utc(2026, 9, 24, 7, 30)),
+  RawSms(
+      sender: 'DigiPay',
+      body: 'پرداخت بدهی و شارژ اعتبار دیجی‌پی\nاعتبار قابل مصرف: ۵۰٬۰۰۰٬۰۰۰ ریال',
+      receivedAt: DateTime.utc(2026, 9, 23, 16)),
+  RawSms(
+      sender: '9830001234',
+      body: 'رمز پویا: 482913\nمبلغ 1,000,000 ریال\nاعتبار 120 ثانیه',
+      receivedAt: DateTime.utc(2026, 9, 24, 8)),
+];
+
+Future<DashboardController> _diagController() async {
+  final store = FakeTransactionStore(clock: () => _diagNow);
+  await store.addAllowedSender('9830001234', bankId: 'mellat', ownerName: 'مهدی');
+  await store.addAllowedSender('DigiPay', ownerName: 'مهدی');
+  await SmsImporter(store).importAll(_diagInbox);
+  final c = DashboardController(store, clock: () => _diagNow)..readInbox = () async => _diagInbox;
+  await c.load();
+  return c;
 }
 
 void _phone(WidgetTester tester, {double height = 1500}) {
@@ -299,6 +345,26 @@ void main() {
         ];
     await tester.pumpWidget(_app(SendersScreen(controller: c)));
     await _shot(tester, '13_senders_light');
+  });
+
+  testWidgets('diagnostics balance', (tester) async {
+    _phone(tester, height: 1900);
+    await tester.pumpWidget(_app(DiagnosticsScreen(controller: await _diagController())));
+    await _shot(tester, '15_diag_balance_light');
+  });
+
+  testWidgets('diagnostics chain', (tester) async {
+    _phone(tester, height: 2100);
+    await tester.pumpWidget(
+        _app(DiagnosticsScreen(controller: await _diagController(), initialTab: 1)));
+    await _shot(tester, '16_diag_chain_light');
+  });
+
+  testWidgets('diagnostics sms', (tester) async {
+    _phone(tester, height: 2600);
+    await tester.pumpWidget(
+        _app(DiagnosticsScreen(controller: await _diagController(), initialTab: 2)));
+    await _shot(tester, '17_diag_sms_light');
   });
 
   testWidgets('login', (tester) async {

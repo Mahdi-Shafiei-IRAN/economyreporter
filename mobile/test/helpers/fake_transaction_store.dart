@@ -405,6 +405,10 @@ class FakeTransactionStore implements TransactionStore {
   }
 
   @override
+  Future<List<TransactionRecord>> deletedSmsTransactions() async =>
+      [for (final t in _items) if (t.isDeleted && t.source == 'sms') t];
+
+  @override
   Future<List<AllowedSender>> allowedSenders() async => List.of(_senders);
 
   @override

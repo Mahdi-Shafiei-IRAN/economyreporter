@@ -57,28 +57,48 @@ bool countsInTotals(TransactionRecord t) =>
     (t.kind == 'income' || t.kind == 'expense');
 
 /// کلیدِ کارت برای گروه‌بندیِ موجودی (بانک + شماره‌ی کارت/حساب، وگرنه صاحب).
-String _balanceCardKey(TransactionRecord t) {
+String balanceCardKey(TransactionRecord t) {
   final bank = t.bankId ?? '';
   if (t.cardLast4?.isNotEmpty ?? false) return '$bank|c:${t.cardLast4}';
   if (t.accountRef?.isNotEmpty ?? false) return '$bank|a:${t.accountRef}';
   return '$bank|u:${t.ownerUserId ?? t.walletLabel ?? 'unknown'}';
 }
 
-/// موجودیِ واقعی: برای هر کارت، «مانده»ی آخرین پیامکِ بانک (که مطلق است و شاملِ
-/// موجودیِ ابتدای دوره می‌شود) را می‌گیرد و تراکنش‌های بعد از آن مانده را هم اعمال
-/// می‌کند؛ سپس جمعِ همه‌ی کارت‌ها. [asOf] = فقط تا این زمان (پایان دوره).
-///
-/// چرا؟ چون «خالص = درآمد − هزینه» موجودیِ ابتدای دوره را صفر می‌گیرد و غلط است؛
-/// ولی مانده‌ی بانک عددِ واقعیِ حساب است.
-int realBalanceRial(Iterable<TransactionRecord> all, {DateTime? asOf}) {
+/// سهمِ یک کارت در [realBalanceRial] و اینکه عددش از کجا آمده.
+class CardBalance {
+  final String key;
+  final int balanceRial;
+
+  /// آخرین تراکنشِ مانده‌دار؛ null یعنی مانده‌ای نبود و [balanceRial] فقط جمعِ
+  /// علامت‌دارِ تراکنش‌هاست (تخمین، بدون موجودیِ ابتدایی).
+  final TransactionRecord? anchor;
+
+  /// یک تراکنشِ نمونه از همین کارت (برای عنوان).
+  final TransactionRecord sample;
+
+  const CardBalance({
+    required this.key,
+    required this.balanceRial,
+    required this.anchor,
+    required this.sample,
+  });
+
+  bool get isEstimate => anchor == null;
+}
+
+/// موجودیِ واقعیِ هر کارت: «مانده»ی آخرین پیامکِ بانک (که مطلق است و شاملِ
+/// موجودیِ ابتدای دوره می‌شود) به‌اضافه‌ی تراکنش‌های بعد از آن مانده.
+/// [asOf] = فقط تا این زمان (پایان دوره).
+Map<String, CardBalance> realBalanceByCard(Iterable<TransactionRecord> all,
+    {DateTime? asOf}) {
   final byCard = <String, List<TransactionRecord>>{};
   for (final t in all) {
     if (t.isDeleted) continue;
     if (asOf != null && t.effectiveTime.isAfter(asOf)) continue;
-    byCard.putIfAbsent(_balanceCardKey(t), () => []).add(t);
+    byCard.putIfAbsent(balanceCardKey(t), () => []).add(t);
   }
-  var total = 0;
-  for (final list in byCard.values) {
+  final result = <String, CardBalance>{};
+  byCard.forEach((key, list) {
     list.sort((a, b) => a.effectiveTime.compareTo(b.effectiveTime));
     // آخرین تراکنشی که مانده دارد.
     var anchor = -1;
@@ -88,18 +108,30 @@ int realBalanceRial(Iterable<TransactionRecord> all, {DateTime? asOf}) {
         break;
       }
     }
-    if (anchor == -1) {
-      // هیچ مانده‌ای نداریم؛ بهترین تخمین: جمعِ علامت‌دار (بدون موجودیِ ابتدایی).
-      for (final t in list) {
-        total += t.signedAmount;
-      }
-    } else {
-      total += list[anchor].balanceAfterRial!;
-      // تراکنش‌های بعد از آن مانده را هم اعمال کن (اگر پیامکِ جدیدتری مانده نداشت).
-      for (var i = anchor + 1; i < list.length; i++) {
-        total += list[i].signedAmount;
-      }
+    // بدون مانده: بهترین تخمین جمعِ علامت‌دار است (بدون موجودیِ ابتدایی). با مانده:
+    // تراکنش‌های بعد از آن هم اعمال می‌شوند (اگر پیامکِ جدیدتری مانده نداشت).
+    var balance = anchor == -1 ? 0 : list[anchor].balanceAfterRial!;
+    for (var i = anchor + 1; i < list.length; i++) {
+      balance += list[i].signedAmount;
     }
+    result[key] = CardBalance(
+      key: key,
+      balanceRial: balance,
+      anchor: anchor == -1 ? null : list[anchor],
+      sample: list.last,
+    );
+  });
+  return result;
+}
+
+/// موجودیِ واقعی: جمعِ [realBalanceByCard] روی همه‌ی کارت‌ها.
+///
+/// چرا؟ چون «خالص = درآمد − هزینه» موجودیِ ابتدای دوره را صفر می‌گیرد و غلط است؛
+/// ولی مانده‌ی بانک عددِ واقعیِ حساب است.
+int realBalanceRial(Iterable<TransactionRecord> all, {DateTime? asOf}) {
+  var total = 0;
+  for (final c in realBalanceByCard(all, asOf: asOf).values) {
+    total += c.balanceRial;
   }
   return total;
 }
@@ -210,6 +242,9 @@ abstract class TransactionStore {
 
   /// حذف نرم: تراکنش نامعتبر (ناموفق/پیامک رمز) پنهان می‌شود ولی پیامکش دوباره وارد نمی‌شود.
   Future<void> deleteTransaction(String id);
+
+  /// تراکنش‌های پیامکیِ حذف‌شده (برای عیب‌یابی: پیامکی که کاربر نامعتبر کرده).
+  Future<List<TransactionRecord>> deletedSmsTransactions();
 
   /// انتسابِ دستیِ تراکنش به یک کیفِ مشخص (وقتی شخص چند حساب در یک بانک دارد و
   /// پیامک شماره نداشته). این انتساب پایدار است و با حدسِ خودکار بازنویسی نمی‌شود.
@@ -1166,6 +1201,10 @@ class TransactionRepository implements TransactionStore {
     await setSetting(SettingKeys.categorizeFrom, start.toIso8601String());
     return start;
   }
+
+  @override
+  Future<List<TransactionRecord>> deletedSmsTransactions() =>
+      _select(['t.deleted_at IS NOT NULL', "t.source = 'sms'"], const []);
 
   @override
   Future<List<TransactionRecord>> uncategorized({int? limit}) async {

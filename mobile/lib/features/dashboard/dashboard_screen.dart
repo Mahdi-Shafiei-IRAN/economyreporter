@@ -8,6 +8,7 @@ import '../../core/format/money_format.dart';
 import '../../core/theme/app_theme.dart';
 import '../categories/categorize_list_screen.dart';
 import '../categories/categorize_screen.dart';
+import '../diagnostics/diagnostics_screen.dart';
 import '../reports/report_screen.dart';
 import '../review/reconciliation_screen.dart';
 import '../review/duplicates_screen.dart';
@@ -375,6 +376,7 @@ class _TransactionsTabState extends State<_TransactionsTab> {
                             filtered: c.hasActiveFilters,
                             scope: c.person == null ? null : _personLabel(c.person!),
                             openingBalance: c.openingBalance,
+                            onExplain: () => _push(DiagnosticsScreen(controller: c)),
                           ),
                         ),
                       ),

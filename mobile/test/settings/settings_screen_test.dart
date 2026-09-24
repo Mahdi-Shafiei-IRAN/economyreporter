@@ -55,6 +55,7 @@ void main() {
     await controller.load();
     await pump(tester);
 
+    await tester.scrollUntilVisible(find.textContaining('سرور در دسترس نبود'), 300);
     expect(find.textContaining('سرور در دسترس نبود'), findsOneWidget);
     expect(find.textContaining('۱۰۷ تراکنش در صف ماند'), findsOneWidget);
   });
@@ -62,7 +63,7 @@ void main() {
   testWidgets('همگام‌سازی دستی نتیجه را نشان می‌دهد', (tester) async {
     await pump(tester, onSync: () async => 'همگام‌سازی انجام شد: ۲ ارسال، ۰ دریافت');
 
-    await tester.ensureVisible(find.byKey(kSyncNowKey));
+    await tester.scrollUntilVisible(find.byKey(kSyncNowKey), 300);
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(kSyncNowKey));
     await tester.pumpAndSettle();

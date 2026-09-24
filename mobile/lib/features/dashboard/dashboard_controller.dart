@@ -9,6 +9,10 @@ import 'package:flutter/foundation.dart' hide Category;
 
 import '../../core/family/family_api.dart';
 import '../../core/dedup/duplicate_finder.dart';
+import '../../core/diagnostics/balance_breakdown.dart';
+import '../../core/diagnostics/balance_chain.dart';
+import '../../core/diagnostics/diagnostic_report.dart';
+import '../../core/diagnostics/sms_diagnosis.dart';
 import '../../core/reconcile/reconciliation.dart';
 import '../../core/transfer/transfer_finder.dart';
 import '../budgets/data/budget.dart';
@@ -37,6 +41,9 @@ class DashboardController extends ChangeNotifier {
 
   /// خواندن صندوق پیامک گوشی (برای پیشنهاد فرستنده‌های بانک).
   Future<List<RawSms>> Function()? readInbox;
+
+  /// خواندنِ عمیق‌ترِ صندوق برای صفحه‌ی عیب‌یابی (اگر نبود، همان [readInbox]).
+  Future<List<RawSms>> Function()? readInboxForDiagnosis;
 
   /// بعد از مجاز کردن فرستنده‌ی تازه: خواندن دوباره‌ی صندوق، تا پیامک‌های قبلیِ
   /// همان فرستنده هم ثبت شوند.
@@ -131,6 +138,50 @@ class DashboardController extends ChangeNotifier {
     if (o == null) return null;
     return o + summary.balanceRial;
   }
+
+  // ---------------------------------------------------------------------------
+  // عیب‌یابی (فقط خواندنی؛ چیزی را تغییر نمی‌دهد)
+  // ---------------------------------------------------------------------------
+
+  /// عددِ موجودیِ کارت خلاصه، کارت به کارت، کنارِ موجودیِ آخرِ دوره طبق بانک.
+  BalanceBreakdown balanceBreakdown() =>
+      computeBalanceBreakdown(_scopedAll, period);
+
+  /// زنجیره‌ی مانده‌ی هر حساب (شخصِ انتخاب‌شده اعمال می‌شود).
+  BalanceChainReport balanceChains() => auditBalanceChains(_scopedAll);
+
+  /// سرنوشتِ هر پیامکِ فرستنده‌های مجاز + پیش‌نمایشِ قانونِ پیشنهادی.
+  Future<SmsDiagnosisReport> diagnoseSmsMessages() async {
+    var inbox = const <RawSms>[];
+    var inboxRead = false;
+    final read = readInboxForDiagnosis ?? readInbox;
+    if (read != null) {
+      try {
+        inbox = await read();
+        inboxRead = true;
+      } catch (_) {
+        // بدون مجوز پیامک فقط تراکنش‌های ثبت‌شده بررسی می‌شوند.
+      }
+    }
+    return diagnoseSms(
+      inbox: inbox,
+      stored: [..._byId.values, ...await repository.deletedSmsTransactions()],
+      allowed: allowedSenders,
+      parser: parser,
+      inboxRead: inboxRead,
+    );
+  }
+
+  /// گزارشِ عیب‌یابیِ متنی (شماره‌ی کارت/حساب پوشانده) برای کپی.
+  String diagnosticReportText({SmsDiagnosisReport? sms, String? appVersion}) =>
+      buildDiagnosticReport(
+        balance: balanceBreakdown(),
+        chains: balanceChains(),
+        sms: sms,
+        now: now,
+        scope: person,
+        appVersion: appVersion,
+      );
 
   /// گزارشِ به‌تفکیکِ کارت: هر کارت با موجودیِ واقعی و درآمد/هزینهٔ [p].
   /// (شخصِ انتخاب‌شده اعمال می‌شود؛ کارت‌ها بر اساسِ موجودی مرتب می‌شوند.)

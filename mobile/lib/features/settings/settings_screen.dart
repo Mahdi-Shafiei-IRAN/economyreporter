@@ -10,6 +10,7 @@ import '../../core/theme/theme_controller.dart';
 import '../categories/categorize_list_screen.dart';
 import '../budgets/budgets_screen.dart';
 import '../dashboard/dashboard_controller.dart';
+import '../diagnostics/diagnostics_screen.dart';
 import '../family/add_member_screen.dart';
 import '../review/reconciliation_screen.dart';
 import '../review/review_screen.dart';
@@ -24,6 +25,7 @@ const kSettingsSendersKey = Key('settings-senders');
 const kShowSmsToggleKey = Key('settings-show-sms');
 const kSettingsReviewKey = Key('settings-review');
 const kSettingsReconcileKey = Key('settings-reconcile');
+const kSettingsDiagnosticsKey = Key('settings-diagnostics');
 const kSettingsCategorizeKey = Key('settings-categorize');
 const kCategorizeFromTileKey = Key('settings-categorize-from');
 const kSyncNowKey = Key('settings-sync-now');
@@ -201,6 +203,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   subtitle: const Text('وقتی مانده‌ی پیامک‌ها با هم جور نیست'),
                   trailing: _Count(c.balanceGaps.length),
                   onTap: () => _push(ReconciliationScreen(controller: c)),
+                ),
+                const Divider(indent: 56),
+                ListTile(
+                  key: kSettingsDiagnosticsKey,
+                  leading: const Icon(Icons.troubleshoot),
+                  title: const Text('عیب‌یابی موجودی و پیامک‌ها'),
+                  subtitle: const Text('چرا موجودی این عدد است و هر پیامک چرا شمرده شد/نشد'),
+                  trailing: _Count(c.balanceChains().problemCount),
+                  onTap: () => _push(DiagnosticsScreen(controller: c)),
                 ),
                 const Divider(indent: 56),
                 ListTile(
