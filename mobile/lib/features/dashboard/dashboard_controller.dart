@@ -51,6 +51,9 @@ class DashboardController extends ChangeNotifier {
   /// همان فرستنده هم ثبت شوند.
   Future<void> Function()? onSendersChanged;
 
+  /// خواندنِ دوباره‌ی کلِ صندوقِ پیامک (تعداد تراکنش‌های تازه).
+  Future<int> Function()? importWholeInbox;
+
   DashboardController(
     this.repository, {
     this.parser = const SmsParser(),
@@ -830,9 +833,30 @@ class DashboardController extends ChangeNotifier {
     await load();
   }
 
-  Future<void> removeAllowedSender(String id) async {
+  /// [deleteTransactions]: تراکنش‌هایی که از پیامکِ همین فرستنده ثبت شده هم حذف (نرم) شوند.
+  Future<void> removeAllowedSender(String id, {bool deleteTransactions = false}) async {
+    AllowedSender? sender;
+    for (final s in allowedSenders) {
+      if (s.id == id) sender = s;
+    }
     await repository.deleteAllowedSender(id);
+    if (deleteTransactions && sender != null) {
+      await invalidateMany(transactionsOfSender(sender.address).where(canEdit));
+    }
     await load();
+  }
+
+  /// تراکنش‌های ثبت‌شده از پیامکِ یک فرستنده (روی همین گوشی).
+  List<TransactionRecord> transactionsOfSender(String address) => [
+        for (final t in _byId.values)
+          if (!t.isDeleted && t.smsSender != null && sameSender(t.smsSender!, address)) t,
+      ];
+
+  /// «خواندنِ دوباره‌ی همه‌ی پیامک‌ها»: کلِ صندوق با قانون‌های فعلی؛ تعداد تراکنش‌های تازه.
+  Future<int> rescanInbox() async {
+    final n = await importWholeInbox?.call() ?? 0;
+    await load();
+    return n;
   }
 
   // ---------------------------------------------------------------------------

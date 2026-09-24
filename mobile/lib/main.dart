@@ -164,10 +164,13 @@ class _BootstrapState extends State<_Bootstrap> {
 
     // پیشنهاد فرستنده‌های بانک از صندوق گوشی؛ و بعد از مجاز کردن یک فرستنده،
     // خواندن دوباره‌ی صندوق تا پیامک‌های قبلیِ همان فرستنده هم ثبت شوند.
+    // پیشنهاد فرستنده‌ها و عیب‌یابی از کلِ صندوق؛ بعد از مجاز کردنِ فرستنده (یا «خواندنِ
+    // دوباره») کلِ صندوق دوباره خوانده می‌شود تا پیامک‌های قدیمی‌ترِ همان بانک هم ثبت شوند.
     dashboard
-      ..readInbox = smsInbox.readInbox
-      ..readInboxForDiagnosis = (() => smsInbox.readInbox(limit: 2000))
-      ..onSendersChanged = smsInbox.importInbox;
+      ..readInbox = (() => smsInbox.readInbox(limit: 5000))
+      ..readInboxForDiagnosis = (() => smsInbox.readInbox(limit: 5000))
+      ..importWholeInbox = (() => smsInbox.importInbox(full: true))
+      ..onSendersChanged = (() => smsInbox.importInbox(full: true));
 
     return _Services(
       auth: auth,

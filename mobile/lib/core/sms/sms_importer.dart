@@ -87,6 +87,31 @@ class SmsImporter {
     return !t.effectiveTime.isBefore(await store.categorizeFrom());
   }
 
+  /// واردکردنِ صندوقِ گوشی. [full] = false: فقط پیامک‌های بعد از آخرین خواندن (با ۲ روز
+  /// حاشیه)؛ اولین بار (یا [full]) همه. «آخرین خواندن» بعد از هر بار به‌روز می‌شود.
+  Future<ImportResult> importInbox(List<RawSms> inbox, {bool full = false}) async {
+    final raw = full ? null : await store.getSetting(SettingKeys.inboxWatermark);
+    final watermark = raw == null ? null : DateTime.tryParse(raw);
+    final since = watermark?.subtract(const Duration(days: 2));
+    final messages = since == null
+        ? inbox
+        : [
+            for (final m in inbox)
+              if (m.receivedAt == null || m.receivedAt!.isAfter(since)) m,
+          ];
+    final result = await importAll(messages);
+    DateTime? newest;
+    for (final m in inbox) {
+      final at = m.receivedAt;
+      if (at != null && (newest == null || at.isAfter(newest))) newest = at;
+    }
+    if (newest != null &&
+        (watermark == null || newest.isAfter(watermark))) {
+      await store.setSetting(SettingKeys.inboxWatermark, newest.toUtc().toIso8601String());
+    }
+    return result;
+  }
+
   /// فهرستی از پیامک‌ها را وارد می‌کند و آمار می‌دهد.
   Future<ImportResult> importAll(List<RawSms> messages) async {
     final allowed = await store.allowedSenders();

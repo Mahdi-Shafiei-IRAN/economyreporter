@@ -36,19 +36,23 @@ class SmsInboxService {
     return granted ?? false;
   }
 
-  /// پیامک‌های اخیر صندوق ورودی (جدیدترین اول). چیزی ذخیره نمی‌کند؛ برای
-  /// پیشنهاد فرستنده‌های بانک هم استفاده می‌شود.
-  Future<List<RawSms>> readInbox({int limit = 300}) async {
+  /// پیامک‌های صندوق ورودی (جدیدترین اول)؛ [limit] = null یعنی همه. چیزی ذخیره نمی‌کند؛
+  /// برای پیشنهاد فرستنده‌ها و عیب‌یابی هم استفاده می‌شود. (سیستم‌عامل به‌هرحال همه را
+  /// برمی‌گرداند؛ محدودیت فقط پردازش را کم می‌کند.)
+  Future<List<RawSms>> readInbox({int? limit}) async {
     final messages = await _telephony.getInboxSms(
       columns: [SmsColumn.ADDRESS, SmsColumn.BODY, SmsColumn.DATE],
       sortOrder: [OrderBy(SmsColumn.DATE, sort: Sort.DESC)],
     );
-    return messages.take(limit).map(_toRaw).toList();
+    return (limit == null ? messages : messages.take(limit)).map(_toRaw).toList();
   }
 
-  /// وارد کردن پیامک‌های اخیر صندوق ورودی (هنگام باز شدن اپ). تعداد تراکنش جدید.
-  Future<int> importInbox({int limit = 300}) async {
-    final result = await importer.importAll(await readInbox(limit: limit));
+  /// وارد کردن پیامک‌های صندوق. [full]: همه‌ی صندوق (بعد از مجاز کردنِ فرستنده یا
+  /// «خواندنِ دوباره»)؛ وگرنه فقط پیامک‌های بعد از آخرین خواندن (باز شدنِ اپ).
+  /// قبلاً فقط ۳۰۰ پیامکِ آخرِ کلِ صندوق خوانده می‌شد و پیامکِ قدیمی‌ترِ بانک هیچ‌وقت
+  /// ثبت نمی‌شد. تعداد تراکنش جدید را برمی‌گرداند.
+  Future<int> importInbox({bool full = false}) async {
+    final result = await importer.importInbox(await readInbox(), full: full);
     if (result.created > 0) onChanged?.call();
     return result.created;
   }

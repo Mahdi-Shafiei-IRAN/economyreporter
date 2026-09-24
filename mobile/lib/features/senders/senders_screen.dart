@@ -9,6 +9,7 @@ import '../../core/format/money_format.dart';
 import '../../core/sms/bank_registry.dart';
 import '../../core/theme/app_theme.dart';
 import '../dashboard/dashboard_controller.dart';
+import '../diagnostics/diagnostics_screen.dart';
 import '../transactions/transaction_details_sheet.dart';
 import 'data/allowed_sender.dart';
 import 'data/sender_candidates.dart';
@@ -18,6 +19,8 @@ const kSenderAddressFieldKey = Key('sender-address');
 const kSenderSaveKey = Key('sender-save');
 const kSendersEmptyKey = Key('senders-empty');
 const kCandidatesEmptyKey = Key('candidates-empty');
+const kSendersRescanKey = Key('senders-rescan');
+const kSendersWhyKey = Key('senders-why');
 
 String _fa(int n) => toPersianDigits('$n');
 
@@ -42,6 +45,7 @@ class _SendersScreenState extends State<SendersScreen> {
   DashboardController get _c => widget.controller;
   late Future<List<SenderCandidate>> _candidates = _c.senderCandidates();
   final _messengerKey = GlobalKey<ScaffoldMessengerState>();
+  bool _rescanning = false;
 
   void _refresh() {
     setState(() {
@@ -146,25 +150,48 @@ class _SendersScreenState extends State<SendersScreen> {
   }
 
   Future<void> _remove(AllowedSender s) async {
-    final ok = await showDialog<bool>(
+    final n = _c.transactionsOfSender(s.address).length;
+    // null = انصراف؛ false = فقط بردار؛ true = بردار و تراکنش‌هایش را هم حذف کن.
+    final choice = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: Text('«${s.address}» از فهرست برداشته شود؟'),
-        content: const Text('از این به بعد پیامک‌هایش ثبت نمی‌شود. تراکنش‌هایی که '
-            'قبلاً ثبت شده‌اند می‌مانند.'),
+        content: Text(n == 0
+            ? 'از این به بعد پیامک‌هایش ثبت نمی‌شود.'
+            : 'از این به بعد پیامک‌هایش ثبت نمی‌شود. ${_fa(n)} تراکنشی که قبلاً از این '
+                'فرستنده ثبت شده بماند یا حذف شود؟'),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('انصراف')),
+              onPressed: () => Navigator.pop(context), child: const Text('انصراف')),
+          if (n > 0)
+            TextButton(
+                key: const Key('sender-remove-with-tx'),
+                onPressed: () => Navigator.pop(context, true),
+                child: Text('بردار و ${_fa(n)} تراکنش را حذف کن')),
           FilledButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('بردار')),
+              key: const Key('sender-remove'),
+              onPressed: () => Navigator.pop(context, false),
+              child: Text(n > 0 ? 'فقط بردار' : 'بردار')),
         ],
       ),
     );
-    if (ok != true) return;
-    await _c.removeAllowedSender(s.id);
+    if (choice == null) return;
+    await _c.removeAllowedSender(s.id, deleteTransactions: choice);
     if (mounted) _refresh();
+  }
+
+  Future<void> _rescan() async {
+    setState(() => _rescanning = true);
+    try {
+      final n = await _c.rescanInbox();
+      if (!mounted) return;
+      _refresh();
+      _snack(n > 0
+          ? '${_fa(n)} تراکنشِ تازه از پیامک‌های قدیمی‌تر ثبت شد.'
+          : 'همه‌ی پیامک‌های تراکنشیِ فرستنده‌های مجاز قبلاً ثبت شده بودند.');
+    } finally {
+      if (mounted) setState(() => _rescanning = false);
+    }
   }
 
   Future<void> _addManually() async {
@@ -204,6 +231,25 @@ class _SendersScreenState extends State<SendersScreen> {
               children: [
                 const _Explain(),
                 _Title('فرستنده‌های مجاز (${_fa(allowed.length)})'),
+                if (allowed.isNotEmpty)
+                  Wrap(spacing: 8, runSpacing: 4, children: [
+                    OutlinedButton.icon(
+                      key: kSendersRescanKey,
+                      onPressed: _rescanning ? null : _rescan,
+                      icon: _rescanning
+                          ? const SizedBox(
+                              width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                          : const Icon(Icons.refresh_rounded),
+                      label: const Text('خواندنِ دوباره‌ی همه‌ی پیامک‌ها'),
+                    ),
+                    TextButton.icon(
+                      key: kSendersWhyKey,
+                      onPressed: () => Navigator.of(context).push(MaterialPageRoute(
+                          builder: (_) => DiagnosticsScreen(controller: _c, initialTab: 2))),
+                      icon: const Icon(Icons.help_outline_rounded),
+                      label: const Text('چرا بعضی پیامک‌ها ثبت نشده؟'),
+                    ),
+                  ]),
                 if (allowed.isEmpty)
                   const _NoSenders(key: kSendersEmptyKey)
                 else
@@ -223,6 +269,7 @@ class _SendersScreenState extends State<SendersScreen> {
                                   ? 'بانک نامشخص'
                                   : bankNameById(allowed[i].bankId!),
                               if (allowed[i].hasOwner) 'صاحب: ${allowed[i].ownerName}',
+                              '${_fa(_c.transactionsOfSender(allowed[i].address).length)} تراکنش',
                             ].join(' • ')),
                             trailing: IconButton(
                               tooltip: 'برداشتن از فهرست',

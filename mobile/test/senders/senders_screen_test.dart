@@ -112,4 +112,39 @@ void main() {
     expect(controller.allowedSenders.single.address, 'Saman');
     expect(controller.allowedSenders.single.bankId, 'saman');
   });
+
+  testWidgets('خواندنِ دوباره‌ی همه‌ی پیامک‌ها + برداشتنِ فرستنده همراهِ تراکنش‌هایش',
+      (tester) async {
+    await controller.addAllowedSender('BankMellat', bankId: 'mellat');
+    store.seed(
+        const SmsParser().parse(
+            sender: 'BankMellat', body: 'خرید مبلغ 50,000 ریال از کارت 1234', bankId: 'mellat'),
+        sender: 'BankMellat',
+        receivedAt: now);
+    var rescans = 0;
+    controller.importWholeInbox = () async {
+      rescans++;
+      return 3;
+    };
+    await controller.load();
+    await pump(tester);
+
+    expect(
+        find.descendant(
+            of: find.byKey(const ValueKey('allowed-BankMellat')),
+            matching: find.textContaining('۱ تراکنش')),
+        findsOneWidget);
+    await tester.tap(find.byKey(kSendersRescanKey));
+    await tester.pumpAndSettle();
+    expect(rescans, 1);
+    expect(find.textContaining('۳ تراکنشِ تازه'), findsOneWidget);
+    await drainSnackBar(tester);
+
+    await tester.tap(find.byTooltip('برداشتن از فهرست'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('sender-remove-with-tx')));
+    await tester.pumpAndSettle();
+    expect(controller.allowedSenders, isEmpty);
+    expect(controller.transactionsOfSender('BankMellat'), isEmpty);
+  });
 }

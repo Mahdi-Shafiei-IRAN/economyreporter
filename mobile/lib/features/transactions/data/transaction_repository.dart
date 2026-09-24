@@ -335,6 +335,9 @@ class SettingKeys {
   /// JSON: نتیجه‌ی آخرین تعمیرِ خودکار (زمان و شمارش‌ها).
   static const repairResult = 'repair_result';
 
+  /// زمانِ جدیدترین پیامکی که از صندوق خوانده شد (واردکردنِ بعدی فقط از همین‌جا).
+  static const inboxWatermark = 'inbox_watermark';
+
   /// cursor دریافتِ کیف‌ها از سرور.
   static const walletCursor = 'wallet_cursor';
 
