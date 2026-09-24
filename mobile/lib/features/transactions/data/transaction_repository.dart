@@ -335,6 +335,10 @@ class SettingKeys {
   /// JSON: نتیجه‌ی آخرین تعمیرِ خودکار (زمان و شمارش‌ها).
   static const repairResult = 'repair_result';
 
+  /// JSON: شناسه‌ی تراکنش‌هایی که **خودِ برنامه** حذف کرده (تعمیرِ خودکار، برداشتنِ فرستنده
+  /// همراهِ تراکنش‌هایش). اگر بعداً با قانون بخوانند خودکار برمی‌گردند؛ حذفِ دستیِ کاربر نه.
+  static const autoRemoved = 'auto_removed';
+
   /// زمانِ جدیدترین پیامکی که از صندوق خوانده شد (واردکردنِ بعدی فقط از همین‌جا).
   static const inboxWatermark = 'inbox_watermark';
 

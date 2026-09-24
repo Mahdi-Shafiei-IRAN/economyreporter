@@ -31,6 +31,7 @@ const kDiagBalanceDiffKey = Key('diag-balance-diff');
 const kDiagSmsListKey = Key('diag-sms-list');
 const kDiagRepairKey = Key('diag-repair');
 const kDiagImportAllKey = Key('diag-import-all');
+const kDiagRestoreAllKey = Key('diag-restore-all');
 
 /// اجرای یک «درستش کن» با پیامِ نتیجه.
 typedef _Run = Future<void> Function(Future<void> Function() action, String done);
@@ -385,6 +386,8 @@ class _RepairCard extends StatelessWidget {
               '${_fa(r.removed)} تراکنشِ بی‌شماره (اعتبار کیف پول، اطلاعیه، …) یا رمز پویا کنار رفتند؛ '
                   'در «پیامک‌ها» ← «در جمع نیست» قابل برگرداندن‌اند',
             if (r.imported > 0) '${_fa(r.imported)} پیامکِ تراکنشی که ثبت نشده بود وارد شد',
+            if (r.revived > 0)
+              '${_fa(r.revived)} تراکنشی که قبلاً خودکار کنار رفته بود، حالا با قانون می‌خواند و برگشت',
             if (!r.changedAnything) 'چیزی برای درست کردن نبود ✓',
           ];
     return Card(
@@ -770,6 +773,16 @@ class _SmsTabState extends State<_SmsTab> {
         if (!snap.hasData) return const Center(child: CircularProgressIndicator());
         final r = snap.data!;
         final items = [for (final d in r.items) if (_filter.matches(d)) d];
+        // حذف‌شده‌هایی که شماره حساب/کارت + مبلغ + نوع دارند (مثلاً با «بردار و
+        // تراکنش‌هایش را حذف کن» در نسخه‌های قبل رفته بودند).
+        final restorable = [
+          for (final d in r.items)
+            if (d.verdict == SmsVerdict.deleted &&
+                d.strict.accepts &&
+                d.stored != null &&
+                widget.controller.canEdit(d.stored!))
+              d.stored!,
+        ];
         final header = <Widget>[
           const _Intro(
             title: 'هر پیامک چرا شمرده شد یا نشد',
@@ -796,6 +809,14 @@ class _SmsTabState extends State<_SmsTab> {
                   'وارد شدند'),
               key: kDiagImportAllKey,
               icon: Icons.download_rounded,
+            ),
+          if (restorable.isNotEmpty)
+            _fixButton(
+              'برگرداندنِ ${_fa(restorable.length)} پیامکِ حذف‌شده که با قانون می‌خوانند',
+              () => widget.run(
+                  () => widget.controller.restoreMany(restorable), 'برگشتند'),
+              key: kDiagRestoreAllKey,
+              icon: Icons.restore_rounded,
             ),
           if (r.notAllowedWithAmount.isNotEmpty)
             _NotAllowedCard(report: r, controller: widget.controller),

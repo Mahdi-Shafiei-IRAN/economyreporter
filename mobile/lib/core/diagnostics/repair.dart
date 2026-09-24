@@ -10,6 +10,9 @@
 ///   ۳) **قانونِ «شماره‌ی حساب/کارت + مبلغ + نوع»:** پیامکِ بی‌شماره یا رمز پویا/یادآوری
 ///      حذف نرم می‌شود (قابل برگرداندن). تراکنشی که کاربر دستی به کارتی چسبانده یا
 ///      برگردانده ([kept]) دست نمی‌خورد.
+///
+/// و برعکس ([planRevival]): تراکنشی که **خودِ برنامه** حذف کرده بود و حالا با قانون
+/// می‌خواند (پارسرِ بهتر، فرستنده‌ی دوباره مجاز) خودکار برمی‌گردد.
 library;
 
 import '../../features/senders/data/allowed_sender.dart';
@@ -17,6 +20,7 @@ import '../../features/transactions/data/transaction_record.dart';
 import '../../features/transactions/data/transaction_repository.dart';
 import '../sms/sms_fingerprint.dart';
 import '../sms/sms_importer.dart';
+import '../sms/models.dart';
 import '../sms/sms_parser.dart';
 
 class RepairResult {
@@ -34,16 +38,25 @@ class RepairResult {
   /// پیامک‌های تراکنشیِ صندوق که تازه وارد شدند (قبلاً ثبت نشده بودند).
   final int imported;
 
+  /// حذف‌شده‌های خودکارِ قبلی که حالا با قانون می‌خوانند و برگشتند.
+  final int revived;
+
+  /// نسخه‌ی پارسری که این تعمیر با آن اجرا شد ([kParserVersion])؛ پارسرِ تازه‌تر
+  /// یعنی تعمیر یک بار دیگر خودکار اجرا شود.
+  final int? parserVersion;
+
   const RepairResult({
     required this.at,
     this.adopted = 0,
     this.backfilled = 0,
     this.removedIds = const [],
     this.imported = 0,
+    this.revived = 0,
+    this.parserVersion,
   });
 
   int get removed => removedIds.length;
-  bool get changedAnything => adopted + backfilled + removed + imported > 0;
+  bool get changedAnything => adopted + backfilled + removed + imported + revived > 0;
 
   Map<String, Object?> toJson() => {
         'at': at.toUtc().toIso8601String(),
@@ -51,6 +64,8 @@ class RepairResult {
         'backfilled': backfilled,
         'removed': removedIds,
         'imported': imported,
+        'revived': revived,
+        if (parserVersion != null) 'parser': parserVersion,
       };
 
   factory RepairResult.fromJson(Map<String, dynamic> j) => RepairResult(
@@ -59,6 +74,8 @@ class RepairResult {
         backfilled: j['backfilled'] as int? ?? 0,
         removedIds: [for (final e in (j['removed'] as List? ?? const [])) e.toString()],
         imported: j['imported'] as int? ?? 0,
+        revived: j['revived'] as int? ?? 0,
+        parserVersion: j['parser'] as int?,
       );
 }
 
@@ -117,15 +134,7 @@ RepairPlan planRepair({
       body: t.smsBody!,
       bankId: findAllowedSender(allowed, sender)?.bankId,
     );
-    final fill = <String, Object?>{
-      if (t.accountRef == null && parsed.accountRef != null) 'account_ref': parsed.accountRef,
-      if (t.cardLast4 == null && parsed.cardLast4 != null) 'card_last4': parsed.cardLast4,
-      if (t.bankId == null && parsed.bankId != null) 'bank_id': parsed.bankId,
-      if (t.balanceAfterRial == null && parsed.balanceAfterRial != null)
-        'balance_after_rial': parsed.balanceAfterRial,
-      if (parsed.occurredAt != null && parsed.occurredAt != t.transactionDate)
-        'transaction_date': parsed.occurredAt!.toUtc().toIso8601String(),
-    };
+    final fill = _fillFromText(t, parsed);
     final hasId = (t.accountRef ?? parsed.accountRef) != null ||
         (t.cardLast4 ?? parsed.cardLast4) != null;
     final breaksRule = !hasId || parsed.isOtp || parsed.isReminder;
@@ -150,4 +159,40 @@ RepairPlan planRepair({
       removedIds: removed,
     ),
   );
+}
+
+/// ستون‌هایی که پارسرِ قدیمی نخوانده بود و متنِ پیامک دارد (فقط خالی‌ها + تاریخ).
+Map<String, Object?> _fillFromText(TransactionRecord t, ParsedTransaction parsed) => {
+      if (t.accountRef == null && parsed.accountRef != null) 'account_ref': parsed.accountRef,
+      if (t.cardLast4 == null && parsed.cardLast4 != null) 'card_last4': parsed.cardLast4,
+      if (t.bankId == null && parsed.bankId != null) 'bank_id': parsed.bankId,
+      if (t.balanceAfterRial == null && parsed.balanceAfterRial != null)
+        'balance_after_rial': parsed.balanceAfterRial,
+      if (parsed.occurredAt != null && parsed.occurredAt != t.transactionDate)
+        'transaction_date': parsed.occurredAt!.toUtc().toIso8601String(),
+    };
+
+/// برگرداندنِ تراکنش‌هایی که **خودِ برنامه** حذف کرده بود ([autoRemoved]: تعمیرِ خودکار،
+/// «بردار و تراکنش‌هایش را حذف کن») و حالا با قانون می‌خوانند: فرستنده‌شان مجاز است و
+/// پیامکشان «شماره حساب/کارت + مبلغ + نوع» دارد (مثلاً بعد از بهترشدنِ پارسر، یا مجاز
+/// کردنِ دوباره‌ی فرستنده). بدونِ این، ضدتکرار (که حذف‌شده‌ها را هم می‌بیند) نمی‌گذاشت
+/// آن پیامک‌ها دوباره ثبت شوند. حذفِ دستیِ کاربر در [autoRemoved] نیست و برنمی‌گردد.
+List<TxPatch> planRevival({
+  required Iterable<TransactionRecord> deleted,
+  required Set<String> autoRemoved,
+  required List<AllowedSender> allowed,
+  SmsParser parser = const SmsParser(),
+}) {
+  final patches = <TxPatch>[];
+  for (final t in deleted) {
+    if (!t.isDeleted || !autoRemoved.contains(t.id)) continue;
+    final body = t.smsBody, address = t.smsSender;
+    if (t.source != 'sms' || body == null || address == null) continue;
+    final sender = findAllowedSender(allowed, address);
+    if (sender == null) continue;
+    final parsed = parser.parse(sender: address, body: body, bankId: sender.bankId);
+    if (!parsed.isCountable) continue;
+    patches.add(TxPatch(t.id, set: _fillFromText(t, parsed), restore: true));
+  }
+  return patches;
 }

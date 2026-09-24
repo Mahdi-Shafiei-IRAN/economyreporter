@@ -19,7 +19,7 @@ final _idAfterKeyword = RegExp(
     r'(حساب|کارت|شماره|شبا|سپرده|IR|ir)(\s*:?\s*)([0-9][0-9\-\*xX\.]{3,}[0-9])');
 final _longDigits = RegExp(r'(?<![0-9,])[0-9]{11,}(?![0-9,])');
 
-/// حسابِ نقطه‌دارِ پاسارگاد (777.888.21819509.1).
+/// حسابِ نقطه‌دارِ پاسارگاد (777.888.10000001.1).
 final _dottedAccount =
     RegExp(r'(?<![0-9.])[0-9]{2,4}\.[0-9]{2,4}\.[0-9]{5,10}\.[0-9]{1,2}(?![0-9.])');
 final _digit = RegExp(r'[0-9]');
@@ -100,7 +100,8 @@ String buildDiagnosticReport({
   if (repair != null) {
     b.writeln('درست کردنِ خودکار (${_when(repair.at)}): وصل به پیامک ${repair.adopted} • '
         'تکمیل از متن ${repair.backfilled} • کنار رفته ${repair.removed} • '
-        'واردشده ${repair.imported}');
+        'واردشده ${repair.imported} • برگشته ${repair.revived}'
+        '${repair.parserVersion == null ? '' : ' • پارسر ${repair.parserVersion}'}');
   }
   b.writeln();
 
@@ -178,6 +179,8 @@ String buildDiagnosticReport({
         ' مانده ${p.balanceAfterRial == null ? '-' : _rial(p.balanceAfterRial!)}'
         ' | قانون: $strict');
     b.writeln('    متن: ${_oneLine(d.body)}');
+    final hidden = describeInvisible(d.body);
+    if (hidden.isNotEmpty) b.writeln('    نویسه‌های نامرئی: $hidden');
   }
   if (sms.items.length > maxSms) {
     b.writeln('… و ${sms.items.length - maxSms} پیامکِ قدیمی‌تر');

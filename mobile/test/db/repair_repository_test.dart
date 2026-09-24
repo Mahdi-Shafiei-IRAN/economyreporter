@@ -120,4 +120,31 @@ void main() {
     // یک بار: بار دوم اجرا نمی‌شود.
     expect(await c.runRepairOnce(), isNull);
   });
+
+  test('برداشتن و مجاز کردنِ دوباره‌ی فرستنده روی پایگاه‌داده‌ی واقعی: تراکنش‌ها برمی‌گردند',
+      () async {
+    final inbox = [
+      RawSms(
+          sender: 'Bank Mellat',
+          body: 'واریز سود کوتاه مدت\nحساب4900000002\nمبلغ4,033\n05/07/01',
+          receivedAt: now.subtract(const Duration(days: 1))),
+      RawSms(
+          sender: 'Bank Mellat',
+          body: 'حساب4900000002\nواریز485\nمانده1,040,193\n05/06/15-10:39',
+          receivedAt: now.subtract(const Duration(days: 18))),
+    ];
+    await SmsImporter(repo).importAll(inbox);
+    final c = DashboardController(repo, clock: () => now)..readInbox = () async => inbox;
+    await c.load();
+    final mellat = c.allowedSenders.firstWhere((s) => s.address == 'Bank Mellat');
+
+    await c.removeAllowedSender(mellat.id, deleteTransactions: true);
+    expect(c.transactionsOfSender('Bank Mellat'), isEmpty);
+    expect(await repo.deletedSmsTransactions(), hasLength(2));
+
+    await c.addAllowedSender('Bank Mellat', bankId: 'mellat');
+    expect(c.transactionsOfSender('Bank Mellat'), hasLength(2));
+    expect(await repo.deletedSmsTransactions(), isEmpty);
+    expect((await SmsImporter(repo).importAll(inbox)).created, 0);
+  });
 }

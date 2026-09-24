@@ -236,9 +236,61 @@ class DashboardController extends ChangeNotifier {
     }
   }
 
+  Future<Set<String>> _autoRemoved() async {
+    final raw = await repository.getSetting(SettingKeys.autoRemoved);
+    if (raw == null) {
+      // نسخه‌های قبل فقط نتیجه‌ی آخرین تعمیر را نگه می‌داشتند؛ همان را نقطه‌ی شروع کن.
+      final seed = {
+        ...?_decodeRepair(await repository.getSetting(SettingKeys.repairResult))?.removedIds,
+      };
+      await _saveAutoRemoved(seed);
+      return seed;
+    }
+    try {
+      return (jsonDecode(raw) as List).map((e) => e.toString()).toSet();
+    } catch (_) {
+      return {};
+    }
+  }
+
+  Future<void> _saveAutoRemoved(Set<String> ids) =>
+      repository.setSetting(SettingKeys.autoRemoved, jsonEncode(ids.toList()));
+
+  Future<void> _rememberAutoRemoved(Iterable<String> ids) async {
+    if (ids.isEmpty) return;
+    await _saveAutoRemoved({...await _autoRemoved(), ...ids});
+  }
+
+  /// حذف یا برگرداندنِ دستیِ کاربر: دیگر «حذفِ خودکار» حساب نمی‌شود.
+  Future<void> _forgetAutoRemoved(Iterable<String> ids) async {
+    final current = await _autoRemoved();
+    if (!ids.any(current.contains)) return;
+    await _saveAutoRemoved(current.difference(ids.toSet()));
+  }
+
+  /// تراکنش‌هایی که خودِ برنامه حذف کرده بود و حالا با قانون می‌خوانند برمی‌گردند
+  /// (نگاه کن به [planRevival]). تعدادِ برگشته‌ها.
+  Future<int> reviveAutoRemoved() async {
+    final ids = await _autoRemoved();
+    if (ids.isEmpty) return 0;
+    final deleted = await repository.deletedSmsTransactions();
+    final patches = planRevival(
+      deleted: deleted,
+      autoRemoved: ids,
+      allowed: await repository.allowedSenders(),
+      parser: parser,
+    );
+    await repository.applyPatches(patches);
+    final stillDeleted = {for (final t in deleted) t.id}
+      ..removeAll([for (final p in patches) p.id]);
+    await _saveAutoRemoved(ids.intersection(stillDeleted));
+    return patches.length;
+  }
+
   /// تعمیرِ خودکار با قانون‌های فعلی (نگاه کن به [planRepair]) و بعد واردکردنِ
   /// پیامک‌های تراکنشیِ صندوق که هنوز ثبت نشده‌اند. نتیجه ذخیره می‌شود.
   Future<RepairResult> runRepair() async {
+    final revived = await reviveAutoRemoved();
     await load();
     final inbox = await _readInboxSafe();
     final plan = planRepair(
@@ -250,6 +302,7 @@ class DashboardController extends ChangeNotifier {
       parser: parser,
     );
     await repository.applyPatches(plan.patches);
+    await _rememberAutoRemoved(plan.result.removedIds);
     var imported = 0;
     if (inbox.isNotEmpty) {
       final importer = SmsImporter(repository,
@@ -262,23 +315,33 @@ class DashboardController extends ChangeNotifier {
       backfilled: plan.result.backfilled,
       removedIds: plan.result.removedIds,
       imported: imported,
+      revived: revived,
+      parserVersion: kParserVersion,
     );
     await repository.setSetting(SettingKeys.repairResult, jsonEncode(result.toJson()));
     await _changed();
     return result;
   }
 
-  /// یک بار بعد از نصبِ این نسخه (بعدها از دکمه‌ی «اجرای دوباره»).
+  /// بعد از نصب: یک بار، و دوباره هر بار که پارسر بهتر شده ([kParserVersion])، تا
+  /// پیامک‌هایی که پارسرِ قبلی رد یا حذف کرده بود برگردند. (دستی: دکمه‌ی «اجرای دوباره».)
   Future<RepairResult?> runRepairOnce() async {
-    if (await repository.getSetting(SettingKeys.repairResult) != null) return null;
+    final last = _decodeRepair(await repository.getSetting(SettingKeys.repairResult));
+    if (last != null && last.parserVersion == kParserVersion) return null;
     return runRepair();
   }
 
   /// برگرداندنِ تراکنشِ حذف‌شده؛ تعمیرِ خودکار دیگر حذفش نمی‌کند.
-  Future<void> restoreTransaction(TransactionRecord t) async {
-    final kept = await _kept()..add(t.id);
+  Future<void> restoreTransaction(TransactionRecord t) => restoreMany([t]);
+
+  /// برگرداندنِ چند تراکنشِ حذف‌شده با هم (دکمه‌ی «برگرداندنِ همه» در عیب‌یابی).
+  Future<void> restoreMany(Iterable<TransactionRecord> records) async {
+    final ids = [for (final t in records) if (t.isDeleted && canEdit(t)) t.id];
+    if (ids.isEmpty) return;
+    await _forgetAutoRemoved(ids);
+    final kept = await _kept()..addAll(ids);
     await repository.setSetting(SettingKeys.keptTransactions, jsonEncode(kept.toList()));
-    await repository.applyPatches([TxPatch(t.id, restore: true)]);
+    await repository.applyPatches([for (final id in ids) TxPatch(id, restore: true)]);
     await _changed();
   }
 
@@ -589,10 +652,15 @@ class DashboardController extends ChangeNotifier {
   /// حذف (نامعتبر) گروهی؛ فقط تراکنش‌هایی که اجازه‌اش را داری. تعداد حذف‌شده.
   Future<int> invalidateMany(Iterable<TransactionRecord> records) async {
     var n = 0;
+    final ids = <String>[];
     for (final t in records) {
       if (t.isDeleted || !canEdit(t)) continue;
-      await repository.deleteTransaction(t.id);
-      selected.remove(t.id);
+      ids.add(t.id);
+    }
+    await _forgetAutoRemoved(ids);
+    for (final id in ids) {
+      await repository.deleteTransaction(id);
+      selected.remove(id);
       n++;
     }
     if (n > 0) await _changed();
@@ -654,6 +722,7 @@ class DashboardController extends ChangeNotifier {
 
   /// «نامعتبر»: تراکنش انجام‌نشده یا پیامکِ رمزِ اشتباهی ثبت‌شده (حذف نرم).
   Future<void> deleteTransaction(String id) async {
+    await _forgetAutoRemoved([id]);
     await repository.deleteTransaction(id);
     selected.remove(id);
     await _changed();
@@ -825,6 +894,8 @@ class DashboardController extends ChangeNotifier {
       {String? bankId, String? ownerName, String? ownerUserId}) async {
     await repository.addAllowedSender(address,
         bankId: bankId, ownerName: ownerName, ownerUserId: ownerUserId);
+    // تراکنش‌هایی که با برداشتنِ قبلیِ همین فرستنده حذف شده بودند برمی‌گردند.
+    await reviveAutoRemoved();
     try {
       await onSendersChanged?.call();
     } catch (_) {
@@ -841,7 +912,10 @@ class DashboardController extends ChangeNotifier {
     }
     await repository.deleteAllowedSender(id);
     if (deleteTransactions && sender != null) {
-      await invalidateMany(transactionsOfSender(sender.address).where(canEdit));
+      final txs = transactionsOfSender(sender.address).where(canEdit).toList();
+      await invalidateMany(txs);
+      // حذفِ «خودکار»: اگر فرستنده دوباره مجاز شود، همین تراکنش‌ها برمی‌گردند.
+      await _rememberAutoRemoved([for (final t in txs) t.id]);
     }
     await load();
   }

@@ -243,4 +243,32 @@ void main() {
     expect(tester.takeException(), isNull);
     expect(find.byType(DiagnosticsScreen), findsOneWidget);
   });
+
+  testWidgets('«برگرداندنِ همه»: حذف‌شده‌هایی که با قانون می‌خوانند، یک‌جا', (tester) async {
+    await store.addAllowedSender('Bank Mellat', bankId: 'mellat');
+    final mellat = [
+      for (var i = 0; i < 3; i++)
+        RawSms(
+            sender: 'Bank Mellat',
+            body: 'حساب4900000002\nواریز${(i + 1) * 1000}\nمانده${50000 + i * 1000}',
+            receivedAt: _now.subtract(Duration(hours: i + 1))),
+    ];
+    inbox = [...inbox, ...mellat];
+    await SmsImporter(store).importAll(mellat);
+    await controller.load();
+    // مثلِ «بردار و تراکنش‌هایش را حذف کن» در نسخه‌های قبل (بی‌سابقه).
+    for (final t in controller.transactionsOfSender('Bank Mellat')) {
+      await store.deleteTransaction(t.id);
+    }
+    await controller.load();
+
+    await tester.pumpWidget(app(DiagnosticsScreen(controller: controller, initialTab: 2)));
+    await tester.pumpAndSettle();
+    // دیجی‌پیِ بی‌شماره (خلافِ قانون) جزوشان نیست.
+    expect(find.textContaining('برگرداندنِ ۳ پیامکِ حذف‌شده'), findsOneWidget);
+    await tester.tap(find.byKey(kDiagRestoreAllKey));
+    await tester.pumpAndSettle();
+    expect(controller.transactionsOfSender('Bank Mellat'), hasLength(3));
+    expect(find.byKey(kDiagRestoreAllKey), findsNothing);
+  });
 }

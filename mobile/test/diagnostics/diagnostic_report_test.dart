@@ -28,7 +28,7 @@ void main() {
     });
 
     test('حسابِ نقطه‌دارِ پاسارگاد پوشانده می‌شود، مبلغ نه', () {
-      expect(maskSensitive('777.888.21819509.1\n7,400,000-'), '***.***.*****509.1\n7,400,000-');
+      expect(maskSensitive('777.888.10000001.1\n7,400,000-'), '***.***.*****001.1\n7,400,000-');
     });
 
     test('شماره‌ی موبایل/شبا (رشته‌ی عددیِ بلند) هر جا باشد پوشانده می‌شود', () {
@@ -68,5 +68,25 @@ void main() {
     expect(text, contains('رد: شماره حساب/کارت ندارد'));
     expect(text, contains('حساب ******0009'));
     expect(text, isNot(contains('1000000009')));
+  });
+
+  test('نویسه‌های نامرئیِ پیامک در گزارش نام برده می‌شوند', () async {
+    final now = DateTime.utc(2026, 9, 23, 12);
+    final store = FakeTransactionStore(clock: () => now);
+    await store.addAllowedSender('Bank Mellat', bankId: 'mellat');
+    final inbox = [
+      RawSms(
+          sender: 'Bank Mellat',
+          body: 'واریز سود\nحساب\u20601000000009\nمبلغ\u200F4,033',
+          receivedAt: now),
+    ];
+    final all = await store.getAll();
+    final text = buildDiagnosticReport(
+      balance: computeBalanceBreakdown(all, Period.containing(now)),
+      chains: auditBalanceChains(all),
+      sms: diagnoseSms(inbox: inbox, stored: all, allowed: await store.allowedSenders()),
+      now: now,
+    );
+    expect(text, contains('نویسه‌های نامرئی: U+2060×1، U+200F×1'));
   });
 }

@@ -18,7 +18,7 @@ void main() {
     for (var i = 0; i < 10; i++)
       RawSms(
         sender: 'Bank Mellat',
-        body: 'حساب4933787334\nبرداشت${(i + 1) * 1000}\nمانده${900000 - i * 1000}',
+        body: 'حساب4900000002\nبرداشت${(i + 1) * 1000}\nمانده${900000 - i * 1000}',
         receivedAt: now.subtract(Duration(days: 60 - i)),
       ),
   ];
@@ -58,7 +58,7 @@ void main() {
     await importer.importInbox(inbox);
     final fresh = RawSms(
         sender: 'Bank Mellat',
-        body: 'حساب4933787334\nواریز485\nمانده1,040,190',
+        body: 'حساب4900000002\nواریز485\nمانده1,040,190',
         receivedAt: now.add(const Duration(hours: 1)));
     expect((await importer.importInbox([fresh, ...inbox])).created, 1);
   });
@@ -111,8 +111,8 @@ void main() {
     await store.addAllowedSender('Bank Mellat', bankId: 'mellat');
     final r = await importer.importAll([
       RawSms(
-          sender: '‏Bank Mellat',
-          body: 'واریز سود کوتاه مدت\nحساب‏4933787334\nمبلغ‏4,033\n05/07/01',
+          sender: '\u200FBank Mellat',
+          body: 'واریز سود کوتاه مدت\nحساب\u200F4900000002\nمبلغ\u200F4,033\n05/07/01',
           receivedAt: now),
     ]);
     expect(r.created, 1);
@@ -124,7 +124,7 @@ void main() {
     await store.addAllowedSender('Bank Mellat', bankId: 'mellat');
     final sms = RawSms(
         sender: 'Bank Mellat',
-        body: 'حساب4933787334\nواریز‏485\nمانده1,040,193\n05/06/15-10:39',
+        body: 'حساب4900000002\nواریز\u200F485\nمانده1,040,193\n05/06/15-10:39',
         receivedAt: now);
     expect((await importer.importAll([sms])).created, 1);
     expect((await importer.importAll([sms])).created, 0);

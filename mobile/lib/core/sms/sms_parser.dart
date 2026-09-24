@@ -16,7 +16,8 @@ import 'models.dart';
 /// نسخه‌ی قاعده‌های پارسر. هر بار که پارسر پیامکی را که قبلاً رد می‌کرد درست می‌خواند
 /// (قالبِ بانکِ تازه و …) بالا برود: بازشدنِ بعدیِ اپ یک بار کلِ صندوق را دوباره می‌خواند.
 /// ۲: نویسه‌های نامرئی، پاسارگاد (مبلغِ علامت‌دار، حسابِ نقطه‌دار)، سپه (حساب بعد از «به:»).
-const int kParserVersion = 2;
+/// ۳: همه‌ی نویسه‌های قالب/اعراب/کشیده، «ى» عربی، جداکننده‌ی هزارگانِ «،»/«.»/«’».
+const int kParserVersion = 3;
 
 class SmsParser {
   const SmsParser();
@@ -89,7 +90,7 @@ class SmsParser {
 
   // --- قاعده‌های مخصوصِ هر بانک (قالبِ پیامکِ بانک‌ها فرق دارد) ---
 
-  /// پاسارگاد: «777.888.21819509.1» شماره‌ی حساب (نقطه‌دار) در خطِ اول.
+  /// پاسارگاد: «777.888.10000001.1» شماره‌ی حساب (نقطه‌دار) در خطِ اول.
   static final _pasargadAccountRe =
       RegExp(r'(?<![0-9.])([0-9]{2,4}\.[0-9]{2,4}\.[0-9]{5,10}\.[0-9]{1,2})(?![0-9.])');
 
@@ -114,8 +115,8 @@ class SmsParser {
         detectBank(sender) ??
         detectBank(body);
 
-    // نویسه‌های نامرئیِ جهت‌دهی (RLM و …) اول حذف می‌شوند (فقط برای پارس).
-    final normalized = normalizeForParsing(stripInvisible(body));
+    // نویسه‌های نامرئی (RLM، WJ، کشیده، …) و جداکننده‌های هزارگانِ دیگر (فقط برای پارس).
+    final normalized = cleanForParsing(body);
     final compacted = compact(normalized);
 
     final lowerCompacted = compacted.toLowerCase();

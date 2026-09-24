@@ -35,13 +35,44 @@ String normalizeForParsing(String input) {
   return s;
 }
 
-/// نویسه‌های نامرئیِ جهت‌دهی/قالب (RLM، LRM، …) که بعضی بانک‌ها وسطِ متن می‌گذارند:
-/// «حساب\u200F123…» روی صفحه همان «حساب123…» است ولی Regex را خراب می‌کند.
-final _invisible = RegExp('[\u200B\u200D-\u200F\u202A-\u202E\u2066-\u2069\uFEFF\u061C]');
+/// نویسه‌های نامرئی که بعضی بانک‌ها وسطِ متن می‌گذارند: «حساب\u200F123…» روی صفحه همان
+/// «حساب123…» است ولی Regex را خراب می‌کند. همه‌ی نویسه‌های قالب (Cf: RLM، LRM، WJ،
+/// نیم‌خط نرم، …)، نشانه‌های روی حرف (Mn: اعراب، variation selector) و کشیده‌ی «ـ».
+/// نیم‌فاصله (ZWNJ) نه: جزو نوشتار است و [normalizeForParsing] فاصله‌اش می‌کند.
+final _invisible = RegExp(r'(?!\u200C)[\p{Cf}\p{Mn}\u0640\u180E]', unicode: true);
 
 /// حذفِ نویسه‌های نامرئی. عمداً در [normalizeForParsing] نیست، چون اثرانگشتِ پیامک
 /// (ضدتکرار) از آن ساخته می‌شود و تغییرش پیامک‌های ثبت‌شده را دوباره ثبت می‌کرد.
 String stripInvisible(String input) => input.replaceAll(_invisible, '');
+
+/// نویسه‌های نامرئیِ یک متن به‌صورت «U+200F×2، U+2060×1» (برای گزارش عیب‌یابی؛
+/// روی صفحه دیده نمی‌شوند). خالی یعنی متن تمیز است.
+String describeInvisible(String input) {
+  final counts = <int, int>{};
+  for (final m in _invisible.allMatches(input)) {
+    final rune = m[0]!.runes.first;
+    counts[rune] = (counts[rune] ?? 0) + 1;
+  }
+  if (input.contains('ى')) counts[0x0649] = 'ى'.allMatches(input).length;
+  return [
+    for (final e in counts.entries)
+      'U+${e.key.toRadixString(16).toUpperCase().padLeft(4, '0')}×${e.value}',
+  ].join('، ');
+}
+
+/// جداکننده‌ی هزارگانِ غیرِ کاما: «86،184»، «86’184» و «1.500.000» (نه حسابِ نقطه‌دارِ
+/// پاسارگاد «777.888.10000001.1»، نه تاریخِ «1405.07.01»: همه‌ی گروه‌ها باید ۳ رقمی باشند).
+final _altThousands = RegExp(
+    r"(?<![0-9.,،’'])[0-9]{1,3}(?:[،’'][0-9]{3})+(?![0-9])"
+    r'|(?<![0-9.,])[0-9]{1,3}(?:\.[0-9]{3})+(?![0-9]|[.,][0-9])');
+final _altSeparator = RegExp(r"[،’'.]");
+
+/// متنِ آماده‌ی پارس (فقط پارس، نه اثرانگشت): نویسه‌های نامرئی حذف، «ى» عربی → «ی»،
+/// [normalizeForParsing]، و جداکننده‌ی هزارگانِ دیگر → کاما.
+String cleanForParsing(String body) {
+  final s = normalizeForParsing(stripInvisible(body).replaceAll('ى', 'ی'));
+  return s.replaceAllMapped(_altThousands, (m) => m[0]!.replaceAll(_altSeparator, ','));
+}
 
 /// نسخه‌ی فشرده (بدون هیچ فاصله‌ای) برای تطبیق کلیدواژه‌ها،
 /// چون فاصله‌گذاری بین کلمات در پیامک بانک‌ها ثابت نیست.

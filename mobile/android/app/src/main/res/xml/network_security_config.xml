@@ -9,5 +9,7 @@
         <domain includeSubdomains="true">localhost</domain>
         <!-- سرور تولید (تا وقتی HTTPS با Cloudflare Origin Cert فعال شود) -->
         <domain includeSubdomains="true">87.248.150.95</domain>
+        <!-- لینکِ ثابتِ APKِ به‌روزرسانی (economy-latest.apk) روی دامنه -->
+        <domain includeSubdomains="true">koalaverifyshop.ir</domain>
     </domain-config>
 </network-security-config>
