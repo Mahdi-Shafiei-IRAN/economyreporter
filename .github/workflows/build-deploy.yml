@@ -1,5 +1,6 @@
-name: Build & Deploy APK
+name: Build APK
 
+# سرور ایران از GitHub قابل دسترس نیست؛ انتشار روی سرور با deploy/publish-apk.ps1 انجام می‌شود.
 on:
   push:
     branches: [main]
@@ -8,14 +9,8 @@ on:
       - '.github/workflows/build-deploy.yml'
   workflow_dispatch:
 
-env:
-  API_BASE_URL: http://87.248.150.95/api/v1
-  LATEST_URL: http://mahdishafie.ir/updates/economy-latest.apk
-  SERVER: 87.248.150.95
-  SSH_PORT: '9011'
-
 jobs:
-  build-and-deploy:
+  build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -42,42 +37,15 @@ jobs:
           printf 'storePassword=%s\nkeyPassword=%s\nkeyAlias=%s\nstoreFile=economy-release.jks\n' \
             "$KEYSTORE_PASSWORD" "$KEY_PASSWORD" "$KEY_ALIAS" > mobile/android/key.properties
 
-      - name: Build APK
+      - name: Test & build
         working-directory: mobile
         run: |
           flutter pub get
+          flutter test
           flutter build apk --release --target-platform android-arm64 \
-            --dart-define=API_BASE_URL=$API_BASE_URL
+            --dart-define=API_BASE_URL=http://87.248.150.95/api/v1
 
-      - name: Version
-        id: ver
-        run: |
-          V=$(grep '^version:' mobile/pubspec.yaml | sed 's/version: *//')
-          echo "name=${V%%+*}" >> "$GITHUB_OUTPUT"
-          echo "build=${V##*+}" >> "$GITHUB_OUTPUT"
-
-      - name: version.json
-        env:
-          NOTES: ${{ github.event.head_commit.message }}
-          VNAME: ${{ steps.ver.outputs.name }}
-          VBUILD: ${{ steps.ver.outputs.build }}
-        run: |
-          python3 -c 'import json,os; print(json.dumps({"versionCode": int(os.environ["VBUILD"]) + 3000, "versionName": os.environ["VNAME"], "notes": os.environ.get("NOTES","").splitlines()[0] if os.environ.get("NOTES") else "", "url": os.environ["LATEST_URL"]}, ensure_ascii=False))' > version.json
-          cat version.json
-
-      - name: Deploy
-        env:
-          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
-          VBUILD: ${{ steps.ver.outputs.build }}
-        run: |
-          mkdir -p ~/.ssh
-          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -p $SSH_PORT $SERVER >> ~/.ssh/known_hosts
-          APK=economy-$VBUILD.apk
-          scp -i ~/.ssh/deploy_key -P $SSH_PORT \
-            mobile/build/app/outputs/flutter-apk/app-release.apk root@$SERVER:/opt/economy/updates/$APK.tmp
-          scp -i ~/.ssh/deploy_key -P $SSH_PORT version.json root@$SERVER:/opt/economy/updates/version.json.tmp
-          ssh -i ~/.ssh/deploy_key -p $SSH_PORT root@$SERVER "set -e; cd /opt/economy/updates; \
-            mv $APK.tmp $APK; cp $APK economy-latest.apk.tmp; mv economy-latest.apk.tmp economy-latest.apk; \
-            mv version.json.tmp version.json; chown economy:economy $APK economy-latest.apk version.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: economy-apk
+          path: mobile/build/app/outputs/flutter-apk/app-release.apk
