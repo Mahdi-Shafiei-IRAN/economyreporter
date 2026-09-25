@@ -8,8 +8,10 @@ import 'package:path/path.dart' as p;
 import 'package:sqflite/sqflite.dart';
 import 'package:uuid/uuid.dart';
 
+import '../ledger/ledger_schema.dart';
+
 const String kDbName = 'economy.db';
-const int kDbVersion = 10;
+const int kDbVersion = 11;
 
 /// دسته‌های پیش‌فرض (قابل ویرایش توسط کاربر بعداً).
 const List<String> kDefaultCategories = [
@@ -104,6 +106,11 @@ Future<void> migrateSchema(Database db, int oldVersion, int newVersion) async {
     // نسخه ۱۰: انتسابِ دستیِ تراکنش به یک کارتِ مشخص (وقتی پیامک شماره ندارد و
     // شخص چند حساب در یک بانک دارد). این انتساب پایدار می‌ماند.
     await _ensureColumn(db, 'transactions', 'pinned_wallet_id', 'TEXT');
+  }
+  if (oldVersion < 11) {
+    // نسخه ۱۱: دفترِ نسخه‌ی ۲ (پشتِ پرچمِ ledger_v2؛ docs/v2-design.md). هیچ تراکنشی نمی‌سازد.
+    await _ensureColumn(db, 'wallets', 'archived', 'INTEGER NOT NULL DEFAULT 0');
+    await createLedgerTables(db);
   }
 }
 
@@ -247,6 +254,8 @@ Future<void> createSchema(Database db) async {
   await _ensureColumn(db, 'transactions', 'pinned_wallet_id', 'TEXT');
   await _createSettingsTable(db);
   await _createAllowedSendersTable(db);
+  await _ensureColumn(db, 'wallets', 'archived', 'INTEGER NOT NULL DEFAULT 0');
+  await createLedgerTables(db);
 }
 
 Future<void> _createV5Indexes(Database db) async {
