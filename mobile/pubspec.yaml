@@ -37,7 +37,7 @@ dependencies:
   cupertino_icons: ^1.0.6
   sqflite: ^2.3.3+1
   path: ^1.9.0
-  uuid: ^4.6.0
+  uuid: ^3.0.7
   crypto: ^3.0.7
   dio: ^5.11.1
   flutter_secure_storage: ^9.2.2
