@@ -11,6 +11,8 @@ import '../../core/family/family_api.dart';
 import '../../core/dedup/duplicate_finder.dart';
 import '../../core/diagnostics/balance_breakdown.dart';
 import '../../core/diagnostics/balance_chain.dart';
+import '../../core/diagnostics/device_health.dart';
+import '../../core/family/health_api.dart';
 import '../../core/diagnostics/diagnostic_report.dart';
 import '../../core/diagnostics/repair.dart';
 import '../../core/diagnostics/sms_diagnosis.dart';
@@ -54,6 +56,12 @@ class DashboardController extends ChangeNotifier {
 
   /// خواندنِ دوباره‌ی کلِ صندوقِ پیامک (تعداد تراکنش‌های تازه).
   Future<int> Function()? importWholeInbox;
+
+  /// گزارشِ سلامتِ گوشی‌ها روی سرور (در تست‌ها معمولاً null).
+  HealthApi? healthApi;
+
+  /// نسخه‌ی برنامه (برای گزارشِ سلامت).
+  String? appVersion;
 
   DashboardController(
     this.repository, {
@@ -181,6 +189,51 @@ class DashboardController extends ChangeNotifier {
   /// زنجیره‌ی مانده‌ی هر حساب (شخصِ انتخاب‌شده اعمال می‌شود).
   BalanceChainReport balanceChains() => auditBalanceChains(_scopedAll,
       deleted: deletedSms.where((t) => person == null || personOf(t) == person));
+
+  /// سلامتِ برنامه روی **همین گوشی** (فقط تراکنش‌های پیامکِ همین گوشی، نه نسخه‌های اعضای
+  /// دیگر). [sms]: اگر عیب‌یابیِ پیامک از قبل آماده است (صفحه‌ی عیب‌یابی).
+  Future<DeviceHealthReport> deviceHealth({SmsDiagnosisReport? sms}) async {
+    final report = sms ?? await diagnoseSmsMessages();
+    final own = [for (final t in _byId.values) if (!t.isRemote || t.smsBody != null) t];
+    return computeDeviceHealth(
+      sms: report,
+      chains: auditBalanceChains(own, deleted: deletedSms),
+      allowed: allowedSenders,
+      now: _clock(),
+      restorable: restorableDeleted(report).length,
+      sync: syncStatus,
+      appVersion: appVersion,
+      parserVersion: kParserVersion,
+    );
+  }
+
+  /// گزارشِ سلامت به سرور تا مدیرِ خانواده ببیند؛ حداکثر هر ۶ ساعت یک بار (خواندنِ کلِ
+  /// صندوق سنگین است)، مگر [force] یا [health]ِ آماده (صفحه‌ی عیب‌یابی). خطای شبکه بی‌صدا
+  /// (دفعه‌ی بعد). true یعنی فرستاده شد.
+  Future<bool> reportHealthIfDue({bool force = false, DeviceHealthReport? health}) async {
+    final api = healthApi;
+    final deviceId = await repository.getSetting(SettingKeys.deviceId);
+    if (api == null || deviceId == null) return false;
+    if (!force && health == null) {
+      try {
+        final last = jsonDecode(await repository.getSetting(SettingKeys.healthReported) ?? '')
+            as Map<String, dynamic>;
+        final at = DateTime.parse(last['at'] as String);
+        if (_clock().difference(at) < const Duration(hours: 6)) return false;
+      } catch (_) {
+        // اولین بار
+      }
+    }
+    health ??= await deviceHealth();
+    try {
+      await api.report(deviceId: deviceId, report: health);
+    } catch (_) {
+      return false;
+    }
+    await repository.setSetting(SettingKeys.healthReported,
+        jsonEncode({'at': _clock().toUtc().toIso8601String(), 'level': health.level.name}));
+    return true;
+  }
 
   /// سرنوشتِ هر پیامکِ فرستنده‌های مجاز + پیش‌نمایشِ قانونِ پیشنهادی.
   Future<SmsDiagnosisReport> diagnoseSmsMessages() async {

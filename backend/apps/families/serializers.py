@@ -1,9 +1,11 @@
+import json
+
 from rest_framework import serializers
 
 from apps.users.phone import normalize_phone, validate_mobile
 from apps.users.serializers import UserSerializer
 
-from .models import FamilyGroup, FamilyMembership
+from .models import DeviceHealth, FamilyGroup, FamilyMembership
 
 
 class FamilyMembershipSerializer(serializers.ModelSerializer):
@@ -47,3 +49,33 @@ class InviteSerializer(serializers.Serializer):
         phone = normalize_phone(value)
         validate_mobile(phone)
         return phone
+
+
+class DeviceHealthInSerializer(serializers.Serializer):
+    """گزارشِ سلامتِ یک گوشی (از خودِ گوشی)."""
+
+    MAX_SUMMARY_BYTES = 32 * 1024
+
+    device_id = serializers.CharField(max_length=64)
+    app_version = serializers.CharField(max_length=32, required=False, allow_blank=True)
+    level = serializers.ChoiceField(choices=DeviceHealth.Level.choices)
+    summary = serializers.JSONField(required=False)
+    reported_at = serializers.DateTimeField(required=False)
+
+    def validate_summary(self, value):
+        if value is None:
+            return {}
+        if not isinstance(value, dict):
+            raise serializers.ValidationError("summary باید شیء JSON باشد.")
+        if len(json.dumps(value, ensure_ascii=False).encode()) > self.MAX_SUMMARY_BYTES:
+            raise serializers.ValidationError("summary خیلی بزرگ است.")
+        return value
+
+
+class DeviceHealthSerializer(serializers.ModelSerializer):
+    user = UserSerializer(read_only=True)
+
+    class Meta:
+        model = DeviceHealth
+        fields = ["id", "user", "device_id", "app_version", "level", "summary", "reported_at", "updated_at"]
+        read_only_fields = fields

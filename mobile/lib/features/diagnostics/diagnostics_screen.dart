@@ -13,6 +13,7 @@ import 'package:flutter/services.dart';
 
 import '../../core/diagnostics/balance_breakdown.dart';
 import '../../core/diagnostics/balance_chain.dart';
+import '../../core/diagnostics/device_health.dart';
 import '../../core/diagnostics/diagnostic_report.dart';
 import '../../core/diagnostics/sms_diagnosis.dart';
 import '../../core/format/date_format.dart';
@@ -21,6 +22,7 @@ import '../../core/sms/models.dart';
 import '../../core/sms/sms_importer.dart';
 import '../../core/theme/app_theme.dart';
 import '../dashboard/dashboard_controller.dart';
+import 'health_view.dart';
 import '../senders/senders_screen.dart';
 import '../transactions/data/period.dart';
 import '../transactions/data/transaction_record.dart';
@@ -60,8 +62,16 @@ class DiagnosticsScreen extends StatefulWidget {
 
 class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
   late Future<SmsDiagnosisReport> _sms = widget.controller.diagnoseSmsMessages();
+  late Future<DeviceHealthReport> _health = _healthOf(_sms);
 
   DashboardController get _c => widget.controller;
+
+  /// حکمِ کلی از همان عیب‌یابیِ پیامک (دوباره خوانده نمی‌شود) و فرستادنش برای مدیرِ خانواده.
+  Future<DeviceHealthReport> _healthOf(Future<SmsDiagnosisReport> sms) async {
+    final h = await _c.deviceHealth(sms: await sms);
+    _c.reportHealthIfDue(health: h).ignore();
+    return h;
+  }
 
   Future<void> _copyReport() async {
     SmsDiagnosisReport? sms;
@@ -82,6 +92,7 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
   /// پیامک‌ها را دوباره بررسی کن (setState نباید Future برگرداند).
   void _refreshSms() => setState(() {
         _sms = _c.diagnoseSmsMessages();
+        _health = _healthOf(_sms);
       });
 
   Future<void> _run(Future<void> Function() action, String done) async {
@@ -132,6 +143,7 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
                   controller: _c,
                   breakdown: _c.balanceBreakdown(),
                   chains: chains,
+                  health: _health,
                   run: _run),
               _ChainTab(controller: _c, report: chains, onOpen: _openTx, run: _run),
               _SmsTab(controller: _c, future: _sms, onOpen: _openTx, run: _run),
@@ -292,12 +304,14 @@ class _BalanceTab extends StatelessWidget {
   final DashboardController controller;
   final BalanceBreakdown breakdown;
   final BalanceChainReport chains;
+  final Future<DeviceHealthReport> health;
   final _Run run;
 
   const _BalanceTab({
     required this.controller,
     required this.breakdown,
     required this.chains,
+    required this.health,
     required this.run,
   });
 
@@ -309,6 +323,13 @@ class _BalanceTab extends StatelessWidget {
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
+        FutureBuilder<DeviceHealthReport>(
+          future: health,
+          builder: (context, snap) => snap.hasData
+              ? HealthReportCard(
+                  key: kHealthCardKey, report: snap.data!, title: 'وضعیتِ کلیِ این گوشی')
+              : const SizedBox.shrink(),
+        ),
         const _Intro(
           title: 'این عدد از کجا آمده؟',
           lines: [
@@ -384,7 +405,7 @@ class _RepairCard extends StatelessWidget {
               '${_fa(r.backfilled)} تراکنش شماره‌ی حساب/مانده/تاریخشان از متنِ پیامک تکمیل شد',
             if (r.removed > 0)
               '${_fa(r.removed)} تراکنشِ بی‌شماره (اعتبار کیف پول، اطلاعیه، …) یا رمز پویا کنار رفتند؛ '
-                  'در «پیامک‌ها» ← «در جمع نیست» قابل برگرداندن‌اند',
+                  'در «پیامک‌ها» / «در جمع نیست» قابل برگرداندن‌اند',
             if (r.imported > 0) '${_fa(r.imported)} پیامکِ تراکنشی که ثبت نشده بود وارد شد',
             if (r.revived > 0)
               '${_fa(r.revived)} تراکنشی که قبلاً خودکار کنار رفته بود، حالا با قانون می‌خواند و برگشت',

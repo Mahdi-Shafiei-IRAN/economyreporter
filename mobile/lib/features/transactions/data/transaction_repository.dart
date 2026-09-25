@@ -343,6 +343,9 @@ class SettingKeys {
   /// بانک ثابتشان کند، خودکار برنمی‌گردند.
   static const userDeleted = 'user_deleted';
 
+  /// JSON: آخرین گزارشِ سلامتِ این گوشی که به سرور رفت ({"at": …, "level": …}).
+  static const healthReported = 'health_reported';
+
   /// زمانِ جدیدترین پیامکی که از صندوق خوانده شد (واردکردنِ بعدی فقط از همین‌جا).
   static const inboxWatermark = 'inbox_watermark';
 

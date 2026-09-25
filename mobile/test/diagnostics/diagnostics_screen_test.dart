@@ -93,8 +93,17 @@ void main() {
     await tester.pumpWidget(app(DiagnosticsScreen(controller: controller)));
     await tester.pumpAndSettle();
 
+    // کارتِ «وضعیتِ کلیِ این گوشی» بالای صفحه است؛ بقیه با اسکرول.
+    final list = find
+        .byWidgetPredicate((w) => w is Scrollable && w.axisDirection == AxisDirection.down)
+        .first;
+    await tester.scrollUntilVisible(find.byKey(kDiagBalanceDiffKey), 300, scrollable: list);
     final diff = tester.widget<Text>(find.byKey(kDiagBalanceDiffKey));
     expect(diff.data, formatToman(4000000));
+    for (var i = 0; i < 20 && find.textContaining('بدون شماره کارت/حساب').evaluate().isEmpty; i++) {
+      await tester.drag(list, const Offset(0, -300));
+      await tester.pumpAndSettle();
+    }
     expect(find.textContaining('بدون شماره کارت/حساب'), findsWidgets);
   });
 

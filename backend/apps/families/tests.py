@@ -10,7 +10,7 @@ User = get_user_model()
 PWD = "StrongPass123"
 
 
-class FamilyTests(APITestCase):
+class _FamilyBase(APITestCase):
     def setUp(self):
         cache.clear()  # سطل throttle auth را بین تست‌ها ایزوله کن
         self.owner = User.objects.create_user(phone="09120000001", password=PWD)
@@ -36,6 +36,9 @@ class FamilyTests(APITestCase):
             reverse("family-invite", args=[family_id]), {"phone": phone}, format="json"
         )
 
+
+
+class FamilyTests(_FamilyBase):
     def test_create_family_makes_owner(self):
         resp = self.create_family(self.owner)
         self.assertEqual(resp.status_code, 201)
@@ -127,3 +130,63 @@ class FamilyTests(APITestCase):
             reverse("family-membership-detail", args=[fid, owner_mid])
         )
         self.assertEqual(resp.status_code, 400)
+
+
+class DeviceHealthTests(_FamilyBase):
+    """سلامتِ گوشی‌ها: هر گوشی گزارشِ خودش را می‌فرستد؛ مدیر گوشیِ همه‌ی اعضا را می‌بیند."""
+
+    def report(self, device="dev-1", level="warn", **extra):
+        return self.client.post(
+            reverse("device-health"),
+            {
+                "device_id": device,
+                "app_version": "1.0.22",
+                "level": level,
+                "summary": {"issues": [{"code": "deleted_valid", "count": 2}]},
+                **extra,
+            },
+            format="json",
+        )
+
+    def setUp(self):
+        super().setUp()
+        fid = self.create_family(self.owner).data["id"]
+        self.invite(fid, self.member.phone)
+
+    def test_member_reports_and_owner_sees_it(self):
+        self.auth(self.member)
+        self.assertEqual(self.report().status_code, 200)
+        # دوباره: همان ردیف به‌روز می‌شود، ردیفِ تازه ساخته نمی‌شود.
+        self.assertEqual(self.report(level="ok").status_code, 200)
+
+        self.auth(self.owner)
+        rows = self.client.get(reverse("device-health")).data
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["level"], "ok")
+        self.assertEqual(rows[0]["user"]["phone"], self.member.phone)
+        self.assertEqual(rows[0]["app_version"], "1.0.22")
+
+    def test_member_sees_only_own_devices(self):
+        self.auth(self.owner)
+        self.report(device="owner-phone")
+        self.auth(self.member)
+        self.report(device="member-phone")
+        rows = self.client.get(reverse("device-health")).data
+        self.assertEqual([r["device_id"] for r in rows], ["member-phone"])
+
+    def test_outsider_sees_nothing_of_family(self):
+        self.auth(self.member)
+        self.report()
+        self.auth(self.outsider)
+        self.assertEqual(self.client.get(reverse("device-health")).data, [])
+
+    def test_invalid_level_and_huge_summary_rejected(self):
+        self.auth(self.member)
+        self.assertEqual(self.report(level="great").status_code, 400)
+        big = {"x": "a" * 40000}
+        self.assertEqual(self.report(summary=big).status_code, 400)
+        self.assertEqual(self.report(summary=[1, 2]).status_code, 400)
+
+    def test_requires_auth(self):
+        self.client.credentials()
+        self.assertEqual(self.client.get(reverse("device-health")).status_code, 401)

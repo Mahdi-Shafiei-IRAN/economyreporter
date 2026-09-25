@@ -8,6 +8,7 @@ import 'core/config/app_config.dart';
 import 'core/dashboard/remote_dashboard_api.dart';
 import 'core/database/app_database.dart';
 import 'core/family/family_api.dart';
+import 'core/family/health_api.dart';
 import 'core/network/api_client.dart';
 import 'core/sms/sms_importer.dart';
 import 'core/sync/remote_transaction_api.dart';
@@ -129,7 +130,8 @@ class _BootstrapState extends State<_Bootstrap> {
       await repo.setSetting(SettingKeys.deviceId, deviceId);
     }
 
-    final dashboard = DashboardController(repo, familyApi: DioFamilyApi(api.dio));
+    final dashboard = DashboardController(repo, familyApi: DioFamilyApi(api.dio))
+      ..healthApi = DioHealthApi(api.dio);
     final sync = SyncService(
       db: db,
       api: DioRemoteTransactionApi(api.dio),
@@ -233,7 +235,10 @@ class _RootState extends State<_Root> with WidgetsBindingObserver {
     if (state != AppLifecycleState.resumed) return;
     final s = widget.services;
     s.dashboard.load();
-    if (s.auth.authenticated) s.refreshFromServer().ignore();
+    if (s.auth.authenticated) {
+      s.refreshFromServer().ignore();
+      s.dashboard.reportHealthIfDue().ignore();
+    }
   }
 
   /// بعد از ورود: پروفایل و sync، نوتیفیکیشن، مجوز پیامک، وارد کردن صندوق و
@@ -269,6 +274,9 @@ class _RootState extends State<_Root> with WidgetsBindingObserver {
         await s.dashboard.load();
         s.smsInbox.startListener();
       }
+      // وضعیتِ برنامه روی این گوشی برای مدیرِ خانواده (هر ۶ ساعت؛ بی‌صدا اگر آفلاین).
+      s.dashboard.appVersion ??= await s.updater.currentVersionName();
+      s.dashboard.reportHealthIfDue().ignore();
 
       final launchPayload = await NotificationService.launchPayload();
       if (launchPayload != null) {

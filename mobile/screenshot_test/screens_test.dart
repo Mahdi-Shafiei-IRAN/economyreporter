@@ -8,6 +8,8 @@ import 'dart:io';
 import 'dart:ui' as ui;
 
 import 'package:economy/core/auth/auth_repository.dart';
+import 'package:economy/core/diagnostics/device_health.dart';
+import 'package:economy/core/family/health_api.dart';
 import 'package:economy/core/family/family_api.dart';
 import 'package:economy/core/network/api_client.dart';
 import 'package:economy/core/sms/sms_importer.dart';
@@ -18,6 +20,7 @@ import 'package:economy/features/auth/login_screen.dart';
 import 'package:economy/features/dashboard/dashboard_controller.dart';
 import 'package:economy/features/dashboard/dashboard_screen.dart';
 import 'package:economy/features/diagnostics/diagnostics_screen.dart';
+import 'package:economy/features/diagnostics/health_view.dart';
 import 'package:economy/features/review/reconciliation_screen.dart';
 import 'package:economy/features/review/review_screen.dart';
 import 'package:economy/features/senders/senders_screen.dart';
@@ -212,6 +215,56 @@ Future<DashboardController> _diagController() async {
   return c;
 }
 
+/// گزارشِ سلامتِ گوشیِ کاربرِ دوم، همان‌طور که از سرور می‌آید.
+class _ShotHealthApi implements HealthApi {
+  @override
+  Future<void> report({required String deviceId, required DeviceHealthReport report}) async {}
+
+  @override
+  Future<List<RemoteDeviceHealth>> family() async => [
+        RemoteDeviceHealth(
+          userId: 'u2',
+          userName: 'ZAHRA',
+          deviceId: 'dev-zahra',
+          appVersion: '1.0.22',
+          level: HealthLevel.warn,
+          receivedAt: _diagNow.subtract(const Duration(hours: 2)),
+          report: DeviceHealthReport(
+            at: _diagNow.subtract(const Duration(hours: 2)),
+            appVersion: '1.0.22',
+            lastSyncAt: _diagNow.subtract(const Duration(hours: 3)),
+            issues: const [
+              HealthIssue(HealthLevel.warn, 'deleted_valid',
+                  '۲ پیامکِ درست (شماره‌ی حساب + مبلغ + نوع) حذف شده و شمرده نمی‌شود.',
+                  hint: 'عیب‌یابی / پیامک‌ها / «برگرداندنِ …»'),
+              HealthIssue(HealthLevel.warn, 'chain',
+                  '۳ جای ناجور در زنجیره‌ی مانده‌ی ۱ حساب (پیامکِ جاافتاده، کارمزد، یا نوعِ اشتباه).',
+                  hint: 'عیب‌یابی / زنجیره‌ی مانده'),
+            ],
+            banks: const [
+              BankHealth(name: 'بانک پاسارگاد', sms: 304, counted: 296),
+              BankHealth(name: 'بانک سپه', sms: 16, counted: 16),
+              BankHealth(name: 'بانک ملت', sms: 5, counted: 3),
+            ],
+            accounts: [
+              AccountHealth(
+                  title: 'بانک پاسارگاد • حساب',
+                  transactions: 296,
+                  problems: 3,
+                  balanceRial: 94762229,
+                  lastAt: _diagNow.subtract(const Duration(hours: 5))),
+              AccountHealth(
+                  title: 'بانک ملت • حساب',
+                  transactions: 3,
+                  problems: 0,
+                  balanceRial: 1040193,
+                  lastAt: _diagNow.subtract(const Duration(days: 9))),
+            ],
+          ),
+        ),
+      ];
+}
+
 void _phone(WidgetTester tester, {double height = 1500}) {
   tester.view.physicalSize = Size(393 * 3, height * 3);
   tester.view.devicePixelRatio = 3;
@@ -385,6 +438,14 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('wallet-suggest-0')));
     await _shot(tester, '18_wallet_form_light');
+  });
+
+  testWidgets('devices health', (tester) async {
+    _phone(tester, height: 1900);
+    final c = await _diagController()
+      ..healthApi = _ShotHealthApi();
+    await tester.pumpWidget(_app(DevicesHealthScreen(controller: c)));
+    await _shot(tester, '20_devices_health_light');
   });
 
   testWidgets('home with bank balance + discrepancy', (tester) async {

@@ -344,6 +344,10 @@ POST /auth/login/  (phone + password)   POST /auth/refresh/   GET /auth/me/
 
 # Family (سقف ۳ عضو، server-side)
 GET/POST /family/     GET /family/members/     POST /family/members/invite/     DELETE /family/members/{id}/
+# سلامتِ برنامه روی گوشی‌ها: هر گوشی خلاصه‌ی خودش را می‌فرستد (یک ردیف برای کاربر+گوشی)؛
+# مدیر گوشیِ همه‌ی اعضا را می‌بیند، عضو فقط خودش را. فقط شمارش/نام بانک/مبلغ/نسخه —
+# بدونِ متنِ پیامک، شماره‌ی حساب/کارت و سرشماره.
+GET/POST /family/health/
 
 # Accounts & Cards
 GET/POST /accounts/   GET/PATCH/DELETE /accounts/{id}/

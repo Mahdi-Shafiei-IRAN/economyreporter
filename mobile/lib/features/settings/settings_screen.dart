@@ -11,6 +11,7 @@ import '../categories/categorize_list_screen.dart';
 import '../budgets/budgets_screen.dart';
 import '../dashboard/dashboard_controller.dart';
 import '../diagnostics/diagnostics_screen.dart';
+import '../diagnostics/health_view.dart';
 import '../family/add_member_screen.dart';
 import '../review/reconciliation_screen.dart';
 import '../review/review_screen.dart';
@@ -33,6 +34,7 @@ const kCheckUpdateKey = Key('settings-check-update');
 const kSyncStatusKey = Key('settings-sync-status');
 const kThemeToggleKey = Key('theme-toggle');
 const kLogoutKey = Key('settings-logout');
+const kSettingsDevicesHealthKey = Key('settings-devices-health');
 
 String _fa(int n) => toPersianDigits('$n');
 
@@ -213,6 +215,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   trailing: _Count(c.balanceChains().problemCount),
                   onTap: () => _push(DiagnosticsScreen(controller: c)),
                 ),
+                if (c.healthApi != null) ...[
+                  const Divider(indent: 56),
+                  ListTile(
+                    key: kSettingsDevicesHealthKey,
+                    leading: const Icon(Icons.health_and_safety_outlined),
+                    title: const Text('سلامتِ برنامه روی گوشی‌ها'),
+                    subtitle: const Text('برنامه روی گوشیِ بقیه‌ی خانواده درست کار می‌کند؟'),
+                    trailing: const Icon(Icons.chevron_left_rounded),
+                    onTap: () => _push(DevicesHealthScreen(controller: c)),
+                  ),
+                ],
                 const Divider(indent: 56),
                 ListTile(
                   key: kSettingsCategorizeKey,

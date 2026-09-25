@@ -1,5 +1,6 @@
 from django.contrib.auth import get_user_model
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
 from rest_framework import generics, status
 from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
 from rest_framework.response import Response
@@ -7,9 +8,11 @@ from rest_framework.views import APIView
 
 from apps.users.phone import normalize_phone
 
-from .models import FamilyGroup, FamilyMembership
+from .models import DeviceHealth, FamilyGroup, FamilyMembership
 from .permissions import is_member, is_owner
 from .serializers import (
+    DeviceHealthInSerializer,
+    DeviceHealthSerializer,
     FamilyGroupSerializer,
     FamilyMembershipSerializer,
     InviteSerializer,
@@ -111,3 +114,42 @@ class FamilyMembershipDetailView(APIView):
 
         membership.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class DeviceHealthView(APIView):
+    """سلامتِ برنامه روی گوشی‌ها.
+
+    POST: گوشی گزارشِ خودش را می‌فرستد (یک ردیف برای هر کاربر + گوشی، جایگزین می‌شود).
+    GET: مدیرِ خانواده گوشی‌های همه‌ی اعضا را می‌بیند؛ عضوِ عادی فقط گوشی‌های خودش را.
+    """
+
+    def get(self, request):
+        owned = FamilyMembership.objects.filter(
+            user=request.user, role=FamilyMembership.Role.OWNER
+        ).values("family")
+        users = set(
+            FamilyMembership.objects.filter(family__in=owned).values_list("user", flat=True)
+        )
+        users.add(request.user.id)
+        rows = (
+            DeviceHealth.objects.filter(user__in=users)
+            .select_related("user")
+            .order_by("user__full_name", "user__phone", "-updated_at")
+        )
+        return Response(DeviceHealthSerializer(rows, many=True).data)
+
+    def post(self, request):
+        ser = DeviceHealthInSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        data = ser.validated_data
+        row, _ = DeviceHealth.objects.update_or_create(
+            user=request.user,
+            device_id=data["device_id"],
+            defaults={
+                "app_version": data.get("app_version", ""),
+                "level": data["level"],
+                "summary": data.get("summary") or {},
+                "reported_at": data.get("reported_at") or timezone.now(),
+            },
+        )
+        return Response(DeviceHealthSerializer(row).data, status=status.HTTP_200_OK)

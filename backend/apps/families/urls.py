@@ -1,6 +1,7 @@
 from django.urls import path
 
 from .views import (
+    DeviceHealthView,
     FamilyInviteView,
     FamilyListCreateView,
     FamilyMembershipDetailView,
@@ -9,6 +10,7 @@ from .views import (
 
 urlpatterns = [
     path("", FamilyListCreateView.as_view(), name="family-list-create"),
+    path("health/", DeviceHealthView.as_view(), name="device-health"),
     path("<uuid:family_id>/members/", FamilyMembersView.as_view(), name="family-members"),
     path(
         "<uuid:family_id>/members/invite/",
