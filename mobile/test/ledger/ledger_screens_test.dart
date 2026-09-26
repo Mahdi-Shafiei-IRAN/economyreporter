@@ -3,13 +3,20 @@ import 'package:economy/core/ledger/ledger_repository.dart';
 import 'package:economy/core/ledger/models.dart';
 import 'package:economy/core/ledger/sms_intake.dart';
 import 'package:economy/core/theme/app_theme.dart';
+import 'package:economy/features/ledger/account_card.dart';
 import 'package:economy/features/ledger/account_form.dart';
+import 'package:economy/features/ledger/accounts_view.dart';
+import 'package:economy/features/ledger/banks_view.dart';
 import 'package:economy/features/ledger/entry_sheet.dart';
+import 'package:economy/features/ledger/guide_screen.dart';
 import 'package:economy/features/ledger/ledger_controller.dart';
 import 'package:economy/features/ledger/ledger_home_screen.dart';
+import 'package:economy/features/ledger/ledger_settings_screen.dart';
 import 'package:economy/features/ledger/ledger_v2_toggle.dart';
 import 'package:economy/features/ledger/pending_screen.dart';
+import 'package:economy/features/ledger/setup_screen.dart';
 import 'package:economy/features/senders/data/allowed_sender.dart';
+import 'package:economy/features/senders/data/sender_candidates.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
@@ -93,10 +100,10 @@ void main() {
   List<SmsItem> oldestFirst(LedgerController c) =>
       [...c.pending]..sort((a, b) => a.receivedAt.compareTo(b.receivedAt));
 
-  testWidgets('home: pending banner, "balance now" from the last bank SMS', (tester) async {
+  testWidgets('home: next step goes from "balance now" to pending SMS', (tester) async {
     final c = await setup(tester);
-    await tester.pumpWidget(app(LedgerHomeScreen(controller: c)));
-    expect(find.text('۲ پیامکِ منتظرِ تأیید'), findsOneWidget);
+    await tester.pumpWidget(app(LedgerHomeScreen(controller: c, autoSetup: false)));
+    expect(find.text('قدمِ بعدی: موجودیِ الانِ ۱ حساب'), findsOneWidget);
 
     await tester.tap(find.byKey(ledgerSetBalanceKey('m1')));
     await tester.pumpAndSettle();
@@ -106,6 +113,11 @@ void main() {
     expect(c.accounts.single.balance!.balanceRial, 1200000);
     expect(find.text('۱۲۰٬۰۰۰ تومان'), findsWidgets);
     expect(find.byKey(ledgerSetBalanceKey('m1')), findsNothing);
+    expect(find.text('قدمِ بعدی: ۲ پیامکِ منتظرِ تأیید'), findsOneWidget);
+
+    await tester.tap(find.byKey(kLedgerNextStepKey));
+    await tester.pumpAndSettle();
+    expect(find.byType(PendingScreen), findsOneWidget);
   });
 
   testWidgets('pending: accept, not-a-transaction, and nothing auto-recorded', (tester) async {
@@ -166,7 +178,7 @@ void main() {
 
   testWidgets('manual entry from home needs kind and amount', (tester) async {
     final c = await setup(tester);
-    await tester.pumpWidget(app(LedgerHomeScreen(controller: c)));
+    await tester.pumpWidget(app(LedgerHomeScreen(controller: c, autoSetup: false)));
     await tester.tap(find.byKey(kLedgerAddFabKey));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(kEntrySaveKey));
@@ -182,21 +194,93 @@ void main() {
     expect(c.monthExpense, 500000);
   });
 
-  testWidgets('unknown account number: "new account" form is prefilled from the SMS', (tester) async {
+  testWidgets('unknown account number: the found account is accepted with its last balance',
+      (tester) async {
     final c = await setup(tester, inbox: [mellat('2000000001', 'برداشت50,000', '450,000', t1)]);
     await tester.pumpWidget(app(PendingScreen(controller: c)));
     final item = c.pending.single;
     await tester.tap(find.byKey(pendingNewAccountKey(item.key)));
     await tester.pumpAndSettle();
-    expect(find.widgetWithText(TextField, '2000000001'), findsOneWidget);
+    final cand = c.accountCandidates.single;
+    expect(find.text('بانک ملت • حساب ۲۰۰۰۰۰۰۰۰۱'), findsOneWidget);
+    await tester.tap(find.byKey(candidateAcceptKey(cand.key)));
+    await tester.pumpAndSettle();
     expect(find.text('۴۵٬۰۰۰'), findsOneWidget);
-    await tester.enterText(find.byKey(kAccountOwnerKey), 'زهرا');
-    await act(tester, c, () => tester.tap(find.byKey(kAccountSaveKey)));
+    await act(tester, c, () => tester.tap(find.byKey(kCandidateSaveKey)));
 
     final a = c.accounts.firstWhere((v) => v.account.accountRef == '2000000001');
     expect(a.balance!.balanceRial, 450000);
+    expect(a.account.label, 'بانک ملت');
     expect(c.pending.single.suggestion.accountId, a.account.id);
-    expect(find.byKey(pendingAcceptKey(item.key)), findsOneWidget);
+    expect(c.accountCandidates, isEmpty);
+  });
+
+  testWidgets('first run: the 3-step guide opens by itself and can be finished', (tester) async {
+    var allowedNow = <AllowedSender>[];
+    late LedgerController c;
+    late Database db;
+    await tester.runAsync(() async {
+      db = await openAppDatabase(path: inMemoryDatabasePath, singleInstance: false);
+      final sms = [mellat('2000000001', 'برداشت50,000', '450,000', t1)];
+      c = LedgerController(LedgerRepository(db, deviceId: 'dev', clock: () => now),
+          allowedSenders: () async => allowedNow,
+          readInbox: () async => sms,
+          clock: () => now,
+          senders: SenderOps(
+            candidates: () async => allowedNow.isEmpty
+                ? const [SenderCandidate(address: 'Bank Mellat', bankId: 'mellat', inboxCount: 1, stored: [])]
+                : const [],
+            allow: (address, bankId) async =>
+                allowedNow = [AllowedSender(id: 's1', address: address, bankId: bankId)],
+            dismiss: (_) async {},
+            remove: (_) async {},
+          ));
+      await c.setEnabled(true);
+    });
+    addTearDown(() => tester.runAsync(db.close));
+
+    await tester.pumpWidget(app(LedgerHomeScreen(controller: c)));
+    await tester.pumpAndSettle();
+    expect(find.byType(LedgerSetupScreen), findsOneWidget);
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+    await tester.pumpAndSettle();
+
+    // قدمِ ۱: بانک است.
+    // دیالوگ هم باید بیرون از ساعتِ جعلی باز شود تا ادامه‌ی کار (نوشتن در دیتابیس) اجرا شود.
+    await act(tester, c, () => tester.tap(find.byKey(bankAllowKey('Bank Mellat'))));
+    await act(tester, c, () => tester.tap(find.byKey(kBankPickSaveKey)));
+    expect(c.pending, hasLength(1));
+
+    // قدمِ ۲: حسابِ پیداشده.
+    await tester.tap(find.byKey(kSetupNextKey));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(candidateAcceptKey(c.accountCandidates.single.key)));
+    await tester.pumpAndSettle();
+    await act(tester, c, () => tester.tap(find.byKey(kCandidateSaveKey)));
+    expect(c.activeAccounts.single.balance!.balanceRial, 450000);
+
+    // قدمِ ۳: پیامک‌ها.
+    await tester.tap(find.byKey(kSetupNextKey));
+    await tester.pumpAndSettle();
+    expect(find.text('۱ پیامکِ این ماه منتظرِ تأییدِ توست.'), findsOneWidget);
+    await act(tester, c, () => tester.tap(find.byKey(kSetupNextKey)));
+    expect(c.setupDone, isTrue);
+    expect(find.byType(PendingScreen), findsOneWidget);
+  });
+
+  testWidgets('v2 settings show only v2 things (no old review/diagnostics tools)', (tester) async {
+    final c = await setup(tester);
+    await tester.pumpWidget(app(LedgerSettingsScreen(controller: c, onLogout: () {})));
+    expect(find.byKey(kLedgerSettingsGuideKey), findsOneWidget);
+    expect(find.byKey(kLedgerSettingsBanksKey), findsOneWidget);
+    expect(find.byKey(kLedgerV2ToggleKey), findsOneWidget);
+    for (final old in ['بازبینی پیامک‌های مبهم', 'عیب‌یابی موجودی و پیامک‌ها', 'کارت‌ها و حساب‌ها',
+      'منتظر دسته‌بندی', 'همگام‌سازی الان']) {
+      expect(find.text(old), findsNothing, reason: old);
+    }
+    await tester.tap(find.byKey(kLedgerSettingsGuideKey));
+    await tester.pumpAndSettle();
+    expect(find.byType(LedgerGuideScreen), findsOneWidget);
   });
 
   testWidgets('settings toggle turns v2 off', (tester) async {

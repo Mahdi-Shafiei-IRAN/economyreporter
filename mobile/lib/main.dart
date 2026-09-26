@@ -26,12 +26,13 @@ import 'features/dashboard/dashboard_screen.dart';
 import 'features/family/family_dashboard_screen.dart';
 import 'features/ledger/ledger_controller.dart';
 import 'features/ledger/ledger_home_screen.dart';
+import 'features/family/add_member_screen.dart';
 import 'features/ledger/ledger_notifications.dart';
+import 'features/ledger/ledger_settings_screen.dart';
 import 'features/ledger/ledger_v2_toggle.dart';
 import 'features/ledger/pending_screen.dart';
 import 'features/notifications/notification_service.dart';
 import 'features/senders/senders_screen.dart';
-import 'features/settings/settings_screen.dart';
 import 'features/sms/sms_inbox_service.dart';
 import 'features/transactions/data/transaction_repository.dart';
 
@@ -157,6 +158,13 @@ class _BootstrapState extends State<_Bootstrap> {
       allowedSenders: repo.allowedSenders,
       people: () =>
           (meName: dashboard.meName, meUserId: dashboard.meUserId, members: dashboard.members),
+      senders: SenderOps(
+        candidates: dashboard.senderCandidates,
+        allow: (address, bankId) => dashboard.addAllowedSender(address,
+            bankId: bankId, ownerName: dashboard.meName, ownerUserId: dashboard.meUserId),
+        dismiss: (address) => dashboard.rejectSender(address, const []).then((_) {}),
+        remove: (id) => dashboard.removeAllowedSender(id),
+      ),
     );
 
     final smsInbox = SmsInboxService(
@@ -321,7 +329,7 @@ class _RootState extends State<_Root> with WidgetsBindingObserver {
       final launchPayload = await NotificationService.launchPayload();
       if (launchPayload != null) {
         _onNotificationTap(launchPayload);
-      } else if (granted && s.dashboard.needsSenderSetup) {
+      } else if (granted && s.dashboard.needsSenderSetup && !s.ledger.enabled) {
         // بعد از نصب/ورود: اگر هیچ فرستنده‌ای مجاز نشده، صفحه‌ی انتخاب فرستنده‌ها را
         // خودکار باز کن تا کاربر از روی پیامک‌هایش انتخاب و صاحب تعیین کند.
         navigatorKey.currentState?.push(MaterialPageRoute(
@@ -495,16 +503,18 @@ class _RootState extends State<_Root> with WidgetsBindingObserver {
   void _openLedgerSettings(BuildContext context) {
     final s = widget.services;
     Navigator.of(context).push(MaterialPageRoute(
-      builder: (_) => SettingsScreen(
-        controller: s.dashboard,
-        onSync: () async => (await s.refreshFromServer(force: true)).message,
+      builder: (_) => LedgerSettingsScreen(
+        controller: s.ledger,
         onCheckUpdate: _manualCheckUpdate,
+        onAddMember: s.dashboard.canAddMember
+            ? () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => AddMemberScreen(controller: s.dashboard)))
+            : null,
         onLogout: () {
           Navigator.of(context).popUntil((r) => r.isFirst);
           _setupDone = false;
           s.auth.logout();
         },
-        header: LedgerV2Toggle(controller: s.ledger),
       ),
     ));
   }

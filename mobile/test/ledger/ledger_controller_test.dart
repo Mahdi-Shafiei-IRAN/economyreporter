@@ -119,6 +119,82 @@ void main() {
     expect(await c.repo.entries(), isEmpty);
   });
 
+  group('guided setup', () {
+    test('next step walks: banks → accounts → balance → pending → all good', () async {
+      var allowedNow = <AllowedSender>[];
+      final sent = <String>[];
+      inbox = [
+        mellat('1000005596', 'برداشت100,000', '900,000', t1),
+        mellat('2000000001', 'برداشت50,000', '450,000', t2),
+      ];
+      c = LedgerController(c.repo,
+          allowedSenders: () async => allowedNow,
+          readInbox: () async => inbox,
+          clock: () => now,
+          people: () => (meName: 'مهدی', meUserId: 'u1', members: const []),
+          senders: SenderOps(
+            candidates: () async => const [],
+            allow: (address, bankId) async {
+              sent.add('$address:$bankId');
+              allowedNow = [AllowedSender(id: 's1', address: address, bankId: bankId)];
+            },
+            dismiss: (_) async {},
+            remove: (_) async => allowedNow = [],
+          ));
+      await c.setEnabled(true);
+      expect(c.setupDone, isFalse);
+      expect(c.nextStep, NextStep.chooseBanks);
+      expect(c.pending, isEmpty); // هنوز هیچ فرستنده‌ای مجاز نیست
+
+      await c.allowSender('Bank Mellat', 'mellat');
+      expect(sent, ['Bank Mellat:mellat']);
+      expect(c.pending, hasLength(2));
+      expect(c.nextStep, NextStep.confirmAccounts);
+
+      final cand = c.accountCandidates.single;
+      expect(cand.accountRef, '2000000001');
+      expect(cand.lastBalanceRial, 450000);
+      final a = await c.acceptCandidate(cand, ownerName: 'مهدی', ownerUserId: 'u1',
+          balanceRial: cand.lastBalanceRial);
+      expect(a.label, 'بانک ملت');
+      expect(c.accountCandidates, isEmpty);
+      expect(c.nextStep, NextStep.setBalances); // حسابِ m1 هنوز «موجودیِ الان» ندارد
+
+      await c.setBalanceNow('m1', 900000);
+      expect(c.nextStep, NextStep.reviewPending);
+      await c.acceptMany(c.readyToAccept);
+      expect(c.nextStep, NextStep.allGood);
+
+      await c.finishSetup();
+      expect(c.setupDone, isTrue);
+    });
+
+    test('"don\'t track" sets the account aside; its SMS become not-a-transaction', () async {
+      inbox = [mellat('2000000001', 'برداشت50,000', '450,000', t1)];
+      await c.setEnabled(true);
+      await c.dismissCandidate(c.accountCandidates.single);
+      expect(c.accountCandidates, isEmpty);
+      expect(c.pendingCount, 0);
+      expect(c.pendingArchived, hasLength(1));
+      expect(c.archivedAccounts.single.account.accountRef, '2000000001');
+    });
+
+    test("other family members' accounts are hidden (their SMS go to their phones)", () async {
+      await db.insert('wallets', {
+        'id': 'z1',
+        'owner_name': 'زهرا',
+        'owner_user_id': 'u2',
+        'label': 'سامان',
+        'bank_id': 'saman',
+        'created_at': now.toIso8601String(),
+      });
+      c.people = () => (meName: 'مهدی', meUserId: 'u1', members: const []);
+      await c.setEnabled(true);
+      expect(c.activeAccounts.map((v) => v.account.id), ['m1']);
+      expect(c.othersAccountCount, 1);
+    });
+  });
+
   test('jalaliMonthRange: first of this month to first of next', () {
     final (from, to) = jalaliMonthRange(now);
     expect(from, DateTime.utc(2026, 9, 22, 20, 30));

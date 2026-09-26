@@ -15,6 +15,7 @@ import 'suggestion.dart';
 
 const kLedgerV2Setting = 'ledger_v2';
 const kLedgerStartSetting = 'ledger_start_date';
+const kLedgerSetupDoneSetting = 'ledger_setup_done';
 
 class LedgerRepository {
   LedgerRepository(this.db,
@@ -44,6 +45,11 @@ class LedgerRepository {
   Future<bool> isEnabled() async => await _setting(kLedgerV2Setting) == '1';
 
   Future<void> setEnabled(bool on) => _setSetting(kLedgerV2Setting, on ? '1' : '0');
+
+  /// راهنمای سه‌قدمیِ اولین اجرا دیده/رد شده؟
+  Future<bool> isSetupDone() async => await _setting(kLedgerSetupDoneSetting) == '1';
+
+  Future<void> setSetupDone() => _setSetting(kLedgerSetupDoneSetting, '1');
 
   Future<DateTime?> startDate() async {
     final v = await _setting(kLedgerStartSetting);

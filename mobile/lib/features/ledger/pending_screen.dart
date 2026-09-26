@@ -8,7 +8,7 @@ import 'package:flutter/material.dart';
 import '../../core/format/date_format.dart';
 import '../../core/format/money_format.dart';
 import '../../core/ledger/models.dart';
-import 'account_form.dart';
+import 'accounts_view.dart';
 import 'entry_sheet.dart';
 import 'ledger_controller.dart';
 import 'ledger_text.dart';
@@ -321,8 +321,8 @@ class _PendingCard extends StatelessWidget {
                     if (g.unknownAccountNumber)
                       TextButton.icon(
                         key: pendingNewAccountKey(item.key),
-                        onPressed: () => showAccountForm(context, controller,
-                            prefill: controller.prefillFrom(item)),
+                        onPressed: () => Navigator.of(context).push(MaterialPageRoute(
+                            builder: (_) => LedgerAccountsScreen(controller: controller))),
                         icon: const Icon(Icons.add_card_rounded, size: 18),
                         label: const Text('حسابِ تازه است'),
                       ),

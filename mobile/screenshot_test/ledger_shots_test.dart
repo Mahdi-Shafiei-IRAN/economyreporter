@@ -11,10 +11,14 @@ import 'package:economy/core/ledger/sms_intake.dart';
 import 'package:economy/core/theme/app_theme.dart';
 import 'package:economy/features/ledger/account_form.dart';
 import 'package:economy/features/ledger/entry_sheet.dart';
+import 'package:economy/features/ledger/guide_screen.dart';
 import 'package:economy/features/ledger/ledger_controller.dart';
 import 'package:economy/features/ledger/ledger_home_screen.dart';
+import 'package:economy/features/ledger/ledger_settings_screen.dart';
 import 'package:economy/features/ledger/pending_screen.dart';
+import 'package:economy/features/ledger/setup_screen.dart';
 import 'package:economy/features/senders/data/allowed_sender.dart';
+import 'package:economy/features/senders/data/sender_candidates.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -118,7 +122,25 @@ Future<LedgerController> _controller(WidgetTester tester) async {
         allowedSenders: () async => _allowed,
         readInbox: () async => inbox,
         clock: () => _now,
-        people: () => (meName: 'مهدی', meUserId: 'u1', members: const []));
+        people: () => (meName: 'مهدی', meUserId: 'u1', members: const []),
+        senders: SenderOps(
+          candidates: () async => [
+            const SenderCandidate(
+                address: '+98300089',
+                bankId: 'tejarat',
+                inboxCount: 23,
+                stored: [],
+                sample: 'بانک تجارت\nبرداشت از حساب 1234567\nمبلغ 2,500,000 ریال\nمانده 18,300,000'),
+            const SenderCandidate(
+                address: 'Digikala',
+                inboxCount: 4,
+                stored: [],
+                sample: 'خرید شما به مبلغ 1,290,000 ریال ثبت شد. کد تخفیف: DK20'),
+          ],
+          allow: (_, __) async {},
+          dismiss: (_) async {},
+          remove: (_) async {},
+        ));
     await c.setEnabled(true);
     await c.setBalanceNow('m1', 70000000);
     final first = c.pending.firstWhere((i) => i.suggestion.amountRial == 45000000);
@@ -136,15 +158,44 @@ void main() {
 
   testWidgets('ledger home light', (tester) async {
     _phone(tester);
-    await tester.pumpWidget(_app(LedgerHomeScreen(controller: await _controller(tester), onOpenSettings: () {})));
+    await tester.pumpWidget(_app(LedgerHomeScreen(
+        controller: await _controller(tester), onOpenSettings: () {}, autoSetup: false)));
     await _shot(tester, 'v2_01_home_light');
   });
 
   testWidgets('ledger home dark', (tester) async {
     _phone(tester);
-    await tester.pumpWidget(_app(LedgerHomeScreen(controller: await _controller(tester), onOpenSettings: () {}),
+    await tester.pumpWidget(_app(
+        LedgerHomeScreen(controller: await _controller(tester), onOpenSettings: () {}, autoSetup: false),
         brightness: Brightness.dark));
     await _shot(tester, 'v2_02_home_dark');
+  });
+
+  testWidgets('setup step 1 banks', (tester) async {
+    _phone(tester);
+    await tester.pumpWidget(_app(LedgerSetupScreen(controller: await _controller(tester))));
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+    await _shot(tester, 'v2_07_setup_banks');
+  });
+
+  testWidgets('setup step 2 accounts', (tester) async {
+    _phone(tester);
+    await tester.pumpWidget(_app(LedgerSetupScreen(controller: await _controller(tester))));
+    await tester.tap(find.byKey(kSetupNextKey));
+    await _shot(tester, 'v2_08_setup_accounts');
+  });
+
+  testWidgets('v2 settings', (tester) async {
+    _phone(tester, height: 1100);
+    await tester.pumpWidget(_app(LedgerSettingsScreen(
+        controller: await _controller(tester), onCheckUpdate: () async => '', onLogout: () {})));
+    await _shot(tester, 'v2_09_settings');
+  });
+
+  testWidgets('guide', (tester) async {
+    _phone(tester, height: 1100);
+    await tester.pumpWidget(_app(const LedgerGuideScreen()));
+    await _shot(tester, 'v2_10_guide');
   });
 
   testWidgets('pending', (tester) async {

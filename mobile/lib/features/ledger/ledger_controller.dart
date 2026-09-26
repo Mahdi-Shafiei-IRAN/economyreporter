@@ -5,14 +5,18 @@ library;
 import 'package:flutter/foundation.dart';
 
 import '../../core/family/family_api.dart';
+import '../../core/ledger/account_candidates.dart';
 import '../../core/ledger/ledger_math.dart';
 import '../../core/ledger/ledger_repository.dart';
 import '../../core/ledger/models.dart';
 import '../../core/ledger/sms_intake.dart';
 import '../../core/ledger/suggestion.dart';
+import '../../core/sms/bank_registry.dart';
 import '../../core/sms/jalali.dart';
+import '../../core/sms/models.dart';
 import '../../core/sms/sms_parser.dart';
 import '../senders/data/allowed_sender.dart';
+import '../senders/data/sender_candidates.dart';
 import 'ledger_notifications.dart';
 
 /// اولِ ماهِ شمسیِ [now] تا اولِ ماهِ بعد (UTC).
@@ -60,12 +64,31 @@ class AccountPrefill {
 
 typedef LedgerPeople = ({String? meName, String? meUserId, List<FamilyMember> members});
 
+/// فرستنده‌های پیامکِ بانک (در اپ: همان فهرستِ مجازِ نسخه‌ی ۱ از طریقِ DashboardController).
+class SenderOps {
+  final Future<List<SenderCandidate>> Function() candidates;
+  final Future<void> Function(String address, String? bankId) allow;
+  final Future<void> Function(String address) dismiss;
+  final Future<void> Function(String id) remove;
+
+  const SenderOps({
+    required this.candidates,
+    required this.allow,
+    required this.dismiss,
+    required this.remove,
+  });
+}
+
+/// کارتِ «قدمِ بعدی» بالای خانه (طرح ۱۲.۵)؛ همیشه یکی، به همین ترتیب.
+enum NextStep { chooseBanks, confirmAccounts, setBalances, reviewPending, allGood }
+
 class LedgerController extends ChangeNotifier {
   LedgerController(
     this.repo, {
     required this.allowedSenders,
     this.readInbox,
     this.people,
+    this.senders,
     DateTime Function()? clock,
     this.parser = const SmsParser(),
   }) : _clock = clock ?? DateTime.now;
@@ -78,14 +101,23 @@ class LedgerController extends ChangeNotifier {
 
   /// نام و اعضای خانواده (از داشبوردِ نسخه‌ی ۱) برای فرمِ حساب.
   LedgerPeople Function()? people;
+
+  /// انتخابِ بانک‌ها (قدمِ ۱).
+  SenderOps? senders;
   final SmsParser parser;
   final DateTime Function() _clock;
 
   DateTime get now => _clock().toUtc();
 
   bool enabled = false;
+  bool setupDone = false;
   DateTime? startDate;
+
+  /// همه‌ی حساب‌ها (کیف‌ها)، شاملِ حساب‌های بقیه‌ی خانواده که از سرور آمده‌اند.
   List<AccountView> accounts = const [];
+
+  /// «حساب‌های پیداشده» در پیامک‌های منتظر.
+  List<AccountCandidate> accountCandidates = const [];
 
   /// پیامک‌های منتظر، جدیدترین اول.
   List<SmsItem> pending = const [];
@@ -114,8 +146,28 @@ class LedgerController extends ChangeNotifier {
 
   LedgerAccount? account(String? id) => id == null ? null : _byId[id];
 
-  List<AccountView> get activeAccounts => [for (final a in accounts) if (!a.account.archived) a];
-  List<AccountView> get archivedAccounts => [for (final a in accounts) if (a.account.archived) a];
+  List<AllowedSender> get banks => _allowed;
+
+  /// حسابِ خودم یا حسابی که روی همین گوشی ساخته شده. حساب‌های بقیه‌ی خانواده پیامکشان به گوشیِ
+  /// خودشان می‌رود؛ تا همگام‌سازیِ نسخه‌ی ۲ (فاز ۴) اینجا نشان داده نمی‌شوند.
+  bool isMine(LedgerAccount a) {
+    final me = people?.call().meUserId;
+    return a.ownerUserId == null || me == null || a.ownerUserId == me;
+  }
+
+  List<AccountView> get activeAccounts =>
+      [for (final a in accounts) if (!a.account.archived && isMine(a.account)) a];
+  List<AccountView> get archivedAccounts =>
+      [for (final a in accounts) if (a.account.archived && isMine(a.account)) a];
+  int get othersAccountCount => [for (final a in accounts) if (!isMine(a.account)) a].length;
+
+  NextStep get nextStep {
+    if (_allowed.isEmpty) return NextStep.chooseBanks;
+    if (accountCandidates.isNotEmpty) return NextStep.confirmAccounts;
+    if (activeAccounts.any((a) => a.needsAnchor)) return NextStep.setBalances;
+    if (pendingCount > 0) return NextStep.reviewPending;
+    return NextStep.allGood;
+  }
 
   List<SmsItem> get pendingArchived =>
       [for (final i in pending) if (i.suggestion.notTxReason == NotTxReason.archived) i];
@@ -138,6 +190,7 @@ class LedgerController extends ChangeNotifier {
 
   Future<void> _load() async {
     enabled = await repo.isEnabled();
+    setupDone = await repo.isSetupDone();
     startDate = await repo.startDate();
     _allowed = await allowedSenders();
     final accs = await repo.accounts();
@@ -148,6 +201,7 @@ class LedgerController extends ChangeNotifier {
     pending = [for (final i in items) if (i.status == SmsStatus.pending) i];
     final ctx = SuggestionContext.build(accs, entries, cps);
     accounts = [for (final a in accs) _view(a, ctx.ledgerOf(a.id))];
+    accountCandidates = findAccountCandidates(pending: pending, accounts: accs, parse: _parse);
     final (from, to) = jalaliMonthRange(now);
     final totals = periodTotals(entries, from, to);
     monthIncome = totals.income;
@@ -345,15 +399,81 @@ class LedgerController extends ChangeNotifier {
         return done;
       });
 
-  /// پیش‌پرِ «حسابِ تازه» از متنِ پیامکی که شماره‌اش ناشناخته است.
-  AccountPrefill prefillFrom(SmsItem item) {
+  // --- راهنمای سه‌قدمی و حساب‌های پیداشده ---
+
+  Future<void> finishSetup() => _track(() async {
+        await repo.setSetupDone();
+        await _load();
+      });
+
+  /// «مالِ من است»: حساب با آخرین مانده‌ی پیامک به‌عنوانِ «موجودیِ الان» (قابلِ اصلاح).
+  Future<LedgerAccount> acceptCandidate(
+    AccountCandidate c, {
+    required String ownerName,
+    String? ownerUserId,
+    String? label,
+    int? balanceRial,
+  }) =>
+      createAccount(
+        ownerName: ownerName,
+        ownerUserId: ownerUserId,
+        label: (label == null || label.trim().isEmpty) ? _defaultLabel(c.bankId) : label,
+        bankId: c.bankId,
+        cardLast4: c.cardLast4,
+        accountRef: c.accountRef,
+        balanceRial: balanceRial,
+      );
+
+  /// «پیگیری نکن»: حسابِ کنارگذاشته؛ پیامک‌هایش «تراکنش نیست» پیشنهاد می‌شوند.
+  Future<void> dismissCandidate(AccountCandidate c) => _track(() async {
+        final me = people?.call();
+        final a = await repo.createAccount(
+          ownerName: me?.meName ?? 'من',
+          ownerUserId: me?.meUserId,
+          label: _defaultLabel(c.bankId),
+          bankId: c.bankId,
+          cardLast4: c.cardLast4,
+          accountRef: c.accountRef,
+        );
+        await repo.setArchived(a.id, true);
+        await _afterLedgerChange();
+      });
+
+  String _defaultLabel(String? bankId) => bankId == null ? 'نقد' : bankNameById(bankId);
+
+  Future<List<SenderCandidate>> senderCandidates() async =>
+      await senders?.candidates() ?? const [];
+
+  /// «بانک است»: فرستنده مجاز می‌شود و پیامک‌هایش (از تاریخِ شروع) منتظرِ تأیید می‌آیند.
+  Future<void> allowSender(String address, String? bankId) => _track(() async {
+        await senders?.allow(address, bankId);
+        await _syncInbox();
+      });
+
+  Future<void> dismissSender(String address) => _track(() async {
+        await senders?.dismiss(address);
+        await _load();
+      });
+
+  Future<void> removeSender(String id) => _track(() async {
+        await senders?.remove(id);
+        await _load();
+      });
+
+  ParsedTransaction? _parse(SmsItem item) {
     final body = item.body;
-    if (body == null) return const AccountPrefill();
-    final p = parser.parse(
+    if (body == null) return null;
+    return parser.parse(
         sender: item.sender,
         body: body,
         bankId: findAllowedSender(_allowed, item.sender)?.bankId,
         receivedAt: item.receivedAt);
+  }
+
+  /// پیش‌پرِ «حسابِ تازه» از متنِ پیامکی که شماره‌اش ناشناخته است.
+  AccountPrefill prefillFrom(SmsItem item) {
+    final p = _parse(item);
+    if (p == null) return const AccountPrefill();
     return AccountPrefill(
         bankId: p.bankId,
         cardLast4: p.cardLast4,

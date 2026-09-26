@@ -21,11 +21,9 @@ class LedgerV2Toggle extends StatelessWidget {
         child: SwitchListTile(
           key: kLedgerV2ToggleKey,
           secondary: const Icon(Icons.science_outlined),
-          title: const Text('نسخه‌ی ۲ (آزمایشی): دفترِ حساب با تأییدِ تو'),
-          subtitle: const Text(
-              'هیچ پیامکی خودش ثبت نمی‌شود؛ هر کدام منتظرِ تأییدِ تو می‌ماند و موجودیِ هر حساب از '
-              '«موجودیِ الانش» حساب می‌شود. فعلاً فقط روی همین گوشی ذخیره می‌شود (همگام‌سازی با '
-              'سرور در قدمِ بعد). خاموش کردنش نسخه‌ی قبلی را برمی‌گرداند.'),
+          title: const Text('نسخه‌ی ۲ (آزمایشی)'),
+          subtitle: const Text('هر پیامک منتظرِ تأییدِ تو. فعلاً فقط روی همین گوشی. '
+              'خاموش = نسخه‌ی قبلی.'),
           value: controller.enabled,
           onChanged: controller.setEnabled,
         ),
