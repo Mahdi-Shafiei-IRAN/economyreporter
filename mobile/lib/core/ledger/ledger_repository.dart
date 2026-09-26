@@ -66,6 +66,44 @@ class LedgerRepository {
     return rows.map(LedgerAccount.fromWalletRow).toList();
   }
 
+  /// حسابِ تازه = کیفِ تازه (`wallets`، با همان ستون‌های همگام‌سازیِ نسخه‌ی ۱ تا به سرور برود).
+  Future<LedgerAccount> createAccount({
+    required String ownerName,
+    required String label,
+    String? ownerUserId,
+    String? bankId,
+    String? cardLast4,
+    String? accountRef,
+  }) async {
+    String? clean(String? s) => (s == null || s.trim().isEmpty) ? null : s.trim();
+    final now = _now().toIso8601String();
+    final account = LedgerAccount(
+      id: _uuid.v4(),
+      ownerName: ownerName.trim(),
+      ownerUserId: ownerUserId,
+      label: label.trim(),
+      bankId: bankId,
+      cardLast4: clean(cardLast4),
+      accountRef: clean(accountRef),
+    );
+    await db.insert('wallets', {
+      'id': account.id,
+      'owner_name': account.ownerName,
+      'owner_user_id': account.ownerUserId,
+      'label': account.label,
+      'bank_id': account.bankId,
+      'card_last4': account.cardLast4,
+      'account_ref': account.accountRef,
+      'created_at': now,
+      'updated_at': now,
+      'client_updated_at': now,
+      'is_deleted': 0,
+      'sync_status': 'pending',
+      'archived': 0,
+    });
+    return account;
+  }
+
   Future<void> setArchived(String accountId, bool archived) => db.update(
       'wallets', {'archived': archived ? 1 : 0},
       where: 'id = ?', whereArgs: [accountId]);
@@ -143,15 +181,18 @@ class LedgerRepository {
     return results;
   }
 
-  /// پیشنهادِ پیامک‌های منتظر با پارسرِ تازه؛ تصمیم‌دارها دست‌نخورده (I2).
+  /// پیشنهادِ پیامک‌های منتظر با پارسرِ تازه (یا همه با [force]، بعد از عوض شدنِ حساب‌ها،
+  /// نقطه‌ها یا تراکنش‌ها)؛ تصمیم‌دارها دست‌نخورده (I2).
   Future<int> refreshPendingSuggestions(
-      {required List<AllowedSender> allowed, int parserVersion = kParserVersion}) async {
+      {required List<AllowedSender> allowed,
+      int parserVersion = kParserVersion,
+      bool force = false}) async {
     final all = await smsItems();
     final ctx = await suggestionContext();
     var n = 0;
     for (final item in all) {
-      final fresh =
-          resuggest(item, allowed: allowed, others: all, ctx: ctx, parserVersion: parserVersion);
+      final fresh = resuggest(item,
+          allowed: allowed, others: all, ctx: ctx, parserVersion: parserVersion, force: force);
       if (fresh == null) continue;
       n += await db.update(
           'sms_items', {...fresh.suggestion.toColumns(), 'parser_version': fresh.parserVersion},
@@ -206,6 +247,13 @@ class LedgerRepository {
           whereArgs: [key]);
     });
     return entry;
+  }
+
+  /// «ثبت» با همان پیشنهاد (دکمه‌ی نوتیفیکیشن، کشیدن، تأییدِ گروهی). پیشنهادِ ناقص = خطا.
+  Future<Entry> acceptSuggested(String key) async {
+    final g = (await smsItem(key))?.suggestion;
+    if (g == null || !g.isComplete) throw StateError('SMS item $key has no complete suggestion');
+    return acceptSms(key, accountId: g.accountId!, kind: g.kind!, amountRial: g.amountRial!);
   }
 
   /// «تراکنش نیست» / «تکراری است». پیامکِ ثبت‌شده را باید با حذفِ تراکنشش رد کرد.

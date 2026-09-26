@@ -199,6 +199,21 @@ List<DiscrepancyWindow> discrepancies(List<LedgerItem> seq) {
   return out;
 }
 
+/// درآمد و هزینه‌ی بازه‌ی `[from, to)`؛ انتقال بینِ حساب‌های خانواده شمرده نمی‌شود.
+({int income, int expense}) periodTotals(Iterable<Entry> entries, DateTime from, DateTime to) {
+  var income = 0, expense = 0;
+  for (final e in entries) {
+    if (e.isDeleted || e.isTransfer) continue;
+    if (e.occurredAt.isBefore(from) || !e.occurredAt.isBefore(to)) continue;
+    if (e.kind == EntryKind.income) {
+      income += e.amountRial;
+    } else {
+      expense += e.amountRial;
+    }
+  }
+  return (income: income, expense: expense);
+}
+
 /// موجودی درست بعد از همه‌ی اقلامِ تا [t] ([inclusive]=false: فقط قبل از [t]).
 /// [backwardFirst]: اول رو به عقب از نزدیک‌ترین نقطه‌ی بعد (موجودیِ اولِ ماه، طرح ۶.۱)،
 /// وگرنه رو به جلو از نقطه‌ی قبل؛ با false برعکس (مانده‌ی زنجیره پیش از یک پیامکِ تازه).

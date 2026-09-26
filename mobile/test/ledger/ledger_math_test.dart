@@ -119,4 +119,26 @@ void main() {
       expect(balanceAt(const [], t0), isNull);
     });
   });
+
+  test('periodTotals: [from, to), transfers and deleted left out', () {
+    final t = periodTotals([
+      entry('in', inc, 500, h(1)),
+      entry('out', exp, 200, h(2)),
+      Entry(
+          id: 'tr',
+          accountId: 'a1',
+          kind: exp,
+          amountRial: 999,
+          occurredAt: h(2),
+          isTransfer: true,
+          source: EntrySource.manual,
+          createdAt: h(2),
+          updatedAt: h(2)),
+      entry('gone', exp, 7, h(2)).copyWith(deletedAt: h(3)),
+      entry('before', exp, 1, t0.subtract(const Duration(hours: 1))),
+      entry('edge', exp, 1, h(5)),
+    ], t0, h(5));
+    expect(t.income, 500);
+    expect(t.expense, 200);
+  });
 }

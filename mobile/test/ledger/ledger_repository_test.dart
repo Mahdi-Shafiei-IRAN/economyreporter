@@ -209,6 +209,35 @@ void main() {
     expect(discrepancies(await repo.ledger('m1')), isEmpty);
   });
 
+  test('a new account is a synced wallet; forced refresh re-suggests pending SMS for it', () async {
+    await db.delete('wallets');
+    await repo.intakeAll([mellat('برداشت100,000', 900000, t1)], allowed: allowed);
+    expect((await repo.smsItems()).single.suggestion.unknownAccountNumber, isTrue);
+
+    final a = await repo.createAccount(
+        ownerName: ' مهدی ', label: 'ملت', bankId: 'mellat', accountRef: '1000005596', cardLast4: '');
+    expect(a.cardLast4, isNull);
+    final row = (await db.query('wallets')).single;
+    expect(row['sync_status'], 'pending');
+    expect(row['owner_name'], 'مهدی');
+
+    expect(await repo.refreshPendingSuggestions(allowed: allowed), 0);
+    expect(await repo.refreshPendingSuggestions(allowed: allowed, force: true), 1);
+    expect((await repo.smsItems()).single.suggestion.accountId, a.id);
+  });
+
+  test('acceptSuggested uses the suggestion; an incomplete one is refused', () async {
+    await repo.intakeAll([
+      mellat('برداشت100,000', 900000, t1),
+      IncomingSms(sender: 'Bank Mellat', body: 'رمز پویا: 123456', receivedAt: t2),
+    ], allowed: allowed);
+    final items = {for (final i in await repo.smsItems()) i.suggestion.looksLikeTx: i};
+    final e = await repo.acceptSuggested(items[true]!.key);
+    expect(e.amountRial, 100000);
+    expect(e.bankBalanceAfter, 900000);
+    expect(() => repo.acceptSuggested(items[false]!.key), throwsStateError);
+  });
+
   test('archived account: its SMS are suggested as not-a-transaction', () async {
     await repo.setArchived('m1', true);
     await repo.intakeAll([mellat('برداشت100,000', 900000, t1)], allowed: allowed);

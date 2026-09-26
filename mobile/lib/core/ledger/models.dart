@@ -244,6 +244,10 @@ class SmsSuggestion {
 
   bool get looksLikeTx => notTxReason == null;
 
+  /// همه‌ی چیزِ لازم برای «ثبت» با یک لمس (نوتیفیکیشن، کشیدن، تأییدِ گروهی) معلوم است.
+  bool get isComplete =>
+      looksLikeTx && accountId != null && kind != null && (amountRial ?? 0) > 0;
+
   Map<String, Object?> toColumns() => {
         'sugg_kind': kind?.name,
         'sugg_amount': amountRial,

@@ -120,7 +120,8 @@ IntakeResult intakeSms(
   ));
 }
 
-/// پیشنهادِ تازه برای پیامکِ **منتظر** با پارسرِ جدیدتر؛ تصمیم‌دارها هرگز (I2). null = کاری نیست.
+/// پیشنهادِ تازه برای پیامکِ **منتظر** با پارسرِ جدیدتر (یا با [force] بعد از عوض شدنِ حساب‌ها و
+/// زنجیره)؛ تصمیم‌دارها هرگز (I2). null = کاری نیست.
 SmsItem? resuggest(
   SmsItem item, {
   required Iterable<AllowedSender> allowed,
@@ -128,11 +129,11 @@ SmsItem? resuggest(
   required SuggestionContext ctx,
   SmsParser parser = const SmsParser(),
   int parserVersion = kParserVersion,
+  bool force = false,
 }) {
   final body = item.body;
-  if (item.status != SmsStatus.pending || body == null || item.parserVersion >= parserVersion) {
-    return null;
-  }
+  if (item.status != SmsStatus.pending || body == null) return null;
+  if (!force && item.parserVersion >= parserVersion) return null;
   final sender = findAllowedSender(allowed, item.sender);
   final parsed = parser.parse(
       sender: item.sender, body: body, bankId: sender?.bankId, receivedAt: item.receivedAt);

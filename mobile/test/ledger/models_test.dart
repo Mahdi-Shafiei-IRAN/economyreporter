@@ -78,6 +78,19 @@ void main() {
     expect(back.entryId, 'e1');
   });
 
+  test('a suggestion is complete only with account, kind and a positive amount', () {
+    const full = SmsSuggestion(kind: EntryKind.expense, amountRial: 5, accountId: 'a');
+    expect(full.isComplete, isTrue);
+    expect(const SmsSuggestion(kind: EntryKind.expense, amountRial: 5).isComplete, isFalse);
+    expect(const SmsSuggestion(amountRial: 5, accountId: 'a').isComplete, isFalse);
+    expect(const SmsSuggestion(kind: EntryKind.expense, amountRial: 0, accountId: 'a').isComplete,
+        isFalse);
+    expect(
+        const SmsSuggestion(kind: EntryKind.expense, amountRial: 5, accountId: 'a', notTxReason: 'otp')
+            .isComplete,
+        isFalse);
+  });
+
   test('LedgerAccount reads a wallets row, blank numbers are null', () {
     final a = LedgerAccount.fromWalletRow({
       'id': 'w1',

@@ -135,5 +135,15 @@ void main() {
       final current = stored(SmsStatus.pending).withSuggestion(const SmsSuggestion(), kParserVersion);
       expect(resuggest(current, allowed: allowed, others: const [], ctx: ctx), isNull);
     });
+
+    test('force re-suggests a current pending item (accounts changed), never a decided one', () {
+      final current = stored(SmsStatus.pending).withSuggestion(const SmsSuggestion(), kParserVersion);
+      expect(resuggest(current, allowed: allowed, others: const [], ctx: ctx, force: true)!
+          .suggestion
+          .accountId, 'm1');
+      expect(
+          resuggest(stored(SmsStatus.accepted), allowed: allowed, others: const [], ctx: ctx, force: true),
+          isNull);
+    });
   });
 }
