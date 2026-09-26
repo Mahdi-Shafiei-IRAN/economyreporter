@@ -2,13 +2,16 @@
 /// هر تغییرِ دفتر فقط از دکمه‌های کاربر به این کلاس می‌رسد (I1).
 library;
 
-import 'package:flutter/foundation.dart';
+import 'package:flutter/foundation.dart' hide Category;
 
 import '../../core/family/family_api.dart';
 import '../../core/ledger/account_candidates.dart';
 import '../../core/ledger/ledger_math.dart';
 import '../../core/ledger/ledger_repository.dart';
 import '../../core/ledger/models.dart';
+import '../../core/ledger/month_report.dart';
+import '../budgets/data/budget.dart';
+import '../categories/data/category.dart';
 import '../../core/ledger/sms_intake.dart';
 import '../../core/ledger/suggestion.dart';
 import '../../core/sms/bank_registry.dart';
@@ -121,6 +124,13 @@ class LedgerController extends ChangeNotifier {
 
   /// پیامک‌های منتظر، جدیدترین اول.
   List<SmsItem> pending = const [];
+
+  /// همه‌ی پیامک‌ها (منتظر، ثبت، رد) — برای راهنمای پنجره‌های اختلاف.
+  List<SmsItem> _items = const [];
+  Map<String, List<LedgerItem>> _ledgers = const {};
+  List<Category> categories = const [];
+  Map<String, List<EntryCategory>> allocations = const {};
+  List<Budget> budgets = const [];
   int monthIncome = 0;
   int monthExpense = 0;
   Map<String, LedgerAccount> _byId = const {};
@@ -198,8 +208,13 @@ class LedgerController extends ChangeNotifier {
     final cps = await repo.checkpoints();
     final items = await repo.smsItems();
     _byId = {for (final a in accs) a.id: a};
+    _items = items;
     pending = [for (final i in items) if (i.status == SmsStatus.pending) i];
+    categories = await repo.categories();
+    allocations = await repo.allocations();
+    budgets = await repo.budgets();
     final ctx = SuggestionContext.build(accs, entries, cps);
+    _ledgers = ctx.ledgers;
     accounts = [for (final a in accs) _view(a, ctx.ledgerOf(a.id))];
     accountCandidates = findAccountCandidates(pending: pending, accounts: accs, parse: _parse);
     final (from, to) = jalaliMonthRange(now);
@@ -292,6 +307,8 @@ class LedgerController extends ChangeNotifier {
     required int amountRial,
     DateTime? occurredAt,
     String? note,
+    bool isTransfer = false,
+    List<String> categoryIds = const [],
   }) =>
       _track(() async {
         await repo.acceptSms(item.key,
@@ -299,7 +316,9 @@ class LedgerController extends ChangeNotifier {
             kind: kind,
             amountRial: amountRial,
             occurredAt: occurredAt,
-            note: note);
+            note: note,
+            isTransfer: isTransfer,
+            categoryIds: categoryIds);
         await _afterLedgerChange();
       });
 
@@ -341,6 +360,8 @@ class LedgerController extends ChangeNotifier {
     required int amountRial,
     required DateTime occurredAt,
     String? note,
+    bool isTransfer = false,
+    List<String> categoryIds = const [],
   }) =>
       _track(() async {
         await repo.addEntry(
@@ -348,7 +369,9 @@ class LedgerController extends ChangeNotifier {
             kind: kind,
             amountRial: amountRial,
             occurredAt: occurredAt,
-            note: note);
+            note: note,
+            isTransfer: isTransfer,
+            categoryIds: categoryIds);
         await _afterLedgerChange();
       });
 
@@ -397,6 +420,89 @@ class LedgerController extends ChangeNotifier {
           await _load();
         }
         return done;
+      });
+
+  // --- جزئیاتِ حساب و اختلاف (فاز ۳) ---
+
+  AccountView? view(String accountId) {
+    for (final v in accounts) {
+      if (v.account.id == accountId) return v;
+    }
+    return null;
+  }
+
+  List<LedgerItem> ledgerOf(String accountId) => _ledgers[accountId] ?? const [];
+
+  List<DiscrepancyWindow> windowsOf(String accountId) => discrepancies(ledgerOf(accountId));
+
+  WindowHints hintsFor(DiscrepancyWindow w) => analyzeWindow(w, _items);
+
+  SmsItem? smsItemByKey(String key) {
+    for (final i in _items) {
+      if (i.key == key) return i;
+    }
+    return null;
+  }
+
+  Future<void> updateEntry(Entry e, {List<String>? categoryIds}) => _track(() async {
+        await repo.updateEntry(e, categoryIds: categoryIds);
+        await _afterLedgerChange();
+      });
+
+  Future<void> deleteEntry(String id) => _track(() async {
+        await repo.deleteEntry(id);
+        await _afterLedgerChange();
+      });
+
+  Future<void> deleteCheckpoint(String id) => _track(() async {
+        await repo.deleteCheckpoint(id);
+        await _afterLedgerChange();
+      });
+
+  /// «نوعش برعکس است» — پیشنهادِ پنجره‌ی اختلاف، با دستِ کاربر.
+  Future<void> flipKind(Entry e) => updateEntry(e.copyWith(
+      kind: e.kind == EntryKind.income ? EntryKind.expense : EntryKind.income));
+
+  /// «اصلاح»: تراکنشِ صریح با یادداشتِ اجباری، وسطِ بازه تا داخلِ همان پنجره بیفتد (۱۲.۶).
+  Future<void> addAdjustment(DiscrepancyWindow w, String note) => _track(() async {
+        final diff = w.diffRial;
+        final mid = w.start.add(w.end.difference(w.start) ~/ 2);
+        await repo.addEntry(
+          accountId: w.accountId,
+          kind: diff > 0 ? EntryKind.income : EntryKind.expense,
+          amountRial: diff.abs(),
+          occurredAt: mid,
+          note: note,
+          source: EntrySource.adjustment,
+        );
+        await _afterLedgerChange();
+      });
+
+  /// زمانِ پیش‌فرضِ «تراکنشِ جاافتاده» برای یک پنجره: وسطِ بازه.
+  DateTime gapTime(DiscrepancyWindow w) => w.start.add(w.end.difference(w.start) ~/ 2);
+
+  Future<void> setEntryCategories(String entryId, List<String> categoryIds) => _track(() async {
+        await repo.setEntryCategories(entryId, categoryIds);
+        await _load();
+      });
+
+  Future<List<String>> suggestedCategoryIds(SmsItem item) => repo.v1CategoryIdsFor(item);
+
+  /// گزارشِ ماهی که [anyTimeInMonth] در آن است؛ فقط حساب‌های خودم.
+  MonthReport monthReport(DateTime anyTimeInMonth) {
+    final (from, to) = jalaliMonthRange(anyTimeInMonth);
+    return buildMonthReport(
+      from: from,
+      to: to,
+      ledgers: {for (final v in activeAccounts) v.account.id: ledgerOf(v.account.id)},
+      allocations: allocations,
+      budgets: budgets,
+    );
+  }
+
+  Future<void> setBudget(String categoryName, int? limitRial) => _track(() async {
+        await repo.setBudget(categoryName, limitRial);
+        await _load();
       });
 
   // --- راهنمای سه‌قدمی و حساب‌های پیداشده ---

@@ -165,6 +165,22 @@ class Entry {
       );
 }
 
+/// سهمِ یک دسته از یک تراکنش (تقسیمِ مساوی).
+class EntryCategory {
+  final String categoryId;
+  final String name;
+  final int amountRial;
+  const EntryCategory({required this.categoryId, required this.name, required this.amountRial});
+}
+
+/// تقسیمِ مساویِ [amount] بینِ [n] دسته؛ باقی‌مانده‌ی ریالی به دسته‌های اول (جمع دقیق می‌ماند).
+List<int> splitEqually(int amount, int n) {
+  if (n <= 0) return const [];
+  final base = amount ~/ n;
+  final remainder = amount - base * n;
+  return [for (var i = 0; i < n; i++) base + (i < remainder ? 1 : 0)];
+}
+
 /// نقطه‌ی مانده‌ی **دستی** (لنگر / تطبیق با موجودیِ واقعی). نقطه‌ی بانکی ذخیره نمی‌شود؛
 /// از [Entry.bankBalanceAfter] مشتق می‌شود.
 class Checkpoint {

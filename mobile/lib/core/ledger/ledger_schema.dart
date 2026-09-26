@@ -66,4 +66,13 @@ Future<void> createLedgerTables(DatabaseExecutor db) async {
   ''');
   await db.execute('CREATE INDEX IF NOT EXISTS idx_sms_hash ON sms_items(content_hash)');
   await db.execute('CREATE INDEX IF NOT EXISTS idx_sms_status ON sms_items(status)');
+  // schema ۱۲: دسته‌های هر تراکنشِ دفتر (تقسیمِ مساوی؛ روی جدولِ categories نسخه‌ی ۱).
+  await db.execute('''
+    CREATE TABLE IF NOT EXISTS ledger_entry_categories (
+      entry_id TEXT NOT NULL,
+      category_id TEXT NOT NULL,
+      amount_rial INTEGER NOT NULL,
+      PRIMARY KEY (entry_id, category_id)
+    )
+  ''');
 }

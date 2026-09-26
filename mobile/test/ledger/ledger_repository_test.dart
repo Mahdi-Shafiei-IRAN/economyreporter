@@ -1,4 +1,8 @@
+import 'dart:convert';
+
+import 'package:crypto/crypto.dart';
 import 'package:economy/core/database/app_database.dart';
+import 'package:economy/core/sms/digit_utils.dart';
 import 'package:economy/core/ledger/ledger_math.dart';
 import 'package:economy/core/ledger/ledger_repository.dart';
 import 'package:economy/core/ledger/models.dart';
@@ -236,6 +240,59 @@ void main() {
     expect(e.amountRial, 100000);
     expect(e.bankBalanceAfter, 900000);
     expect(() => repo.acceptSuggested(items[false]!.key), throwsStateError);
+  });
+
+  group('categories and budgets (phase 3)', () {
+    Future<Map<String, String>> catIds() async =>
+        {for (final c in await repo.categories()) c.name: c.id};
+
+    test('categories are split equally and re-split when the amount changes', () async {
+      final ids = await catIds();
+      final e = await repo.addEntry(
+          accountId: 'm1',
+          kind: EntryKind.expense,
+          amountRial: 100,
+          occurredAt: t1,
+          categoryIds: [ids['نان']!, ids['میوه']!, ids['لبنیات']!]);
+      var parts = (await repo.allocations())[e.id]!;
+      expect(parts.map((p) => p.amountRial).fold<int>(0, (s, a) => s + a), 100);
+
+      await repo.updateEntry(e.copyWith(amountRial: 90));
+      parts = (await repo.allocations())[e.id]!;
+      expect(parts.map((p) => p.amountRial), [30, 30, 30]);
+
+      await repo.setEntryCategories(e.id, [ids['نان']!]);
+      expect((await repo.allocations())[e.id]!.single.amountRial, 90);
+    });
+
+    test('an SMS categorised in v1 gets the same categories suggested', () async {
+      final ids = await catIds();
+      await repo.intakeAll([mellat('برداشت100,000', 900000, t1)], allowed: allowed);
+      final item = (await repo.smsItems()).single;
+      final v1Hash = sha256
+          .convert(utf8.encode('${item.sender.trim()}|${normalizeForParsing(item.body!)}'))
+          .toString();
+      await db.insert('transactions', {
+        'id': 'v1tx',
+        'kind': 'expense',
+        'amount_rial': 100000,
+        'sms_content_hash': v1Hash,
+        'created_at': now.toIso8601String(),
+        'updated_at': now.toIso8601String(),
+      });
+      await db.insert('transaction_categories',
+          {'id': 'tc', 'transaction_id': 'v1tx', 'category_id': ids['نان'], 'amount_rial': 100000});
+      expect(await repo.v1CategoryIdsFor(item), [ids['نان']]);
+    });
+
+    test('budget: set, change, remove', () async {
+      await repo.setBudget('نان', 500000);
+      await repo.setBudget('نان', 700000);
+      expect((await repo.budgets()).single.limitRial, 700000);
+      expect((await db.query('budgets')).single['sync_status'], 'pending');
+      await repo.setBudget('نان', null);
+      expect(await repo.budgets(), isEmpty);
+    });
   });
 
   test('archived account: its SMS are suggested as not-a-transaction', () async {

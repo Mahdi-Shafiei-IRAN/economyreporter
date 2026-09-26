@@ -3,10 +3,16 @@
 /// [LedgerRepository.updateEntry]، [LedgerRepository.deleteEntry] (I1).
 library;
 
+import 'dart:convert';
+
+import 'package:crypto/crypto.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:uuid/uuid.dart';
 
+import '../../features/budgets/data/budget.dart';
+import '../../features/categories/data/category.dart';
 import '../../features/senders/data/allowed_sender.dart';
+import '../sms/digit_utils.dart';
 import '../sms/sms_parser.dart';
 import 'ledger_math.dart';
 import 'models.dart';
@@ -209,6 +215,106 @@ class LedgerRepository {
 
   // --- کارِ کاربر ---
 
+  // --- دسته‌ها و بودجه ---
+
+  Future<List<Category>> categories() async {
+    final rows = await db.query('categories', orderBy: 'is_system DESC, name');
+    return rows.map(Category.fromMap).toList();
+  }
+
+  /// شناسه‌ی تراکنش ← دسته‌هایش.
+  Future<Map<String, List<EntryCategory>>> allocations() async {
+    final rows = await db.rawQuery('''
+      SELECT lec.entry_id AS e, lec.category_id AS c, cat.name AS n, lec.amount_rial AS a
+      FROM ledger_entry_categories lec JOIN categories cat ON cat.id = lec.category_id
+      ORDER BY cat.name
+    ''');
+    final out = <String, List<EntryCategory>>{};
+    for (final r in rows) {
+      out.putIfAbsent(r['e']! as String, () => []).add(EntryCategory(
+          categoryId: r['c']! as String, name: r['n']! as String, amountRial: r['a']! as int));
+    }
+    return out;
+  }
+
+  /// دسته‌های یک تراکنش (کارِ کاربر)؛ مبلغ به تساوی تقسیم می‌شود.
+  Future<void> setEntryCategories(String entryId, List<String> categoryIds) async {
+    final e = await _entry(entryId);
+    if (e == null) return;
+    await _writeCategories(db, e, categoryIds);
+    await db.update('ledger_entries', {'updated_at': _now().toIso8601String(), 'sync_status': 'pending'},
+        where: 'id = ?', whereArgs: [entryId]);
+  }
+
+  Future<void> _writeCategories(DatabaseExecutor ex, Entry e, List<String> categoryIds) async {
+    await ex.delete('ledger_entry_categories', where: 'entry_id = ?', whereArgs: [e.id]);
+    final ids = categoryIds.toSet().toList();
+    final parts = splitEqually(e.amountRial, ids.length);
+    for (var i = 0; i < ids.length; i++) {
+      await ex.insert('ledger_entry_categories',
+          {'entry_id': e.id, 'category_id': ids[i], 'amount_rial': parts[i]});
+    }
+  }
+
+  Future<List<String>> _categoryIdsOf(String entryId) async => [
+        for (final r in await db.query('ledger_entry_categories',
+            columns: ['category_id'], where: 'entry_id = ?', whereArgs: [entryId]))
+          r['category_id']! as String,
+      ];
+
+  /// دسته‌هایی که نسخه‌ی ۱ به همین پیامک داده بود (پیش‌پرِ برگه‌ی ثبت؛ طرح ۹.۳).
+  Future<List<String>> v1CategoryIdsFor(SmsItem item) async {
+    final body = item.body;
+    if (body == null) return const [];
+    // همان اثرانگشتِ محتوای نسخه‌ی ۱ (`sms_content_hash` در transactions).
+    final hash = sha256
+        .convert(utf8.encode('${item.sender.trim()}|${normalizeForParsing(body)}'))
+        .toString();
+    final rows = await db.rawQuery('''
+      SELECT DISTINCT tc.category_id AS c FROM transaction_categories tc
+      JOIN transactions t ON t.id = tc.transaction_id
+      WHERE t.sms_content_hash = ? AND t.deleted_at IS NULL
+    ''', [hash]);
+    return [for (final r in rows) r['c']! as String];
+  }
+
+  Future<List<Budget>> budgets() async {
+    final rows = await db.query('budgets', where: 'is_deleted = 0');
+    return rows.map(Budget.fromMap).toList();
+  }
+
+  /// سقفِ ماهانه‌ی یک دسته؛ null یا صفر = برداشتنِ سقف. (همان جدولِ نسخه‌ی ۱ که همگام می‌شود.)
+  Future<void> setBudget(String categoryName, int? limitRial) async {
+    final now = _now().toIso8601String();
+    final existing = await db.query('budgets',
+        where: 'category_name = ? AND is_deleted = 0', whereArgs: [categoryName], limit: 1);
+    final remove = limitRial == null || limitRial <= 0;
+    if (existing.isNotEmpty) {
+      await db.update(
+          'budgets',
+          {
+            if (remove) 'is_deleted': 1 else 'limit_rial': limitRial,
+            'updated_at': now,
+            'client_updated_at': now,
+            'sync_status': 'pending',
+          },
+          where: 'id = ?',
+          whereArgs: [existing.first['id']]);
+    } else if (!remove) {
+      await db.insert('budgets', {
+        'id': _uuid.v4(),
+        'category_name': categoryName,
+        'period': 'monthly',
+        'limit_rial': limitRial,
+        'is_deleted': 0,
+        'updated_at': now,
+        'client_updated_at': now,
+        'sync_status': 'pending',
+        'created_at': now,
+      });
+    }
+  }
+
   /// «ثبت»: یک تراکنش از پیامک (منتظر یا ردشده) می‌سازد. مانده‌ی بانک از پیشنهاد.
   Future<Entry> acceptSms(
     String key, {
@@ -218,6 +324,8 @@ class LedgerRepository {
     DateTime? occurredAt,
     int? bankBalanceAfter,
     String? note,
+    bool isTransfer = false,
+    List<String> categoryIds = const [],
   }) async {
     if (amountRial <= 0) throw ArgumentError.value(amountRial, 'amountRial');
     final item = await smsItem(key);
@@ -234,12 +342,14 @@ class LedgerRepository {
       source: EntrySource.sms,
       smsKey: key,
       note: note,
+      isTransfer: isTransfer,
       createdByDevice: deviceId,
       createdAt: now,
       updatedAt: now,
     );
     await db.transaction((txn) async {
       await txn.insert('ledger_entries', entry.toMap());
+      await _writeCategories(txn, entry, categoryIds);
       await txn.update(
           'sms_items',
           {
@@ -292,6 +402,8 @@ class LedgerRepository {
     required DateTime occurredAt,
     String? note,
     EntrySource source = EntrySource.manual,
+    bool isTransfer = false,
+    List<String> categoryIds = const [],
   }) async {
     if (amountRial <= 0) throw ArgumentError.value(amountRial, 'amountRial');
     if (source == EntrySource.sms) throw ArgumentError('SMS entries are created by acceptSms');
@@ -307,19 +419,28 @@ class LedgerRepository {
       occurredAt: occurredAt.toUtc(),
       source: source,
       note: note,
+      isTransfer: isTransfer,
       createdByDevice: deviceId,
       createdAt: now,
       updatedAt: now,
     );
-    await db.insert('ledger_entries', entry.toMap());
+    await db.transaction((txn) async {
+      await txn.insert('ledger_entries', entry.toMap());
+      await _writeCategories(txn, entry, categoryIds);
+    });
     return entry;
   }
 
-  Future<void> updateEntry(Entry e) async {
+  /// ویرایشِ کاربر. [categoryIds] null = همان دسته‌های قبلی، با تقسیمِ دوباره روی مبلغِ تازه.
+  Future<void> updateEntry(Entry e, {List<String>? categoryIds}) async {
     if (e.amountRial <= 0) throw ArgumentError.value(e.amountRial, 'amountRial');
-    await db.update(
-        'ledger_entries', {...e.copyWith(updatedAt: _now()).toMap(), 'sync_status': 'pending'},
-        where: 'id = ?', whereArgs: [e.id]);
+    final ids = categoryIds ?? await _categoryIdsOf(e.id);
+    await db.transaction((txn) async {
+      await txn.update(
+          'ledger_entries', {...e.copyWith(updatedAt: _now()).toMap(), 'sync_status': 'pending'},
+          where: 'id = ?', whereArgs: [e.id]);
+      await _writeCategories(txn, e, ids);
+    });
   }
 
   /// حذفِ نرم. تراکنشِ پیامکی: یعنی کاربر آن پیامک را رد کرده (`other`).

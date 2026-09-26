@@ -35,6 +35,9 @@ void main() {
 
   /// دیتابیسِ تازه با حسابِ ملت و دو پیامکِ این ماه، نسخه‌ی ۲ روشن.
   Future<LedgerController> setup(WidgetTester tester, {List<IncomingSms>? inbox}) async {
+    tester.view.physicalSize = const Size(1200, 3000);
+    tester.view.devicePixelRatio = 1.5;
+    addTearDown(tester.view.reset);
     late LedgerController c;
     late Database db;
     await tester.runAsync(() async {

@@ -9,7 +9,10 @@ import 'package:economy/core/database/app_database.dart';
 import 'package:economy/core/ledger/ledger_repository.dart';
 import 'package:economy/core/ledger/sms_intake.dart';
 import 'package:economy/core/theme/app_theme.dart';
+import 'package:economy/core/ledger/models.dart';
+import 'package:economy/features/ledger/account_details_screen.dart';
 import 'package:economy/features/ledger/account_form.dart';
+import 'package:economy/features/ledger/month_report_screen.dart';
 import 'package:economy/features/ledger/entry_sheet.dart';
 import 'package:economy/features/ledger/guide_screen.dart';
 import 'package:economy/features/ledger/ledger_controller.dart';
@@ -145,6 +148,22 @@ Future<LedgerController> _controller(WidgetTester tester) async {
     await c.setBalanceNow('m1', 70000000);
     final first = c.pending.firstWhere((i) => i.suggestion.amountRial == 45000000);
     await c.acceptSuggested(first);
+    // کیف پولِ نقد با دو خرج (یکی دسته‌دار) و سقفِ بودجه، برای گزارشِ ماه.
+    final cash = await c.createAccount(ownerName: 'مهدی', label: 'کیف پول', balanceRial: 50000000);
+    final food = c.categories.firstWhere((x) => x.name == 'رستوران').id;
+    await c.addManual(
+        accountId: cash.id,
+        kind: EntryKind.expense,
+        amountRial: 35000000,
+        occurredAt: _now.add(const Duration(minutes: 10)),
+        note: 'شام',
+        categoryIds: [food]);
+    await c.addManual(
+        accountId: cash.id,
+        kind: EntryKind.expense,
+        amountRial: 12000000,
+        occurredAt: _now.add(const Duration(minutes: 20)));
+    await c.setBudget('رستوران', 30000000);
   });
   return c;
 }
@@ -190,6 +209,32 @@ void main() {
     await tester.pumpWidget(_app(LedgerSettingsScreen(
         controller: await _controller(tester), onCheckUpdate: () async => '', onLogout: () {})));
     await _shot(tester, 'v2_09_settings');
+  });
+
+  testWidgets('account details with a window', (tester) async {
+    _phone(tester);
+    await tester.pumpWidget(_app(AccountDetailsScreen(controller: await _controller(tester), accountId: 'm1')));
+    await _shot(tester, 'v2_11_account_details');
+  });
+
+  testWidgets('month report', (tester) async {
+    _phone(tester);
+    await tester.pumpWidget(_app(MonthReportScreen(controller: await _controller(tester))));
+    await tester.tap(find.byKey(kReportUncategorizedKey));
+    await _shot(tester, 'v2_12_month_report');
+  });
+
+  testWidgets('edit entry sheet', (tester) async {
+    _phone(tester, height: 1600);
+    final c = await _controller(tester);
+    final e = (await tester.runAsync(c.repo.entries))!.firstWhere((e) => e.note == 'شام');
+    await tester.pumpWidget(_app(Builder(
+        builder: (context) => Scaffold(
+            body: Center(
+                child: FilledButton(
+                    onPressed: () => showEntrySheet(context, c, entry: e), child: const Text('open')))))));
+    await tester.tap(find.text('open'));
+    await _shot(tester, 'v2_13_edit_entry');
   });
 
   testWidgets('guide', (tester) async {

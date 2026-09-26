@@ -8,6 +8,8 @@ import '../../core/format/date_format.dart';
 import '../../core/format/money_format.dart';
 import '../../core/sms/jalali.dart';
 import 'account_card.dart';
+import 'account_details_screen.dart';
+import 'month_report_screen.dart';
 import 'account_form.dart';
 import 'accounts_view.dart';
 import 'banks_view.dart';
@@ -17,6 +19,7 @@ import 'pending_screen.dart';
 import 'setup_screen.dart';
 
 const kLedgerNextStepKey = Key('ledger-next-step');
+const kLedgerMonthCardKey = Key('ledger-month-card');
 const kLedgerAddFabKey = Key('ledger-add-fab');
 const kLedgerNewAccountKey = Key('ledger-new-account');
 const kLedgerSettingsKey = Key('ledger-settings');
@@ -99,22 +102,33 @@ class _LedgerHomeScreenState extends State<LedgerHomeScreen> {
               children: [
                 _NextStepCard(controller: _c, onOpen: _push),
                 Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        Text('جمعِ موجودی‌ها', style: theme.textTheme.labelLarge),
-                        Text(
-                          _c.totalBalance == null ? '—' : formatToman(_c.totalBalance!),
-                          style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          '$month: درآمد ${formatToman(_c.monthIncome)} • هزینه ${formatToman(_c.monthExpense)}',
-                          style: theme.textTheme.bodySmall,
-                        ),
-                      ],
+                  key: kLedgerMonthCardKey,
+                  clipBehavior: Clip.antiAlias,
+                  child: InkWell(
+                    onTap: () => _push(MonthReportScreen(controller: _c)),
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Text('جمعِ موجودی‌ها', style: theme.textTheme.labelLarge),
+                          Text(
+                            _c.totalBalance == null ? '—' : formatToman(_c.totalBalance!),
+                            style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
+                          ),
+                          const SizedBox(height: 8),
+                          Row(children: [
+                            Expanded(
+                              child: Text(
+                                '$month: درآمد ${formatToman(_c.monthIncome)} • هزینه ${formatToman(_c.monthExpense)}',
+                                style: theme.textTheme.bodySmall,
+                              ),
+                            ),
+                            Text('گزارش', style: theme.textTheme.labelLarge?.copyWith(color: theme.colorScheme.primary)),
+                            Icon(Icons.chevron_left_rounded, color: theme.colorScheme.primary),
+                          ]),
+                        ],
+                      ),
                     ),
                   ),
                 ),
@@ -122,7 +136,12 @@ class _LedgerHomeScreenState extends State<LedgerHomeScreen> {
                   padding: const EdgeInsets.fromLTRB(4, 16, 4, 6),
                   child: Text('حساب‌هایم', style: theme.textTheme.titleMedium),
                 ),
-                for (final v in _c.activeAccounts) LedgerAccountCard(controller: _c, view: v),
+                for (final v in _c.activeAccounts)
+                  LedgerAccountCard(
+                    controller: _c,
+                    view: v,
+                    onTap: () => _push(AccountDetailsScreen(controller: _c, accountId: v.account.id)),
+                  ),
                 if (_c.activeAccounts.isEmpty)
                   Padding(
                     padding: const EdgeInsets.all(12),
