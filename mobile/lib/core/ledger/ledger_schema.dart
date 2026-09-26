@@ -75,4 +75,19 @@ Future<void> createLedgerTables(DatabaseExecutor db) async {
       PRIMARY KEY (entry_id, category_id)
     )
   ''');
+  // schema ۱۳: تصمیم‌های پیامک که از سرور آمده‌اند (بعد از نصبِ دوباره)؛ هر وقت همان پیامک
+  // از صندوق خوانده شود، همین تصمیم را می‌گیرد (I5). بدونِ متن و فرستنده.
+  await db.execute('''
+    CREATE TABLE IF NOT EXISTS ledger_remote_decisions (
+      key TEXT PRIMARY KEY,
+      content_hash TEXT NOT NULL,
+      received_at TEXT NOT NULL,
+      status TEXT NOT NULL,
+      reject_reason TEXT,
+      entry_id TEXT,
+      decided_at TEXT
+    )
+  ''');
+  await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_remote_dec_hash ON ledger_remote_decisions(content_hash)');
 }

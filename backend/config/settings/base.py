@@ -43,6 +43,7 @@ INSTALLED_APPS = [
     "apps.categories",
     "apps.transactions",
     "apps.budgets",
+    "apps.ledger",
 ]
 
 MIDDLEWARE = [

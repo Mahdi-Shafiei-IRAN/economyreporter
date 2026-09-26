@@ -143,6 +143,9 @@ class WalletSyncView(APIView):
             "is_deleted": data.get("is_deleted", False),
             "client_updated_at": data.get("client_updated_at"),
         }
+        # گوشیِ نسخه‌ی قدیمی «archived» نمی‌فرستد؛ نبودنش مقدارِ قبلی را پاک نمی‌کند.
+        if "archived" in item:
+            fields["archived"] = data.get("archived", False)
         if existing is None:
             fields["created_by"] = user
             wallet = Wallet.objects.create(id=wid, **fields)

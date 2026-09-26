@@ -11,7 +11,7 @@ import 'package:uuid/uuid.dart';
 import '../ledger/ledger_schema.dart';
 
 const String kDbName = 'economy.db';
-const int kDbVersion = 12;
+const int kDbVersion = 13;
 
 /// دسته‌های پیش‌فرض (قابل ویرایش توسط کاربر بعداً).
 const List<String> kDefaultCategories = [
@@ -114,6 +114,10 @@ Future<void> migrateSchema(Database db, int oldVersion, int newVersion) async {
   }
   if (oldVersion < 12) {
     // نسخه ۱۲: دسته‌های تراکنشِ دفترِ نسخه‌ی ۲ (جدول‌ها «IF NOT EXISTS» ساخته می‌شوند).
+    await createLedgerTables(db);
+  }
+  if (oldVersion < 13) {
+    // نسخه ۱۳: تصمیم‌های پیامکِ دریافتی از سرور (همگام‌سازیِ نسخه‌ی ۲).
     await createLedgerTables(db);
   }
 }

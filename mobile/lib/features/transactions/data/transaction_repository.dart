@@ -953,6 +953,8 @@ class TransactionRepository implements TransactionStore {
       'client_updated_at': s(j['client_updated_at']),
       'sync_status': 'synced',
     };
+    // سرورِ قدیمی این فیلد را ندارد؛ نبودنش «کنارگذاشته»ی محلی را پاک نمی‌کند.
+    if (j.containsKey('archived')) map['archived'] = j['archived'] == true ? 1 : 0;
     if (local.isEmpty) {
       map['created_at'] = _nowIso();
       await _db.insert('wallets', map);

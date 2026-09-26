@@ -74,6 +74,8 @@ class Wallet(models.Model):
     card_last4 = models.CharField("۴ رقم کارت", max_length=4, blank=True)
     account_ref = models.CharField("شماره حساب", max_length=32, blank=True)
     is_deleted = models.BooleanField("حذف‌شده", default=False)
+    # نسخه‌ی ۲: «پیگیری نشود» (حسابِ کنارگذاشته).
+    archived = models.BooleanField("کنارگذاشته", default=False)
     client_updated_at = models.DateTimeField("آخرین ویرایش روی گوشی", null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField("آخرین تغییر", auto_now=True)

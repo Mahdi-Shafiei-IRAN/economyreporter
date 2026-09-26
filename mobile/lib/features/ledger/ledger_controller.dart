@@ -2,6 +2,8 @@
 /// هر تغییرِ دفتر فقط از دکمه‌های کاربر به این کلاس می‌رسد (I1).
 library;
 
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart' hide Category;
 
 import '../../core/family/family_api.dart';
@@ -107,6 +109,14 @@ class LedgerController extends ChangeNotifier {
 
   /// انتخابِ بانک‌ها (قدمِ ۱).
   SenderOps? senders;
+
+  /// هر تغییرِ دفتر به دستِ کاربر (برای همگام‌سازیِ بی‌درنگ با سرور).
+  VoidCallback? onLocalChange;
+
+  /// آخرین همگام‌سازی با سرور و تعدادِ منتظرِ ارسال (برای تنظیمات).
+  DateTime? lastSyncAt;
+  String? lastSyncError;
+  int unsyncedCount = 0;
   final SmsParser parser;
   final DateTime Function() _clock;
 
@@ -221,6 +231,13 @@ class LedgerController extends ChangeNotifier {
     final totals = periodTotals(entries, from, to);
     monthIncome = totals.income;
     monthExpense = totals.expense;
+    unsyncedCount = await repo.unsyncedCount();
+    final status = await repo.syncStatus();
+    if (status != null) {
+      final j = jsonDecode(status) as Map<String, dynamic>;
+      lastSyncAt = DateTime.tryParse(j['at'] as String? ?? '')?.toUtc();
+      lastSyncError = j['error'] as String?;
+    }
     notifyListeners();
   }
 
@@ -268,6 +285,7 @@ class LedgerController extends ChangeNotifier {
           await _syncInbox();
         }
         await _load();
+        onLocalChange?.call();
       });
 
   /// خواندنِ صندوق → پیامک‌های منتظر (هرگز تراکنش). تعدادِ پیامکِ تازه.
@@ -296,6 +314,7 @@ class LedgerController extends ChangeNotifier {
   Future<void> _afterLedgerChange() async {
     await repo.refreshPendingSuggestions(allowed: await allowedSenders(), force: true);
     await _load();
+    onLocalChange?.call();
   }
 
   // --- کارِ کاربر ---
@@ -484,6 +503,7 @@ class LedgerController extends ChangeNotifier {
   Future<void> setEntryCategories(String entryId, List<String> categoryIds) => _track(() async {
         await repo.setEntryCategories(entryId, categoryIds);
         await _load();
+        onLocalChange?.call();
       });
 
   Future<List<String>> suggestedCategoryIds(SmsItem item) => repo.v1CategoryIdsFor(item);
@@ -503,6 +523,7 @@ class LedgerController extends ChangeNotifier {
   Future<void> setBudget(String categoryName, int? limitRial) => _track(() async {
         await repo.setBudget(categoryName, limitRial);
         await _load();
+        onLocalChange?.call();
       });
 
   // --- راهنمای سه‌قدمی و حساب‌های پیداشده ---
@@ -510,6 +531,7 @@ class LedgerController extends ChangeNotifier {
   Future<void> finishSetup() => _track(() async {
         await repo.setSetupDone();
         await _load();
+        onLocalChange?.call();
       });
 
   /// «مالِ من است»: حساب با آخرین مانده‌ی پیامک به‌عنوانِ «موجودیِ الان» (قابلِ اصلاح).

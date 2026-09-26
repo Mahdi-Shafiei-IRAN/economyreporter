@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
@@ -10,6 +12,7 @@ import 'core/database/app_database.dart';
 import 'core/family/family_api.dart';
 import 'core/family/health_api.dart';
 import 'core/ledger/ledger_repository.dart';
+import 'core/ledger/ledger_sync.dart';
 import 'core/network/api_client.dart';
 import 'core/sms/sms_importer.dart';
 import 'core/sync/remote_transaction_api.dart';
@@ -78,6 +81,7 @@ class _Services {
   final SmsInboxService smsInbox;
   final UpdateService updater;
   final LedgerController ledger;
+  final LedgerSyncService ledgerSync;
 
   const _Services({
     required this.auth,
@@ -88,10 +92,11 @@ class _Services {
     required this.smsInbox,
     required this.updater,
     required this.ledger,
+    required this.ledgerSync,
   });
 
-  /// پروفایل/اعضا از سرور → ارسال و دریافت تراکنش‌ها → تازه‌سازی صفحه.
-  /// در حالت آفلاین بی‌صدا شکست می‌خورد (چیزی گم نمی‌شود).
+  /// پروفایل/اعضا از سرور → ارسال و دریافت تراکنش‌ها (نسخه‌ی ۱، کیف‌ها و بودجه) → دفترِ نسخه‌ی ۲ →
+  /// تازه‌سازی صفحه. در حالت آفلاین بی‌صدا شکست می‌خورد (چیزی گم نمی‌شود).
   Future<SyncSummary> refreshFromServer({bool force = false}) async {
     if (await profile.refresh() == ProfileStatus.needsRelogin) {
       await auth.expireSession(kLegacyAccountNotice);
@@ -99,7 +104,32 @@ class _Services {
     }
     final summary = await sync.sync(force: force);
     await dashboard.load();
+    await syncLedger();
     return summary;
+  }
+
+  /// دفترِ نسخه‌ی ۲. اگر تنظیماتِ سرور آن را روشن کرد (نصبِ دوباره)، صندوق هم خوانده می‌شود.
+  Future<LedgerSyncResult> syncLedger() async {
+    final wasEnabled = ledger.enabled;
+    final result = await ledgerSync.sync();
+    await ledger.load();
+    if (!wasEnabled && ledger.enabled) {
+      try {
+        await ledger.syncInbox();
+      } catch (_) {
+        // صندوق بعداً (بازشدنِ اپ یا کشیدنِ خانه به پایین) خوانده می‌شود.
+      }
+    }
+    return result;
+  }
+
+  /// «همگام‌سازی الان» در تنظیماتِ نسخه‌ی ۲.
+  Future<String> syncLedgerNow() async {
+    await sync.sync(force: true); // کیف‌ها و بودجه
+    final r = await syncLedger();
+    if (r.error != null) return 'همگام‌سازی نشد: ${r.error}. تغییرها روی گوشی می‌مانند و بعداً فرستاده می‌شوند.';
+    return 'همگام‌سازی انجام شد: ${toPersianDigits('${r.sent}')} ارسال، ${toPersianDigits('${r.received}')} دریافت'
+        '${r.failed > 0 ? '، ${toPersianDigits('${r.failed}')} ناموفق' : ''}';
   }
 }
 
@@ -189,6 +219,19 @@ class _BootstrapState extends State<_Bootstrap> {
         () async => [for (final raw in await smsInbox.readInbox()) toIncomingSms(raw)];
     await ledger.load();
 
+    // هر تغییرِ دفتر: چند ثانیه بعد (تا چند تغییرِ پشتِ هم یک‌جا بروند) به سرور.
+    final ledgerSync = LedgerSyncService(ledger.repo, DioLedgerRemote(api.dio));
+    Timer? ledgerDebounce;
+    ledger.onLocalChange = () {
+      ledgerDebounce?.cancel();
+      ledgerDebounce = Timer(const Duration(seconds: 3), () async {
+        if (!auth.authenticated) return;
+        await sync.sync().catchError((_) => const SyncSummary(synced: 0, failed: 0));
+        await ledgerSync.sync();
+        await ledger.load();
+      });
+    };
+
     // پیشنهاد فرستنده‌های بانک از صندوق گوشی؛ و بعد از مجاز کردن یک فرستنده،
     // خواندن دوباره‌ی صندوق تا پیامک‌های قبلیِ همان فرستنده هم ثبت شوند.
     // پیشنهاد فرستنده‌ها و عیب‌یابی از کلِ صندوق؛ بعد از مجاز کردنِ فرستنده (یا «خواندنِ
@@ -208,6 +251,7 @@ class _BootstrapState extends State<_Bootstrap> {
       smsInbox: smsInbox,
       updater: UpdateService(AppConfig.updatesBaseUrl),
       ledger: ledger,
+      ledgerSync: ledgerSync,
     );
   }
 
@@ -506,6 +550,7 @@ class _RootState extends State<_Root> with WidgetsBindingObserver {
       builder: (_) => LedgerSettingsScreen(
         controller: s.ledger,
         onCheckUpdate: _manualCheckUpdate,
+        onSync: s.syncLedgerNow,
         onAddMember: s.dashboard.canAddMember
             ? () => Navigator.of(context).push(
                 MaterialPageRoute(builder: (_) => AddMemberScreen(controller: s.dashboard)))

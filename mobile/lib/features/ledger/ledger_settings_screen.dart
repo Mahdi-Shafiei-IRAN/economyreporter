@@ -4,6 +4,7 @@ library;
 
 import 'package:flutter/material.dart';
 
+import '../../core/format/date_format.dart';
 import '../../core/format/money_format.dart';
 import '../../core/theme/theme_controller.dart';
 import 'banks_view.dart';
@@ -16,6 +17,7 @@ const kLedgerSettingsBanksKey = Key('ledger-settings-banks');
 const kLedgerSettingsFamilyKey = Key('ledger-settings-family');
 const kLedgerSettingsUpdateKey = Key('ledger-settings-update');
 const kLedgerSettingsLogoutKey = Key('ledger-settings-logout');
+const kLedgerSettingsSyncKey = Key('ledger-settings-sync');
 
 class LedgerSettingsScreen extends StatefulWidget {
   final LedgerController controller;
@@ -25,12 +27,16 @@ class LedgerSettingsScreen extends StatefulWidget {
   /// «افزودن عضو خانواده» (فقط مدیر).
   final VoidCallback? onAddMember;
 
+  /// «همگام‌سازی الان»؛ پیامِ نتیجه را برمی‌گرداند.
+  final Future<String> Function()? onSync;
+
   const LedgerSettingsScreen({
     super.key,
     required this.controller,
     this.onCheckUpdate,
     this.onLogout,
     this.onAddMember,
+    this.onSync,
   });
 
   @override
@@ -39,6 +45,17 @@ class LedgerSettingsScreen extends StatefulWidget {
 
 class _LedgerSettingsScreenState extends State<LedgerSettingsScreen> {
   bool _checking = false;
+  bool _syncing = false;
+
+  Future<void> _syncNow() async {
+    setState(() => _syncing = true);
+    try {
+      final message = await widget.onSync!();
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+    } finally {
+      if (mounted) setState(() => _syncing = false);
+    }
+  }
   LedgerController get _c => widget.controller;
 
   void _push(Widget page) => Navigator.of(context).push(MaterialPageRoute(builder: (_) => page));
@@ -90,6 +107,30 @@ class _LedgerSettingsScreenState extends State<LedgerSettingsScreen> {
                   ),
                 ]),
               ),
+              if (widget.onSync != null)
+                Card(
+                  clipBehavior: Clip.antiAlias,
+                  child: ListTile(
+                    key: kLedgerSettingsSyncKey,
+                    leading: Icon(_c.lastSyncError == null
+                        ? Icons.cloud_done_outlined
+                        : Icons.cloud_off_rounded),
+                    title: Text(_c.lastSyncAt == null
+                        ? 'پشتیبان روی سرور: هنوز نه'
+                        : 'پشتیبان روی سرور: ${formatJalaliDateTime(_c.lastSyncAt!)}'),
+                    subtitle: Text([
+                      if (_c.lastSyncError != null) _c.lastSyncError!,
+                      _c.unsyncedCount == 0
+                          ? 'همه‌چیز روی سرور هست؛ با نصبِ دوباره برمی‌گردد'
+                          : '${toPersianDigits('${_c.unsyncedCount}')} تغییر منتظرِ ارسال',
+                    ].join('\n')),
+                    trailing: _syncing
+                        ? const SizedBox(
+                            width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                        : const Icon(Icons.sync_rounded),
+                    onTap: _syncing ? null : _syncNow,
+                  ),
+                ),
               Card(
                 clipBehavior: Clip.antiAlias,
                 child: Column(children: [

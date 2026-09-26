@@ -21,6 +21,7 @@ class WalletSerializer(serializers.ModelSerializer):
             "card_last4",
             "account_ref",
             "is_deleted",
+            "archived",
             "client_updated_at",
             "updated_at",
         ]

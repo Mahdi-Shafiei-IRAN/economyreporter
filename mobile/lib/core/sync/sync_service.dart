@@ -529,6 +529,7 @@ class SyncService {
         'card_last4': w['card_last4'] ?? '',
         'account_ref': w['account_ref'] ?? '',
         'is_deleted': (w['is_deleted'] as int? ?? 0) == 1,
+        'archived': (w['archived'] as int? ?? 0) == 1,
         'client_updated_at': w['client_updated_at'],
       };
 

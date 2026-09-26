@@ -22,7 +22,7 @@ class LedgerV2Toggle extends StatelessWidget {
           key: kLedgerV2ToggleKey,
           secondary: const Icon(Icons.science_outlined),
           title: const Text('نسخه‌ی ۲ (آزمایشی)'),
-          subtitle: const Text('هر پیامک منتظرِ تأییدِ تو. فعلاً فقط روی همین گوشی. '
+          subtitle: const Text('هر پیامک منتظرِ تأییدِ تو؛ روی سرور هم پشتیبان می‌شود. '
               'خاموش = نسخه‌ی قبلی.'),
           value: controller.enabled,
           onChanged: controller.setEnabled,

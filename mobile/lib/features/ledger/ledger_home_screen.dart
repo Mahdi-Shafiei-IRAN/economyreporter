@@ -169,7 +169,7 @@ class _LedgerHomeScreenState extends State<LedgerHomeScreen> {
                     padding: const EdgeInsets.fromLTRB(4, 8, 4, 0),
                     child: Text(
                       'حساب‌های بقیه‌ی خانواده (${_fa(_c.othersAccountCount)}) روی گوشیِ خودشان است؛ '
-                      'بعد از همگام‌سازیِ نسخه‌ی ۲ اینجا هم دیده می‌شوند.',
+                      'دیدنِ آن‌ها در قدمِ بعد اضافه می‌شود.',
                       style: theme.textTheme.bodySmall
                           ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
                     ),

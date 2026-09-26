@@ -22,6 +22,7 @@ import 'suggestion.dart';
 const kLedgerV2Setting = 'ledger_v2';
 const kLedgerStartSetting = 'ledger_start_date';
 const kLedgerSetupDoneSetting = 'ledger_setup_done';
+const kLedgerSettingsDirty = 'ledger_settings_dirty';
 
 class LedgerRepository {
   LedgerRepository(this.db,
@@ -50,12 +51,18 @@ class LedgerRepository {
 
   Future<bool> isEnabled() async => await _setting(kLedgerV2Setting) == '1';
 
-  Future<void> setEnabled(bool on) => _setSetting(kLedgerV2Setting, on ? '1' : '0');
+  Future<void> setEnabled(bool on) async {
+    await _setSetting(kLedgerV2Setting, on ? '1' : '0');
+    await _markSettingsDirty();
+  }
 
   /// راهنمای سه‌قدمیِ اولین اجرا دیده/رد شده؟
   Future<bool> isSetupDone() async => await _setting(kLedgerSetupDoneSetting) == '1';
 
-  Future<void> setSetupDone() => _setSetting(kLedgerSetupDoneSetting, '1');
+  Future<void> setSetupDone() async {
+    await _setSetting(kLedgerSetupDoneSetting, '1');
+    await _markSettingsDirty();
+  }
 
   Future<DateTime?> startDate() async {
     final v = await _setting(kLedgerStartSetting);
@@ -68,8 +75,220 @@ class LedgerRepository {
     if (stored != null) return stored;
     final start = (fromServer ?? ledgerStartFor(_now())).toUtc();
     await _setSetting(kLedgerStartSetting, start.toIso8601String());
+    if (fromServer == null) await _markSettingsDirty();
     return start;
   }
+
+  // --- همگام‌سازی (فاز ۴؛ docs/v2-design.md ۱۲.۷) ---
+
+  Future<void> _markSettingsDirty() => _setSetting(kLedgerSettingsDirty, '1');
+
+  /// تنظیماتی که باید به سرور برود (null = چیزی عوض نشده).
+  Future<Map<String, Object?>?> dirtySettings() async {
+    if (await _setting(kLedgerSettingsDirty) != '1') return null;
+    return {
+      'enabled': await isEnabled(),
+      'start_date': (await startDate())?.toIso8601String(),
+      'setup_done': await isSetupDone(),
+    };
+  }
+
+  Future<void> markSettingsSent() => _setSetting(kLedgerSettingsDirty, '0');
+
+  /// تنظیماتِ سرور: وقتی اینجا تغییرِ ارسال‌نشده‌ای نیست، همان را بگیر (نصبِ دوباره → نسخه‌ی ۲).
+  Future<void> applyRemoteSettings(Map<String, dynamic> j) async {
+    if (await _setting(kLedgerSettingsDirty) == '1') return;
+    final start = j['start_date'];
+    if (start is String && start.isNotEmpty && await startDate() == null) {
+      await _setSetting(kLedgerStartSetting, DateTime.parse(start).toUtc().toIso8601String());
+    }
+    if (j['enabled'] is bool) await _setSetting(kLedgerV2Setting, j['enabled'] == true ? '1' : '0');
+    if (j['setup_done'] == true) await _setSetting(kLedgerSetupDoneSetting, '1');
+  }
+
+  /// ردیف‌هایی که هنوز به سرور نرفته‌اند (تراکنش، نقطه، تصمیمِ پیامک).
+  Future<int> unsyncedCount() async {
+    int count(List<Map<String, Object?>> r) => r.first['n'] as int? ?? 0;
+    return count(await db.rawQuery(
+            "SELECT COUNT(*) AS n FROM ledger_entries WHERE sync_status = 'pending'")) +
+        count(await db.rawQuery(
+            "SELECT COUNT(*) AS n FROM ledger_checkpoints WHERE sync_status = 'pending'")) +
+        count(await db.rawQuery(
+            "SELECT COUNT(*) AS n FROM sms_items WHERE sync_status = 'pending' AND status != 'pending'"));
+  }
+
+  /// نتیجه‌ی آخرین همگام‌سازی (JSON) برای نمایش در تنظیمات.
+  Future<String?> syncStatus() => _setting('ledger_last_sync');
+
+  Future<void> setSyncStatus(String json) => _setSetting('ledger_last_sync', json);
+
+  Future<String?> syncCursor(String what) => _setting('ledger_cursor_$what');
+
+  Future<void> setSyncCursor(String what, String cursor) => _setSetting('ledger_cursor_$what', cursor);
+
+  Future<List<Entry>> pendingEntries() async => [
+        for (final r in await db.query('ledger_entries', where: "sync_status = 'pending'"))
+          Entry.fromMap(r),
+      ];
+
+  Future<List<Checkpoint>> pendingCheckpoints() async => [
+        for (final r in await db.query('ledger_checkpoints', where: "sync_status = 'pending'"))
+          Checkpoint.fromMap(r),
+      ];
+
+  /// تصمیم‌های پیامک که هنوز به سرور نرفته‌اند (پیامکِ هنوز منتظر، تصمیم ندارد).
+  Future<List<SmsItem>> pendingDecisions() async => [
+        for (final r in await db.query('sms_items',
+            where: "sync_status = 'pending' AND status != ?", whereArgs: [SmsStatus.pending.name]))
+          SmsItem.fromMap(r),
+      ];
+
+  /// نامِ دسته‌های یک تراکنش (دسته‌ها با نام همگام می‌شوند؛ شناسه روی هر گوشی فرق دارد).
+  Future<List<String>> categoryNamesOf(String entryId) async => [
+        for (final r in await db.rawQuery('''
+          SELECT c.name AS n FROM ledger_entry_categories lec
+          JOIN categories c ON c.id = lec.category_id WHERE lec.entry_id = ? ORDER BY c.name
+        ''', [entryId]))
+          r['n']! as String,
+      ];
+
+  /// «ارسال شد» — فقط اگر ردیف در این فاصله دوباره ویرایش نشده باشد.
+  Future<void> markEntrySent(Entry e, {bool rejected = false}) => db.update(
+      'ledger_entries', {'sync_status': rejected ? 'rejected' : 'synced'},
+      where: 'id = ? AND updated_at = ?', whereArgs: [e.id, e.toMap()['updated_at']]);
+
+  Future<void> markCheckpointSent(Checkpoint c, {bool rejected = false}) => db.update(
+      'ledger_checkpoints', {'sync_status': rejected ? 'rejected' : 'synced'},
+      where: 'id = ? AND updated_at = ?', whereArgs: [c.id, c.toMap()['updated_at']]);
+
+  Future<void> markDecisionSent(SmsItem i) => db.update('sms_items', {'sync_status': 'synced'},
+      where: 'key = ? AND status = ? AND decided_at IS ?',
+      whereArgs: [i.key, i.status.name, i.decidedAt?.toIso8601String()]);
+
+  Future<String> _categoryIdByName(DatabaseExecutor ex, String name) async {
+    final rows = await ex.query('categories', columns: ['id'], where: 'name = ?', whereArgs: [name], limit: 1);
+    if (rows.isNotEmpty) return rows.first['id']! as String;
+    final id = _uuid.v4();
+    await ex.insert('categories',
+        {'id': id, 'name': name, 'is_system': 0, 'created_at': _now().toIso8601String()});
+    return id;
+  }
+
+  DateTime? _remoteTime(Object? v) =>
+      (v is String && v.isNotEmpty) ? DateTime.parse(v).toUtc() : null;
+
+  /// ردیفِ محلیِ «در صفِ ارسال» که از نسخه‌ی سرور جدیدتر است دست نمی‌خورد (ارسال می‌شود).
+  Future<bool> _localIsNewer(String table, String id, DateTime? remoteClientUpdated) async {
+    final rows = await db.query(table,
+        columns: ['sync_status', 'updated_at'], where: 'id = ?', whereArgs: [id], limit: 1);
+    if (rows.isEmpty || rows.first['sync_status'] != 'pending') return false;
+    final local = DateTime.parse(rows.first['updated_at']! as String).toUtc();
+    return remoteClientUpdated == null || local.isAfter(remoteClientUpdated);
+  }
+
+  Future<void> applyRemoteEntry(Map<String, dynamic> j) async {
+    final id = j['id'].toString();
+    final clientUpdated = _remoteTime(j['client_updated_at']);
+    if (await _localIsNewer('ledger_entries', id, clientUpdated)) return;
+    final updated = clientUpdated ?? _now();
+    final existing = await _entry(id);
+    final e = Entry(
+      id: id,
+      accountId: j['account_id'].toString(),
+      kind: EntryKind.values.byName(j['kind'] as String),
+      isTransfer: j['is_transfer'] == true,
+      transferPairId: j['transfer_pair_id']?.toString(),
+      amountRial: (j['amount_rial'] as num).toInt(),
+      occurredAt: _remoteTime(j['occurred_at'])!,
+      bankBalanceAfter: (j['bank_balance_after'] as num?)?.toInt(),
+      source: EntrySource.values.byName(j['source'] as String),
+      smsKey: (j['sms_key'] as String?)?.isEmpty ?? true ? null : j['sms_key'] as String,
+      note: (j['note'] as String?)?.isEmpty ?? true ? null : j['note'] as String,
+      createdByDevice: j['created_by_device'] as String?,
+      createdAt: existing?.createdAt ?? updated,
+      updatedAt: updated,
+      deletedAt: _remoteTime(j['deleted_at']),
+    );
+    final names = [for (final n in (j['categories'] as List? ?? const [])) n.toString()];
+    await db.transaction((txn) async {
+      await txn.insert('ledger_entries', {...e.toMap(), 'sync_status': 'synced'},
+          conflictAlgorithm: ConflictAlgorithm.replace);
+      await _writeCategories(txn, e, [for (final n in names) await _categoryIdByName(txn, n)]);
+    });
+  }
+
+  Future<void> applyRemoteCheckpoint(Map<String, dynamic> j) async {
+    final id = j['id'].toString();
+    final clientUpdated = _remoteTime(j['client_updated_at']);
+    if (await _localIsNewer('ledger_checkpoints', id, clientUpdated)) return;
+    final updated = clientUpdated ?? _now();
+    final cp = Checkpoint(
+      id: id,
+      accountId: j['account_id'].toString(),
+      at: _remoteTime(j['at'])!,
+      balanceRial: (j['balance_rial'] as num).toInt(),
+      note: (j['note'] as String?)?.isEmpty ?? true ? null : j['note'] as String,
+      createdAt: updated,
+      updatedAt: updated,
+      deletedAt: _remoteTime(j['deleted_at']),
+    );
+    await db.insert('ledger_checkpoints', {...cp.toMap(), 'sync_status': 'synced'},
+        conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  /// تصمیمِ سرور: نگه داشته می‌شود تا پیامکش از صندوق خوانده شود، و اگر همان پیامک اینجا «منتظر»
+  /// است همین حالا گرفته می‌شود (نصبِ دوباره یا گوشیِ دوم؛ I5).
+  Future<void> applyRemoteDecision(Map<String, dynamic> j) async {
+    final d = SmsDecision.fromPayload({
+      ...j,
+      'reject_reason': (j['reject_reason'] as String?)?.isEmpty ?? true ? null : j['reject_reason'],
+    });
+    await db.insert(
+        'ledger_remote_decisions',
+        {
+          'key': d.key,
+          'content_hash': d.contentHash,
+          'received_at': d.receivedAt.toIso8601String(),
+          'status': d.status.name,
+          'reject_reason': d.rejectReason?.code,
+          'entry_id': d.entryId,
+          'decided_at': d.decidedAt?.toIso8601String(),
+        },
+        conflictAlgorithm: ConflictAlgorithm.replace);
+    if (d.status == SmsStatus.pending) return;
+    for (final item in await db.query('sms_items',
+        where: 'content_hash = ? AND status = ?', whereArgs: [d.contentHash, SmsStatus.pending.name])) {
+      final local = SmsItem.fromMap(item);
+      if (!isSameSms(local.contentHash, local.receivedAt, d.contentHash, d.receivedAt)) continue;
+      final taken = local.key != d.key &&
+          (await db.query('sms_items', where: 'key = ?', whereArgs: [d.key], limit: 1)).isNotEmpty;
+      await db.update(
+          'sms_items',
+          {
+            if (!taken) 'key': d.key,
+            'status': d.status.name,
+            'entry_id': d.entryId,
+            'reject_reason': d.rejectReason?.code,
+            'decided_at': d.decidedAt?.toIso8601String(),
+            'sync_status': 'synced',
+          },
+          where: 'key = ?',
+          whereArgs: [local.key]);
+    }
+  }
+
+  Future<List<SmsDecision>> remoteDecisions() async => [
+        for (final r in await db.query('ledger_remote_decisions'))
+          SmsDecision.fromPayload({
+            'key': r['key'],
+            'content_hash': r['content_hash'],
+            'received_at': r['received_at'],
+            'status': r['status'],
+            'reject_reason': r['reject_reason'],
+            'entry_id': r['entry_id'],
+            'decided_at': r['decided_at'],
+          }),
+      ];
 
   // --- خواندن ---
 
@@ -116,9 +335,20 @@ class LedgerRepository {
     return account;
   }
 
-  Future<void> setArchived(String accountId, bool archived) => db.update(
-      'wallets', {'archived': archived ? 1 : 0},
-      where: 'id = ?', whereArgs: [accountId]);
+  /// «پیگیری نشود» — همراهِ کیف به سرور می‌رود (همگام‌سازیِ کیف‌ها).
+  Future<void> setArchived(String accountId, bool archived) {
+    final now = _now().toIso8601String();
+    return db.update(
+        'wallets',
+        {
+          'archived': archived ? 1 : 0,
+          'updated_at': now,
+          'client_updated_at': now,
+          'sync_status': 'pending',
+        },
+        where: 'id = ?',
+        whereArgs: [accountId]);
+  }
 
   Future<List<Entry>> entries({String? accountId}) async {
     final rows = await db.query('ledger_entries',
@@ -169,6 +399,7 @@ class LedgerRepository {
     final start = await ensureStartDate(fromServer: serverStartDate);
     final existing = await smsItems();
     final ctx = await suggestionContext();
+    final decisions = [...serverDecisions, ...await remoteDecisions()];
     final sorted = [...batch]..sort((a, b) => a.receivedAt.compareTo(b.receivedAt));
     final results = <IntakeResult>[];
     for (final sms in sorted) {
@@ -176,11 +407,18 @@ class LedgerRepository {
           startDate: start,
           allowed: allowed,
           existing: existing,
-          serverDecisions: serverDecisions,
+          serverDecisions: decisions,
           ctx: ctx);
       switch (r) {
         case IntakeNew(:final item):
-          await db.insert('sms_items', item.toMap(), conflictAlgorithm: ConflictAlgorithm.ignore);
+          await db.insert(
+              'sms_items',
+              {
+                ...item.toMap(),
+                // تصمیمی که از سرور آمده دوباره فرستاده نمی‌شود.
+                'sync_status': item.status == SmsStatus.pending ? 'pending' : 'synced',
+              },
+              conflictAlgorithm: ConflictAlgorithm.ignore);
           existing.add(item);
         case IntakeKnown(:final item, :final bodyFilled) when bodyFilled:
           await db.update('sms_items', {'body': item.body}, where: 'key = ?', whereArgs: [item.key]);
