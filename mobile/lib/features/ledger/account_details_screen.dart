@@ -41,7 +41,9 @@ class AccountDetailsScreen extends StatelessWidget {
         if (v == null) return const Scaffold(body: SizedBox.shrink());
         final theme = Theme.of(context);
         final seq = controller.ledgerOf(accountId);
-        final windows = controller.windowsOf(accountId);
+        // حسابِ عضوِ دیگر: فقط دیدنی؛ درست کردنِ اختلافش کارِ خودش است.
+        final readOnly = !controller.canEdit(accountId);
+        final windows = readOnly ? const <DiscrepancyWindow>[] : controller.windowsOf(accountId);
         final windowAt = {for (var i = 0; i < windows.length; i++) windows[i].to: i};
         final rows = <Widget>[];
         String? lastDay;
@@ -60,8 +62,9 @@ class AccountDetailsScreen extends StatelessWidget {
                 controller: controller, window: windows[wi], index: wi, hints: controller.hintsFor(windows[wi])));
           }
           rows.add(switch (item) {
-            EntryItem(:final entry) => _EntryRow(controller: controller, entry: entry),
-            CheckpointItem(:final checkpoint) => _CheckpointRow(controller: controller, checkpoint: checkpoint),
+            EntryItem(:final entry) => _EntryRow(controller: controller, entry: entry, readOnly: readOnly),
+            CheckpointItem(:final checkpoint) =>
+              _CheckpointRow(controller: controller, checkpoint: checkpoint, readOnly: readOnly),
           });
         }
         final balance = v.balance;
@@ -84,21 +87,26 @@ class AccountDetailsScreen extends StatelessWidget {
                         Text('از ${formatShortDateTime(balance.anchor.at)}',
                             style: theme.textTheme.labelSmall),
                       const SizedBox(height: 8),
-                      Align(
-                        alignment: AlignmentDirectional.centerStart,
-                        child: OutlinedButton.icon(
-                          key: kDetailsReconcileKey,
-                          onPressed: () =>
-                              showBalanceDialog(context, controller, v, reconcile: balance != null),
-                          icon: const Icon(Icons.fact_check_outlined),
-                          label: Text(balance == null ? 'موجودیِ الانش را وارد کن' : 'موجودیِ واقعی را وارد کن'),
+                      if (readOnly)
+                        Text('حسابِ ${v.account.ownerName}؛ فقط دیدنی.',
+                            style: theme.textTheme.bodySmall
+                                ?.copyWith(color: theme.colorScheme.onSurfaceVariant))
+                      else
+                        Align(
+                          alignment: AlignmentDirectional.centerStart,
+                          child: OutlinedButton.icon(
+                            key: kDetailsReconcileKey,
+                            onPressed: () =>
+                                showBalanceDialog(context, controller, v, reconcile: balance != null),
+                            icon: const Icon(Icons.fact_check_outlined),
+                            label: Text(balance == null ? 'موجودیِ الانش را وارد کن' : 'موجودیِ واقعی را وارد کن'),
+                          ),
                         ),
-                      ),
                     ],
                   ),
                 ),
               ),
-              if (windows.isEmpty && balance != null)
+              if (windows.isEmpty && balance != null && !readOnly)
                 Padding(
                   padding: const EdgeInsets.fromLTRB(4, 8, 4, 0),
                   child: Text('همه‌ی تراکنش‌ها با مانده‌های بانک می‌خوانند.',
@@ -121,8 +129,9 @@ class AccountDetailsScreen extends StatelessWidget {
 class _EntryRow extends StatelessWidget {
   final LedgerController controller;
   final Entry entry;
+  final bool readOnly;
 
-  const _EntryRow({required this.controller, required this.entry});
+  const _EntryRow({required this.controller, required this.entry, this.readOnly = false});
 
   @override
   Widget build(BuildContext context) {
@@ -162,7 +171,7 @@ class _EntryRow extends StatelessWidget {
         trailing: Text(_signed(e.signed),
             style: theme.textTheme.titleSmall?.copyWith(
                 color: income ? Colors.green.shade700 : null, fontWeight: FontWeight.w700)),
-        onTap: () => showEntrySheet(context, controller, entry: e),
+        onTap: readOnly ? null : () => showEntrySheet(context, controller, entry: e),
       ),
     );
   }
@@ -171,8 +180,9 @@ class _EntryRow extends StatelessWidget {
 class _CheckpointRow extends StatelessWidget {
   final LedgerController controller;
   final Checkpoint checkpoint;
+  final bool readOnly;
 
-  const _CheckpointRow({required this.controller, required this.checkpoint});
+  const _CheckpointRow({required this.controller, required this.checkpoint, this.readOnly = false});
 
   @override
   Widget build(BuildContext context) {
@@ -182,7 +192,7 @@ class _CheckpointRow extends StatelessWidget {
       leading: Icon(Icons.flag_outlined, color: theme.colorScheme.primary),
       title: Text('موجودی را وارد کردی: ${formatToman(checkpoint.balanceRial)}'),
       subtitle: Text(formatClock(checkpoint.at)),
-      trailing: IconButton(
+      trailing: readOnly ? null : IconButton(
         tooltip: 'حذف',
         icon: const Icon(Icons.close_rounded, size: 18),
         onPressed: () async {

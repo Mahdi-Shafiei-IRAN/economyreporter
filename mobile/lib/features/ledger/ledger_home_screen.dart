@@ -20,6 +20,7 @@ import 'setup_screen.dart';
 
 const kLedgerNextStepKey = Key('ledger-next-step');
 const kLedgerMonthCardKey = Key('ledger-month-card');
+const kLedgerFamilySectionKey = Key('ledger-family-section');
 const kLedgerAddFabKey = Key('ledger-add-fab');
 const kLedgerNewAccountKey = Key('ledger-new-account');
 const kLedgerSettingsKey = Key('ledger-settings');
@@ -164,16 +165,30 @@ class _LedgerHomeScreenState extends State<LedgerHomeScreen> {
                       for (final v in _c.archivedAccounts) LedgerAccountCard(controller: _c, view: v),
                     ],
                   ),
-                if (_c.othersAccountCount > 0)
+                if (_c.familyAccounts.isNotEmpty) ...[
                   Padding(
-                    padding: const EdgeInsets.fromLTRB(4, 8, 4, 0),
-                    child: Text(
-                      'حساب‌های بقیه‌ی خانواده (${_fa(_c.othersAccountCount)}) روی گوشیِ خودشان است؛ '
-                      'دیدنِ آن‌ها در قدمِ بعد اضافه می‌شود.',
-                      style: theme.textTheme.bodySmall
-                          ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-                    ),
+                    key: kLedgerFamilySectionKey,
+                    padding: const EdgeInsets.fromLTRB(4, 20, 4, 2),
+                    child: Row(children: [
+                      Expanded(child: Text('خانواده', style: theme.textTheme.titleMedium)),
+                      if (_c.familyTotal != null)
+                        Text('جمعِ همه ${formatToman(_c.familyTotal!)}', style: theme.textTheme.labelLarge),
+                    ]),
                   ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(4, 0, 4, 6),
+                    child: Text('حساب‌های بقیه؛ فقط دیدنی — هر کس روی گوشیِ خودش ثبت می‌کند.',
+                        style: theme.textTheme.bodySmall
+                            ?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+                  ),
+                  for (final v in _c.familyAccounts)
+                    LedgerAccountCard(
+                      controller: _c,
+                      view: v,
+                      readOnly: true,
+                      onTap: () => _push(AccountDetailsScreen(controller: _c, accountId: v.account.id)),
+                    ),
+                ],
               ],
             ),
           );

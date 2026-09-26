@@ -7,35 +7,29 @@ import 'package:uuid/uuid.dart';
 import 'core/auth/auth_repository.dart';
 import 'core/auth/token_store.dart';
 import 'core/config/app_config.dart';
-import 'core/dashboard/remote_dashboard_api.dart';
 import 'core/database/app_database.dart';
 import 'core/family/family_api.dart';
 import 'core/family/health_api.dart';
+import 'core/format/money_format.dart';
 import 'core/ledger/ledger_repository.dart';
 import 'core/ledger/ledger_sync.dart';
 import 'core/network/api_client.dart';
-import 'core/sms/sms_importer.dart';
 import 'core/sync/remote_transaction_api.dart';
 import 'core/sync/sync_service.dart';
 import 'core/theme/app_theme.dart';
 import 'core/theme/theme_controller.dart';
-import 'core/format/money_format.dart';
 import 'core/update/update_service.dart';
 import 'features/auth/auth_controller.dart';
 import 'features/auth/login_screen.dart';
-import 'features/categories/categorize_screen.dart';
-import 'features/dashboard/dashboard_controller.dart';
-import 'features/dashboard/dashboard_screen.dart';
-import 'features/family/family_dashboard_screen.dart';
-import 'features/ledger/ledger_controller.dart';
-import 'features/ledger/ledger_home_screen.dart';
 import 'features/family/add_member_screen.dart';
+import 'features/ledger/ledger_controller.dart';
+import 'features/ledger/ledger_health.dart';
+import 'features/ledger/ledger_home_screen.dart';
 import 'features/ledger/ledger_notifications.dart';
 import 'features/ledger/ledger_settings_screen.dart';
-import 'features/ledger/ledger_v2_toggle.dart';
 import 'features/ledger/pending_screen.dart';
+import 'features/ledger/sender_ops.dart';
 import 'features/notifications/notification_service.dart';
-import 'features/senders/senders_screen.dart';
 import 'features/sms/sms_inbox_service.dart';
 import 'features/transactions/data/transaction_repository.dart';
 
@@ -74,62 +68,73 @@ class EconomyApp extends StatelessWidget {
 
 class _Services {
   final AuthController auth;
-  final DashboardController dashboard;
-  final SyncService sync;
+  final TransactionRepository store; // تنظیمات، کیف‌ها، بودجه، فرستنده‌ها
+  final SyncService sync; // کیف‌ها و بودجه با سرور
   final ProfileService profile;
-  final RemoteDashboardApi dashboardApi;
+  final FamilyApi familyApi;
+  final HealthApi healthApi;
   final SmsInboxService smsInbox;
   final UpdateService updater;
   final LedgerController ledger;
   final LedgerSyncService ledgerSync;
+  final String deviceId;
+  String? appVersion;
 
-  const _Services({
+  _Services({
     required this.auth,
-    required this.dashboard,
+    required this.store,
     required this.sync,
     required this.profile,
-    required this.dashboardApi,
+    required this.familyApi,
+    required this.healthApi,
     required this.smsInbox,
     required this.updater,
     required this.ledger,
     required this.ledgerSync,
+    required this.deviceId,
   });
 
-  /// پروفایل/اعضا از سرور → ارسال و دریافت تراکنش‌ها (نسخه‌ی ۱، کیف‌ها و بودجه) → دفترِ نسخه‌ی ۲ →
-  /// تازه‌سازی صفحه. در حالت آفلاین بی‌صدا شکست می‌خورد (چیزی گم نمی‌شود).
-  Future<SyncSummary> refreshFromServer({bool force = false}) async {
+  /// پروفایل/اعضا از سرور → کیف‌ها و بودجه → دفتر. در حالت آفلاین بی‌صدا شکست می‌خورد (چیزی گم نمی‌شود).
+  Future<void> refreshFromServer({bool force = false}) async {
+    final previousUser = await store.getSetting(SettingKeys.meUserId);
     if (await profile.refresh() == ProfileStatus.needsRelogin) {
       await auth.expireSession(kLegacyAccountNotice);
-      return const SyncSummary(synced: 0, failed: 0, error: 'auth');
+      return;
     }
-    final summary = await sync.sync(force: force);
-    await dashboard.load();
+    final currentUser = await store.getSetting(SettingKeys.meUserId);
+    if (previousUser != null && currentUser != null && previousUser != currentUser) {
+      // کاربرِ دیگری روی همین گوشی وارد شد: دفترِ قبلی به نامِ او فرستاده نشود (طرح ۱۲.۸).
+      await ledger.repo.resetForAccountSwitch();
+    }
+    await sync.sync(force: force).catchError((_) => const SyncSummary(synced: 0, failed: 0));
     await syncLedger();
-    return summary;
   }
 
-  /// دفترِ نسخه‌ی ۲. اگر تنظیماتِ سرور آن را روشن کرد (نصبِ دوباره)، صندوق هم خوانده می‌شود.
   Future<LedgerSyncResult> syncLedger() async {
-    final wasEnabled = ledger.enabled;
+    final startBefore = await ledger.repo.startDate();
     final result = await ledgerSync.sync();
-    await ledger.load();
-    if (!wasEnabled && ledger.enabled) {
-      try {
-        await ledger.syncInbox();
-      } catch (_) {
-        // صندوق بعداً (بازشدنِ اپ یا کشیدنِ خانه به پایین) خوانده می‌شود.
-      }
+    if (await ledger.repo.startDate() != startBefore) {
+      // نصبِ دوباره: تاریخِ شروعِ اصلی از سرور آمد؛ پیامک‌های قبل از آن هم از صندوق خوانده شوند.
+      await ledger.syncInbox().catchError((_) => 0);
+    } else {
+      await ledger.load();
     }
     return result;
   }
 
-  /// «همگام‌سازی الان» در تنظیماتِ نسخه‌ی ۲.
+  /// «همگام‌سازی الان» در تنظیمات.
   Future<String> syncLedgerNow() async {
-    await sync.sync(force: true); // کیف‌ها و بودجه
+    await sync.sync(force: true).catchError((_) => const SyncSummary(synced: 0, failed: 0));
     final r = await syncLedger();
     if (r.error != null) return 'همگام‌سازی نشد: ${r.error}. تغییرها روی گوشی می‌مانند و بعداً فرستاده می‌شوند.';
     return 'همگام‌سازی انجام شد: ${toPersianDigits('${r.sent}')} ارسال، ${toPersianDigits('${r.received}')} دریافت'
         '${r.failed > 0 ? '، ${toPersianDigits('${r.failed}')} ناموفق' : ''}';
+  }
+
+  Future<void> reportHealth({bool force = false}) async {
+    appVersion ??= await updater.currentVersionName();
+    await reportLedgerHealthIfDue(ledger,
+        api: healthApi, deviceId: deviceId, appVersion: appVersion, force: force);
   }
 }
 
@@ -161,70 +166,54 @@ class _BootstrapState extends State<_Bootstrap> {
     await auth.bootstrap();
 
     final db = await openAppDatabase();
-    final repo = TransactionRepository(db);
+    final store = TransactionRepository(db);
 
-    // شناسه‌ی ثابت گوشی (قبلاً هر اجرا یک شناسه‌ی تازه ساخته می‌شد).
-    var deviceId = await repo.getSetting(SettingKeys.deviceId);
+    // شناسه‌ی ثابت گوشی.
+    var deviceId = await store.getSetting(SettingKeys.deviceId);
     if (deviceId == null) {
       deviceId = const Uuid().v4();
-      await repo.setSetting(SettingKeys.deviceId, deviceId);
+      await store.setSetting(SettingKeys.deviceId, deviceId);
     }
 
-    final dashboard = DashboardController(repo, familyApi: DioFamilyApi(api.dio))
-      ..healthApi = DioHealthApi(api.dio);
-    final sync = SyncService(
-      db: db,
-      api: DioRemoteTransactionApi(api.dio),
-      deviceId: deviceId,
-    );
-    final profile = ProfileService(DioFamilyApi(api.dio), repo);
+    final sync = SyncService(db: db, api: DioRemoteTransactionApi(api.dio), deviceId: deviceId);
+    final familyApi = DioFamilyApi(api.dio);
+    final ledgerRepo = LedgerRepository(db, deviceId: deviceId);
 
-    // هر ویرایش محلی (دسته‌بندی، حذف، کارت) بی‌درنگ برای بقیه‌ی اعضا فرستاده شود.
-    dashboard.onLocalChange = () => sync.sync().ignore();
-
-    // نسخه‌ی ۲ (پشتِ پرچم): دفترِ حساب با تأییدِ کاربر.
+    late final SmsInboxService smsInbox;
     final ledger = LedgerController(
-      LedgerRepository(db, deviceId: deviceId),
-      allowedSenders: repo.allowedSenders,
-      people: () =>
-          (meName: dashboard.meName, meUserId: dashboard.meUserId, members: dashboard.members),
-      senders: SenderOps(
-        candidates: dashboard.senderCandidates,
-        allow: (address, bankId) => dashboard.addAllowedSender(address,
-            bankId: bankId, ownerName: dashboard.meName, ownerUserId: dashboard.meUserId),
-        dismiss: (address) => dashboard.rejectSender(address, const []).then((_) {}),
-        remove: (id) => dashboard.removeAllowedSender(id),
+      ledgerRepo,
+      allowedSenders: store.allowedSenders,
+      readInbox: () async => [for (final raw in await smsInbox.readInbox()) toIncomingSms(raw)],
+      senders: ledgerSenderOps(
+        store,
+        readInbox: () => smsInbox.readInbox(limit: 5000),
+        me: () async {
+          final p = await ledgerRepo.people();
+          return (meName: p.meName, meUserId: p.meUserId);
+        },
       ),
     );
-
-    final smsInbox = SmsInboxService(
-      importer: SmsImporter(repo, deviceId: deviceId),
-      onChanged: () {
-        dashboard.load(); // تازه‌سازی صفحه
-        sync.sync().ignore(); // ارسال خودکار به سرور خانواده
-      },
-      onTransactionCaptured: (tx) {
-        if (tx.promptCategorize && !ledger.enabled) {
-          NotificationService.showTransaction(tx.id, tx.amountRial);
-        }
-      },
+    smsInbox = SmsInboxService(
       onLiveSms: (raw) async {
-        if (!ledger.enabled) return;
         for (final item in await ledger.intake([toIncomingSms(raw)])) {
           await NotificationService.showLedgerSms(item, ledger.account(item.suggestion.accountId));
         }
       },
     );
-    ledger.readInbox =
-        () async => [for (final raw in await smsInbox.readInbox()) toIncomingSms(raw)];
+
+    // نسخه‌ی ۲ همیشه روشن (طرح ۱۲.۸): گوشی‌ای که هنوز روشنش نکرده بود راهنمای سه‌قدمی را می‌بیند.
+    if (!await ledgerRepo.isEnabled()) {
+      await ledgerRepo.setEnabled(true);
+      await ledgerRepo.ensureStartDate();
+    }
     await ledger.load();
 
     // هر تغییرِ دفتر: چند ثانیه بعد (تا چند تغییرِ پشتِ هم یک‌جا بروند) به سرور.
-    final ledgerSync = LedgerSyncService(ledger.repo, DioLedgerRemote(api.dio));
-    Timer? ledgerDebounce;
+    final ledgerSync = LedgerSyncService(ledgerRepo, DioLedgerRemote(api.dio));
+    Timer? debounce;
     ledger.onLocalChange = () {
-      ledgerDebounce?.cancel();
-      ledgerDebounce = Timer(const Duration(seconds: 3), () async {
+      debounce?.cancel();
+      debounce = Timer(const Duration(seconds: 3), () async {
         if (!auth.authenticated) return;
         await sync.sync().catchError((_) => const SyncSummary(synced: 0, failed: 0));
         await ledgerSync.sync();
@@ -232,26 +221,18 @@ class _BootstrapState extends State<_Bootstrap> {
       });
     };
 
-    // پیشنهاد فرستنده‌های بانک از صندوق گوشی؛ و بعد از مجاز کردن یک فرستنده،
-    // خواندن دوباره‌ی صندوق تا پیامک‌های قبلیِ همان فرستنده هم ثبت شوند.
-    // پیشنهاد فرستنده‌ها و عیب‌یابی از کلِ صندوق؛ بعد از مجاز کردنِ فرستنده (یا «خواندنِ
-    // دوباره») کلِ صندوق دوباره خوانده می‌شود تا پیامک‌های قدیمی‌ترِ همان بانک هم ثبت شوند.
-    dashboard
-      ..readInbox = (() => smsInbox.readInbox(limit: 5000))
-      ..readInboxForDiagnosis = (() => smsInbox.readInbox(limit: 5000))
-      ..importWholeInbox = (() => smsInbox.importInbox(full: true))
-      ..onSendersChanged = (() => smsInbox.importInbox(full: true));
-
     return _Services(
       auth: auth,
-      dashboard: dashboard,
+      store: store,
       sync: sync,
-      profile: profile,
-      dashboardApi: DioRemoteDashboardApi(api.dio),
+      profile: ProfileService(familyApi, store),
+      familyApi: familyApi,
+      healthApi: DioHealthApi(api.dio),
       smsInbox: smsInbox,
       updater: UpdateService(AppConfig.updatesBaseUrl),
       ledger: ledger,
       ledgerSync: ledgerSync,
+      deviceId: deviceId,
     );
   }
 
@@ -265,8 +246,7 @@ class _BootstrapState extends State<_Bootstrap> {
             body: Center(
               child: Padding(
                 padding: const EdgeInsets.all(24),
-                child: Text('خطا در راه‌اندازی:\n${snapshot.error}',
-                    textAlign: TextAlign.center),
+                child: Text('خطا در راه‌اندازی:\n${snapshot.error}', textAlign: TextAlign.center),
               ),
             ),
           );
@@ -308,78 +288,45 @@ class _RootState extends State<_Root> with WidgetsBindingObserver {
     super.dispose();
   }
 
-  /// برگشت به اپ: پیامک‌هایی که در پس‌زمینه ذخیره شده‌اند و تغییرات بقیه‌ی اعضا.
+  /// برگشت به اپ: پیامک‌ها و دکمه‌های نوتیفیکیشن که در پس‌زمینه ثبت شده‌اند، و سرور.
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state != AppLifecycleState.resumed) return;
     final s = widget.services;
-    s.dashboard.load();
-    // پیامک‌ها و دکمه‌های نوتیفیکیشن که در پس‌زمینه ثبت شده‌اند.
-    if (s.ledger.enabled) {
-      s.ledger.syncInbox().catchError((_) => 0).ignore();
-    } else {
-      s.ledger.load().ignore();
-    }
+    s.ledger.syncInbox().catchError((_) => 0).ignore();
     if (s.auth.authenticated) {
       s.refreshFromServer().ignore();
-      s.dashboard.reportHealthIfDue().ignore();
+      s.reportHealth().ignore();
     }
   }
 
-  /// بعد از ورود: پروفایل و sync، نوتیفیکیشن، مجوز پیامک، وارد کردن صندوق و
-  /// گوش‌دادن زنده؛ و اگر اپ از نوتیفیکیشن باز شده، رفتن به دسته‌بندی.
+  /// بعد از ورود: سرور، نوتیفیکیشن، مجوز و خواندنِ پیامک، گوش‌دادنِ زنده و سلامت.
   Future<void> _maybeSetup() async {
     final s = widget.services;
     if (!s.auth.authenticated) {
-      // خروج (دستی یا اجباری): با ورود بعدی دوباره راه‌اندازی شود.
       _setupDone = false;
       return;
     }
     if (_setupDone) return;
     _setupDone = true;
 
-    // چکِ به‌روزرسانی مستقل و زودهنگام؛ نباید به مجوز پیامک/صندوق وابسته باشد
-    // (اگر آن مرحله‌ها گیر کنند یا خطا بدهند، آپدیت باز هم بررسی می‌شود).
+    // چکِ به‌روزرسانی مستقل و زودهنگام؛ نباید به مجوز پیامک/صندوق وابسته باشد.
     _checkForUpdate();
     s.refreshFromServer().ignore();
 
     try {
       await NotificationService.init(onTap: _onNotificationTap, onAction: _onNotificationAction);
-
-      final granted = await s.smsInbox.requestPermission();
-      if (granted) {
-        // یک بار بعد از نصبِ این نسخه: وصل کردنِ نسخه‌های سرور به پیامکشان، تکمیل از
-        // متن و قانونِ «شماره‌ی حساب/کارت» (قابل برگرداندن از صفحه‌ی عیب‌یابی).
+      if (await s.smsInbox.requestPermission()) {
         try {
-          await s.dashboard.runRepairOnce();
+          await s.ledger.syncInbox();
         } catch (_) {
-          // تعمیر نشد؛ از صفحه‌ی عیب‌یابی دوباره قابل اجراست.
-        }
-        await s.smsInbox.importInbox();
-        await s.dashboard.load();
-        if (s.ledger.enabled) {
-          try {
-            await s.ledger.syncInbox();
-          } catch (_) {
-            // از صفحه‌ی اصلیِ نسخه‌ی ۲ با کشیدن به پایین دوباره خوانده می‌شود.
-          }
+          // با کشیدنِ خانه به پایین دوباره خوانده می‌شود.
         }
         s.smsInbox.startListener();
       }
-      // وضعیتِ برنامه روی این گوشی برای مدیرِ خانواده (هر ۶ ساعت؛ بی‌صدا اگر آفلاین).
-      s.dashboard.appVersion ??= await s.updater.currentVersionName();
-      s.dashboard.reportHealthIfDue().ignore();
-
+      s.reportHealth().ignore();
       final launchPayload = await NotificationService.launchPayload();
-      if (launchPayload != null) {
-        _onNotificationTap(launchPayload);
-      } else if (granted && s.dashboard.needsSenderSetup && !s.ledger.enabled) {
-        // بعد از نصب/ورود: اگر هیچ فرستنده‌ای مجاز نشده، صفحه‌ی انتخاب فرستنده‌ها را
-        // خودکار باز کن تا کاربر از روی پیامک‌هایش انتخاب و صاحب تعیین کند.
-        navigatorKey.currentState?.push(MaterialPageRoute(
-          builder: (_) => SendersScreen(controller: s.dashboard),
-        ));
-      }
+      if (launchPayload != null) _onNotificationTap(launchPayload);
     } catch (_) {
       // خطای راه‌اندازی (مجوز/صندوق/نوتیف) نباید بقیه‌ی اپ را زمین بزند.
     }
@@ -400,22 +347,15 @@ class _RootState extends State<_Root> with WidgetsBindingObserver {
             ? 'یک نسخه‌ی تازه‌ی برنامه روی سرور هست. همین حالا به‌روزرسانی کن.'
             : info.notes),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('بعداً'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('به‌روزرسانی'),
-          ),
+          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('بعداً')),
+          FilledButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('به‌روزرسانی')),
         ],
       ),
     );
     if (go == true) _runUpdate(info);
   }
 
-  /// دانلود با نوارِ پیشرفت (و دکمه‌ی لغو)، بعد نصب‌کننده‌ی اندروید. اگر نشد، دلیلش
-  /// به فارسی و دکمه‌ی «دوباره» نشان داده می‌شود (قبلاً بی‌صدا شکست می‌خورد).
+  /// دانلود با نوارِ پیشرفت (و دکمه‌ی لغو)، بعد نصب‌کننده‌ی اندروید؛ در خطا پیامِ فارسی و «دوباره».
   Future<void> _runUpdate(AppUpdateInfo info) async {
     final ctx = navigatorKey.currentContext;
     if (ctx == null || !ctx.mounted) return;
@@ -443,9 +383,7 @@ class _RootState extends State<_Root> with WidgetsBindingObserver {
                 ],
               ),
             ),
-            actions: [
-              TextButton(onPressed: () => cancel.cancel(), child: const Text('لغو')),
-            ],
+            actions: [TextButton(onPressed: () => cancel.cancel(), child: const Text('لغو'))],
           ),
         );
       },
@@ -495,14 +433,8 @@ class _RootState extends State<_Root> with WidgetsBindingObserver {
           ],
         ),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('بستن'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('دوباره'),
-          ),
+          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('بستن')),
+          FilledButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('دوباره')),
         ],
       ),
     ).then((again) {
@@ -515,9 +447,7 @@ class _RootState extends State<_Root> with WidgetsBindingObserver {
     final updater = widget.services.updater;
     final currentName = await updater.currentVersionName();
     final info = await updater.fetch();
-    if (info == null) {
-      return 'اتصال به سرور نشد؛ اینترنت را بررسی کن و بعداً دوباره بزن.';
-    }
+    if (info == null) return 'اتصال به سرور نشد؛ اینترنت را بررسی کن و بعداً دوباره بزن.';
     if (compareVersionNames(info.versionName, currentName) > 0) {
       _runUpdate(info);
       return 'نسخه‌ی جدید ${info.versionName} پیدا شد (نسخه‌ی فعلی: $currentName)؛ در حال دانلود…';
@@ -525,36 +455,50 @@ class _RootState extends State<_Root> with WidgetsBindingObserver {
     return 'به‌روزترین نسخه را داری (نسخه‌ی فعلی: $currentName).';
   }
 
-  /// لمسِ نوتیفیکیشن: پیامکِ نسخه‌ی ۲ → منتظرِ تأیید؛ تراکنشِ نسخه‌ی ۱ → دسته‌بندی.
+  /// لمسِ نوتیفیکیشنِ پیامک → «منتظرِ تأیید».
   void _onNotificationTap(String payload) {
-    if (ledgerKeyOf(payload) == null) {
-      _openCategorize(payload);
-      return;
-    }
+    if (ledgerKeyOf(payload) == null) return;
     final ledger = widget.services.ledger;
-    ledger.load().whenComplete(() => navigatorKey.currentState?.push(
-        MaterialPageRoute(builder: (_) => PendingScreen(controller: ledger))));
+    ledger.load().whenComplete(() => navigatorKey.currentState
+        ?.push(MaterialPageRoute(builder: (_) => PendingScreen(controller: ledger))));
   }
 
   /// دکمه‌ی «ثبت» / «تراکنش نیست» روی نوتیفیکیشن وقتی اپ باز است.
   void _onNotificationAction(String actionId, String payload) {
     final key = ledgerKeyOf(payload);
-    if (key != null) {
-      widget.services.ledger.applyNotificationAction(actionId, key).ignore();
-    }
+    if (key != null) widget.services.ledger.applyNotificationAction(actionId, key).ignore();
   }
 
-  void _openLedgerSettings(BuildContext context) {
+  void _openSettings(BuildContext context) {
     final s = widget.services;
     Navigator.of(context).push(MaterialPageRoute(
       builder: (_) => LedgerSettingsScreen(
         controller: s.ledger,
         onCheckUpdate: _manualCheckUpdate,
         onSync: s.syncLedgerNow,
-        onAddMember: s.dashboard.canAddMember
-            ? () => Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => AddMemberScreen(controller: s.dashboard)))
+        onAddMember: s.ledger.isManager
+            ? () => Navigator.of(context).push(MaterialPageRoute(
+                builder: (_) => AddMemberScreen(
+                      onAdd: ({required phone, required password, fullName}) async {
+                        final err = await addFamilyMember(s.familyApi, s.store,
+                            phone: phone, password: password, fullName: fullName);
+                        await s.ledger.load();
+                        return err;
+                      },
+                    )))
             : null,
+        onOpenDevicesHealth: () async {
+          s.appVersion ??= await s.updater.currentVersionName();
+          if (!context.mounted) return;
+          Navigator.of(context).push(MaterialPageRoute(
+            builder: (_) => LedgerDevicesHealthScreen(
+              controller: s.ledger,
+              api: s.healthApi,
+              deviceId: s.deviceId,
+              appVersion: s.appVersion,
+            ),
+          ));
+        },
         onLogout: () {
           Navigator.of(context).popUntil((r) => r.isFirst);
           _setupDone = false;
@@ -564,56 +508,17 @@ class _RootState extends State<_Root> with WidgetsBindingObserver {
     ));
   }
 
-  /// باز کردن صفحه‌ی دسته‌بندی برای تراکنشِ نوتیفیکیشن.
-  Future<void> _openCategorize(String txId) async {
-    final record = await widget.services.dashboard.transactionById(txId);
-    if (record == null) return;
-    navigatorKey.currentState?.push(
-      MaterialPageRoute(
-        builder: (_) => CategorizeScreen(
-          controller: widget.services.dashboard,
-          record: record,
-        ),
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final services = widget.services;
     return AnimatedBuilder(
-      animation: Listenable.merge([services.auth, services.ledger]),
-      builder: (context, _) {
-        if (services.auth.authenticated && services.ledger.enabled) {
-          return LedgerHomeScreen(
-            controller: services.ledger,
-            onOpenSettings: () => _openLedgerSettings(context),
-          );
-        }
-        if (services.auth.authenticated) {
-          return DashboardScreen(
-            settingsHeader: LedgerV2Toggle(controller: services.ledger),
-            controller: services.dashboard,
-            onLogout: () {
-              _setupDone = false;
-              services.auth.logout();
-            },
-            onSync: () async =>
-                (await services.refreshFromServer(force: true)).message,
-            onCheckUpdate: _manualCheckUpdate,
-            onOpenFamilyDashboard: () => Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (_) => FamilyDashboardScreen(
-                  api: services.dashboardApi,
-                  initialPeriod: services.dashboard.period,
-                  now: services.dashboard.now,
-                ),
-              ),
-            ),
-          );
-        }
-        return LoginScreen(controller: services.auth);
-      },
+      animation: services.auth,
+      builder: (context, _) => services.auth.authenticated
+          ? LedgerHomeScreen(
+              controller: services.ledger,
+              onOpenSettings: () => _openSettings(context),
+            )
+          : LoginScreen(controller: services.auth),
     );
   }
 }

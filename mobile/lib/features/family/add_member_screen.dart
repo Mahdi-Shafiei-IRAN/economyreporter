@@ -2,9 +2,11 @@
 /// عضو بعداً با همان شماره/رمز روی گوشیِ خودش وارد می‌شود.
 library;
 
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 
-import '../dashboard/dashboard_controller.dart';
+import '../../core/family/family_api.dart';
+import '../transactions/data/transaction_repository.dart';
 
 const kAddMemberPhoneKey = Key('add-member-phone');
 const kAddMemberPasswordKey = Key('add-member-password');
@@ -12,10 +14,41 @@ const kAddMemberNameKey = Key('add-member-name');
 const kAddMemberSubmitKey = Key('add-member-submit');
 const kAddMemberErrorKey = Key('add-member-error');
 
-class AddMemberScreen extends StatefulWidget {
-  final DashboardController controller;
+typedef AddMemberFn = Future<String?> Function(
+    {required String phone, required String password, String? fullName});
 
-  const AddMemberScreen({super.key, required this.controller});
+/// افزودنِ عضو با سرور و تازه کردنِ فهرستِ اعضا روی گوشی؛ خطا = پیامِ فارسی، موفق = null.
+Future<String?> addFamilyMember(
+  FamilyApi api,
+  TransactionStore store, {
+  required String phone,
+  required String password,
+  String? fullName,
+}) async {
+  try {
+    await api.addMember(phone: phone, password: password, fullName: fullName);
+    await store.setSetting(SettingKeys.familyMembers, FamilyMember.encodeList(await api.members()));
+    return null;
+  } on DioException catch (e) {
+    final data = e.response?.data;
+    if (data is Map) {
+      for (final f in const ['phone', 'password', 'detail', 'non_field_errors']) {
+        final v = data[f];
+        if (v is List && v.isNotEmpty) return v.first.toString();
+        if (v is String) return v;
+      }
+    }
+    if (e.response?.statusCode == 403) return 'فقط مدیرِ خانواده می‌تواند عضو اضافه کند';
+    return 'خطا در افزودن عضو';
+  } catch (_) {
+    return 'خطا در افزودن عضو';
+  }
+}
+
+class AddMemberScreen extends StatefulWidget {
+  final AddMemberFn onAdd;
+
+  const AddMemberScreen({super.key, required this.onAdd});
 
   @override
   State<AddMemberScreen> createState() => _AddMemberScreenState();
@@ -47,7 +80,7 @@ class _AddMemberScreenState extends State<AddMemberScreen> {
       _busy = true;
       _error = null;
     });
-    final err = await widget.controller.addMember(
+    final err = await widget.onAdd(
       phone: phone,
       password: password,
       fullName: _name.text,

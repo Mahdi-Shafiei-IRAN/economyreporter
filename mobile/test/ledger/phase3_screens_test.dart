@@ -2,6 +2,7 @@
 library;
 
 import 'package:economy/core/database/app_database.dart';
+import 'package:economy/core/format/money_format.dart';
 import 'package:economy/core/ledger/ledger_repository.dart';
 import 'package:economy/core/ledger/models.dart';
 import 'package:economy/core/ledger/sms_intake.dart';
@@ -9,6 +10,7 @@ import 'package:economy/core/theme/app_theme.dart';
 import 'package:economy/features/ledger/account_details_screen.dart';
 import 'package:economy/features/ledger/account_form.dart';
 import 'package:economy/features/ledger/entry_sheet.dart';
+import 'package:economy/features/ledger/ledger_home_screen.dart';
 import 'package:economy/features/ledger/ledger_controller.dart';
 import 'package:economy/features/ledger/month_report_screen.dart';
 import 'package:economy/features/senders/data/allowed_sender.dart';
@@ -223,5 +225,51 @@ void main() {
     await act(tester, c, () => tester.tap(find.text('حذف').last));
     expect(await tester.runAsync(c.repo.entries), isEmpty);
     expect((await tester.runAsync(() => c.repo.smsItem(e.smsKey!)))!.status, SmsStatus.rejected);
+  });
+
+  testWidgets("phase 5: the manager sees the family's accounts, read-only", (tester) async {
+    final c = await setup(tester, [mellat('برداشت100,000', '900,000', t1)]);
+    await run(tester, () async {
+      await c.repo.db.insert('wallets', {
+        'id': 'z1',
+        'owner_name': 'زهرا',
+        'owner_user_id': 'u2',
+        'label': 'سامان',
+        'bank_id': 'saman',
+        'created_at': now.toIso8601String(),
+      });
+      await c.repo.applyRemoteCheckpoint({
+        'id': 'zc1',
+        'account_id': 'z1',
+        'balance_rial': 700000,
+        'at': t1.subtract(const Duration(hours: 1)).toIso8601String(),
+        'client_updated_at': t1.toIso8601String(),
+      });
+      await c.repo.applyRemoteEntry({
+        'id': 'ze1',
+        'account_id': 'z1',
+        'kind': 'expense',
+        'amount_rial': 200000,
+        'occurred_at': t1.toIso8601String(),
+        'source': 'manual',
+        'client_updated_at': t1.toIso8601String(),
+      });
+      c.people = () => (meName: 'مهدی', meUserId: 'u1', members: const []);
+      await c.setBalanceNow('m1', 900000);
+    });
+    await tester.pumpWidget(app(LedgerHomeScreen(controller: c, autoSetup: false)));
+    await tester.pumpAndSettle();
+    expect(find.byKey(kLedgerFamilySectionKey), findsOneWidget);
+    expect(find.text('جمعِ همه ${formatToman(1400000)}'), findsOneWidget); // ۹۰ + ۵۰ هزار تومان
+    expect(find.textContaining('سامان'), findsWidgets);
+
+    await tester.tap(find.textContaining('سامان').first);
+    await tester.pumpAndSettle();
+    expect(find.byType(AccountDetailsScreen), findsOneWidget);
+    expect(find.text('حسابِ زهرا؛ فقط دیدنی.'), findsOneWidget);
+    expect(find.byKey(kDetailsReconcileKey), findsNothing);
+    await tester.tap(find.byKey(entryRowKey('ze1')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(kEntrySaveKey), findsNothing); // برگه‌ی ویرایش باز نمی‌شود
   });
 }

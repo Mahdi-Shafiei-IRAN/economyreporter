@@ -1,6 +1,5 @@
 import 'package:economy/core/format/date_format.dart';
 import 'package:economy/core/sms/jalali.dart';
-import 'package:economy/features/transactions/data/period.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -50,28 +49,4 @@ void main() {
     });
   });
 
-  group('بازه‌ی ماهانه', () {
-    test('مرزها و برچسب', () {
-      const p = Period.month(1405, 6);
-      expect(p.from, DateTime.utc(2026, 8, 22, 20, 30));
-      expect(p.to, DateTime.utc(2026, 9, 22, 20, 30));
-      expect(p.title, 'شهریور ۱۴۰۵');
-      expect(p.rangeLabel, 'از ۱ شهریور ۱۴۰۵ تا ۳۱ شهریور ۱۴۰۵');
-      expect(p.contains(DateTime.utc(2026, 9, 11)), isTrue);
-      expect(p.contains(DateTime.utc(2026, 9, 22, 20, 30)), isFalse);
-    });
-
-    test('ماه قبل/بعد از مرز سال عبور می‌کند', () {
-      expect(const Period.month(1405, 1).previous, const Period.month(1404, 12));
-      expect(const Period.month(1404, 12).next, const Period.month(1405, 1));
-      expect(Period.containing(DateTime.utc(2026, 9, 11)), const Period.month(1405, 6));
-    });
-
-    test('همه‌ی زمان‌ها بی‌مرز است', () {
-      const p = Period.all();
-      expect(p.from, isNull);
-      expect(p.to, isNull);
-      expect(p.contains(DateTime.utc(1990)), isTrue);
-    });
-  });
 }

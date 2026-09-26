@@ -178,8 +178,10 @@ void main() {
       expect(c.pendingArchived, hasLength(1));
       expect(c.archivedAccounts.single.account.accountRef, '2000000001');
     });
+  });
 
-    test("other family members' accounts are hidden (their SMS go to their phones)", () async {
+  group('phase 5: family view (manager) is read-only', () {
+    Future<void> addZahra() async {
       await db.insert('wallets', {
         'id': 'z1',
         'owner_name': 'زهرا',
@@ -188,10 +190,70 @@ void main() {
         'bank_id': 'saman',
         'created_at': now.toIso8601String(),
       });
+      // دفترِ زهرا از سرور آمده (applyRemote…): موجودی ۵۰۰هزار و یک هزینه‌ی این ماه.
+      await c.repo.applyRemoteCheckpoint({
+        'id': 'zc1',
+        'account_id': 'z1',
+        'balance_rial': 700000,
+        'at': t1.subtract(const Duration(hours: 1)).toIso8601String(),
+        'client_updated_at': t1.toIso8601String(),
+        'updated_at': t1.toIso8601String(),
+      });
+      await c.repo.applyRemoteEntry({
+        'id': 'ze1',
+        'account_id': 'z1',
+        'kind': 'expense',
+        'amount_rial': 200000,
+        'occurred_at': t1.toIso8601String(),
+        'source': 'manual',
+        'client_updated_at': t1.toIso8601String(),
+        'updated_at': t1.toIso8601String(),
+      });
       c.people = () => (meName: 'مهدی', meUserId: 'u1', members: const []);
       await c.setEnabled(true);
+    }
+
+    test("other members' accounts are separate from mine and add to the family total", () async {
+      await addZahra();
+      await c.setBalanceNow('m1', 1200000);
       expect(c.activeAccounts.map((v) => v.account.id), ['m1']);
-      expect(c.othersAccountCount, 1);
+      expect(c.familyAccounts.map((v) => v.account.id), ['z1']);
+      expect(c.familyAccounts.single.balance!.balanceRial, 500000);
+      expect(c.totalBalance, 1200000);
+      expect(c.familyTotal, 1700000);
+      // پیامک‌های این گوشی فقط به حسابِ خودم پیشنهاد می‌شوند.
+      expect(c.pending.every((i) => i.suggestion.accountId != 'z1'), isTrue);
+    });
+
+    test('the month report counts the family only when asked', () async {
+      await addZahra();
+      await c.acceptMany(c.readyToAccept);
+      expect(c.monthReport(now).expenseRial, 100000);
+      expect(c.monthReport(now, family: true).expenseRial, 300000);
+    });
+
+    test("nothing of another member's account can be changed on this phone", () async {
+      await addZahra();
+      expect(c.canEdit('m1'), isTrue);
+      expect(c.canEdit('z1'), isFalse);
+      final theirs = (await c.repo.entries()).single;
+      final cp = (await c.repo.checkpoints(accountId: 'z1')).single;
+      for (final attempt in <Future<void> Function()>[
+        () => c.setBalanceNow('z1', 1),
+        () => c.addManual(accountId: 'z1', kind: EntryKind.expense, amountRial: 1, occurredAt: now),
+        () => c.setArchived('z1', true),
+        () => c.updateEntry(theirs.copyWith(amountRial: 1)),
+        () => c.updateEntry(theirs.copyWith(accountId: 'm1')),
+        () => c.deleteEntry(theirs.id),
+        () => c.deleteCheckpoint(cp.id),
+        () => c.setEntryCategories(theirs.id, const []),
+        () => c.accept(c.pending.first, accountId: 'z1', kind: EntryKind.expense, amountRial: 1),
+      ]) {
+        await expectLater(attempt(), throwsStateError);
+      }
+      expect((await c.repo.entries()).single.amountRial, 200000);
+      expect(await c.repo.checkpoints(accountId: 'z1'), hasLength(1));
+      expect(c.familyAccounts.single.account.archived, isFalse);
     });
   });
 

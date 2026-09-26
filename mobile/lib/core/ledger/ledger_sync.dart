@@ -99,7 +99,7 @@ class LedgerSyncService {
         await repo.markSettingsSent();
       }
       await repo.applyRemoteSettings(await remote.getSettings());
-      if (await repo.isEnabled()) {
+      {
         final (s1, f1) = await _pushEntries();
         final (s2, f2) = await _pushCheckpoints();
         final (s3, f3) = await _pushDecisions();

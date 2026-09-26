@@ -1,4 +1,4 @@
-/// نوتیفیکیشن‌ها: تراکنشِ نسخه‌ی ۱ (لمس = دسته‌بندی) و پیامکِ منتظرِ نسخه‌ی ۲ با دکمه‌های
+/// نوتیفیکیشن‌ها: پیامکِ منتظرِ نسخه‌ی ۲ با دکمه‌های
 /// «ثبت» / «تراکنش نیست» (لمس = صفحه‌ی منتظرِ تأیید).
 library;
 
@@ -7,7 +7,6 @@ import 'dart:ui';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 import '../../core/database/app_database.dart';
-import '../../core/format/money_format.dart';
 import '../../core/ledger/ledger_repository.dart';
 import '../../core/ledger/models.dart';
 import '../ledger/ledger_notifications.dart';
@@ -15,14 +14,6 @@ import '../ledger/ledger_notifications.dart';
 const _channelId = 'transactions';
 const _channelName = 'تراکنش‌ها';
 const _channelDesc = 'اعلان تراکنش‌های جدید برای دسته‌بندی';
-
-const _androidDetails = AndroidNotificationDetails(
-  _channelId,
-  _channelName,
-  channelDescription: _channelDesc,
-  importance: Importance.high,
-  priority: Priority.high,
-);
 
 const _android = AndroidInitializationSettings('@mipmap/ic_launcher');
 
@@ -89,7 +80,7 @@ class NotificationService {
       FlutterLocalNotificationsPlugin();
   static bool _inited = false;
 
-  /// [onTap]: لمسِ خودِ نوتیفیکیشن با payload (شناسه‌ی تراکنشِ نسخه‌ی ۱ یا `ledger:<کلید>`).
+  /// [onTap]: لمسِ خودِ نوتیفیکیشن با payload (`ledger:<کلید>`).
   /// [onAction]: دکمه‌ی نوتیفیکیشن وقتی اپ باز است.
   static Future<void> init({
     void Function(String payload)? onTap,
@@ -116,29 +107,6 @@ class NotificationService {
       return details?.notificationResponse?.payload;
     }
     return null;
-  }
-
-  static Future<void> showTransaction(String txId, int amountRial) async {
-    await _plugin.show(
-      txId.hashCode & 0x7fffffff,
-      'تراکنش جدید',
-      '${formatToman(amountRial)} — برای دسته‌بندی لمس کنید',
-      const NotificationDetails(android: _androidDetails),
-      payload: txId,
-    );
-  }
-
-  /// نسخه‌ی پس‌زمینه: پلاگین در ایزوله‌ی جدید از نو مقداردهی می‌شود.
-  static Future<void> showFromBackground(String txId, int amountRial) async {
-    final plugin = FlutterLocalNotificationsPlugin();
-    await _initPlugin(plugin);
-    await plugin.show(
-      txId.hashCode & 0x7fffffff,
-      'تراکنش جدید',
-      '${formatToman(amountRial)} — برای دسته‌بندی لمس کنید',
-      const NotificationDetails(android: _androidDetails),
-      payload: txId,
-    );
   }
 
   static Future<void> showLedgerSms(SmsItem item, LedgerAccount? account) =>

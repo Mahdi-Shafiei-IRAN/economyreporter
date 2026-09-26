@@ -19,8 +19,11 @@ class LedgerAccountCard extends StatelessWidget {
   /// لمسِ کارت (در خانه: جزئیاتِ حساب).
   final VoidCallback? onTap;
 
+  /// حسابِ عضوِ دیگرِ خانواده: بی‌منو و بی‌«موجودیِ الان».
+  final bool readOnly;
+
   const LedgerAccountCard(
-      {super.key, required this.controller, required this.view, this.onTap});
+      {super.key, required this.controller, required this.view, this.onTap, this.readOnly = false});
 
   @override
   Widget build(BuildContext context) {
@@ -50,7 +53,7 @@ class LedgerAccountCard extends StatelessWidget {
                       ],
                     ),
                   ),
-                  PopupMenuButton<String>(
+                  if (!readOnly) PopupMenuButton<String>(
                     tooltip: 'بیشتر',
                     onSelected: (v) => switch (v) {
                       'reconcile' => showBalanceDialog(
@@ -87,11 +90,15 @@ class LedgerAccountCard extends StatelessWidget {
                     'طبقِ پیامکی که هنوز تأیید نکرده‌ای: ${formatToman(view.unconfirmedBalance!)}',
                     style: theme.textTheme.bodySmall
                         ?.copyWith(color: theme.colorScheme.tertiary)),
-              if (view.discrepancyCount > 0)
+              if (view.discrepancyCount > 0 && !readOnly)
                 Text('با مانده‌ی بانک نمی‌خواند — برای دیدن و درست کردن لمس کن',
                     style: theme.textTheme.bodySmall
                         ?.copyWith(color: theme.colorScheme.error)),
-              if (view.needsAnchor && !a.archived)
+              if (readOnly && balance == null)
+                Text('هنوز داده‌ای از گوشیِ ${a.ownerName} نیامده',
+                    style: theme.textTheme.bodySmall
+                        ?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+              if (view.needsAnchor && !a.archived && !readOnly)
                 Padding(
                   padding: const EdgeInsets.only(top: 8),
                   child: Align(

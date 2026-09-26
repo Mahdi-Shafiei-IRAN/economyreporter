@@ -119,10 +119,10 @@ class _CandidateCard extends StatelessWidget {
 
   /// صاحب (پیش‌فرض خودم) و «موجودیِ الان» (پیش‌فرض آخرین مانده) — یک برگه‌ی کوتاه.
   Future<void> _confirm(BuildContext context) async {
-    final people = controller.people?.call();
-    final me = (name: people?.meName ?? 'من', id: people?.meUserId);
+    final people = controller.who;
+    final me = (name: people.meName ?? 'من', id: people.meUserId);
     final others = <({String name, String? id})>[
-      for (final FamilyMember m in people?.members ?? const []) if (m.id != me.id) (name: m.name, id: m.id),
+      for (final FamilyMember m in people.members) if (m.id != me.id) (name: m.name, id: m.id),
     ];
     var owner = me;
     final balance = TextEditingController(text: tomanInputText(candidate.lastBalanceRial));

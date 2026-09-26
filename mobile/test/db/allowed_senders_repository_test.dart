@@ -1,5 +1,4 @@
 import 'package:economy/core/database/app_database.dart';
-import 'package:economy/core/sms/sms_importer.dart';
 import 'package:economy/core/sms/sms_parser.dart';
 import 'package:economy/features/transactions/data/transaction_repository.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -35,60 +34,6 @@ void main() {
 
     await repo.deleteAllowedSender(a.id);
     expect(await repo.allowedSenders(), isEmpty);
-  });
-
-  test('وارد کردن روی دیتابیس واقعی: فقط فرستنده‌ی مجاز، با بانکِ همان فرستنده',
-      () async {
-    await repo.addAllowedSender('BankMellat', bankId: 'mellat');
-    final result = await SmsImporter(repo).importAll([
-      RawSms(
-        sender: 'BankMellat',
-        body: 'خرید مبلغ 80,000 ریال از کارت 1234',
-        receivedAt: DateTime.utc(2026, 9, 1),
-      ),
-      RawSms(
-        sender: 'Snapp',
-        body: 'پرداخت مبلغ 150,000 ریال بابت سفر',
-        receivedAt: DateTime.utc(2026, 9, 1),
-      ),
-    ]);
-
-    expect(result.created, 1);
-    expect(result.notAllowed, 1);
-    final saved = (await repo.getAll()).single;
-    expect(saved.smsSender, 'BankMellat');
-    expect(saved.bankId, 'mellat');
-  });
-
-  test('سرشماره‌ی عددیِ بی‌بانک: با تعیین صاحبِ فرستنده نسبت داده می‌شود',
-      () async {
-    // فرستنده شماره است و بانک تشخیص داده نمی‌شود؛ پیامک شماره‌ی حساب دارد.
-    await repo.addAllowedSender('982000123', ownerName: 'مهدی', ownerUserId: 'u-me');
-    final tx = await SmsImporter(repo).importOne(RawSms(
-      sender: '982000123',
-      body: 'حساب 1000000005 پرداخت مبلغ 250,000 ریال',
-      receivedAt: DateTime.utc(2026, 9, 1),
-    ));
-    expect(tx, isNotNull);
-    final saved = (await repo.getById(tx!.id))!;
-    expect(saved.ownerName, 'مهدی');
-    expect(saved.ownerUserId, 'u-me');
-  });
-
-  test('تعیین صاحبِ فرستنده بعد از ثبت: تراکنش‌های قبلیِ همان فرستنده هم صاحب می‌گیرند',
-      () async {
-    await repo.addAllowedSender('982000123'); // بدون صاحب
-    final tx = await SmsImporter(repo).importOne(RawSms(
-      sender: '982000123',
-      body: 'حساب 1000000005 پرداخت مبلغ 90,000 ریال',
-      receivedAt: DateTime.utc(2026, 9, 2),
-    ));
-    expect((await repo.getById(tx!.id))!.ownerName, isNull);
-
-    // حالا همان فرستنده را با صاحب دوباره اضافه می‌کنیم → باید backfill شود.
-    await repo.deleteAllowedSender((await repo.allowedSenders()).single.id);
-    await repo.addAllowedSender('+982000123', ownerName: 'بابا', ownerUserId: 'u-father');
-    expect((await repo.getById(tx.id))!.ownerName, 'بابا');
   });
 
   test('مجاز کردن فرستنده با بانک: پیامک‌های قبلیِ بی‌بانکِ همان فرستنده بانک می‌گیرند',

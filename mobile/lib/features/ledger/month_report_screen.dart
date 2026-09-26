@@ -14,6 +14,7 @@ import 'ledger_text.dart';
 const kReportPrevKey = Key('report-prev');
 const kReportNextKey = Key('report-next');
 const kReportUncategorizedKey = Key('report-uncategorized');
+const kReportScopeKey = Key('report-scope');
 Key reportCategoryKey(String name) => Key('report-cat-$name');
 const kBudgetFieldKey = Key('budget-field');
 const kBudgetSaveKey = Key('budget-save');
@@ -34,6 +35,9 @@ class MonthReportScreen extends StatefulWidget {
 
 class _MonthReportScreenState extends State<MonthReportScreen> {
   late DateTime _month = widget.controller.now;
+
+  /// کلِ خانواده (فقط مدیر که حساب‌های بقیه را دارد).
+  bool _family = false;
 
   void _shift(int months) {
     final (from, to) = jalaliMonthRange(_month);
@@ -74,7 +78,8 @@ class _MonthReportScreenState extends State<MonthReportScreen> {
     return AnimatedBuilder(
       animation: widget.controller,
       builder: (context, _) {
-        final r = widget.controller.monthReport(_month);
+        final hasFamily = widget.controller.familyAccounts.isNotEmpty;
+        final r = widget.controller.monthReport(_month, family: _family && hasFamily);
         final isCurrent = !widget.controller.now.isBefore(r.from) && widget.controller.now.isBefore(r.to);
         final maxSpent = r.categories.fold<int>(
             1, (m, c) => [m, c.spentRial, c.limitRial ?? 0].reduce((a, b) => a > b ? a : b));
@@ -99,6 +104,19 @@ class _MonthReportScreenState extends State<MonthReportScreen> {
           body: ListView(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
             children: [
+              if (hasFamily)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: SegmentedButton<bool>(
+                    key: kReportScopeKey,
+                    segments: const [
+                      ButtonSegment(value: false, label: Text('فقط من')),
+                      ButtonSegment(value: true, label: Text('کلِ خانواده')),
+                    ],
+                    selected: {_family},
+                    onSelectionChanged: (s) => setState(() => _family = s.first),
+                  ),
+                ),
               Card(
                 child: Padding(
                   padding: const EdgeInsets.all(16),
@@ -172,7 +190,9 @@ class _MonthReportScreenState extends State<MonthReportScreen> {
                             if (widget.controller.account(e.accountId) case final a?) accountTitle(a),
                             if (e.note?.trim().isNotEmpty ?? false) e.note!.trim(),
                           ].join(' • ')),
-                          onTap: () => showEntrySheet(context, widget.controller, entry: e),
+                          onTap: widget.controller.canEdit(e.accountId)
+                              ? () => showEntrySheet(context, widget.controller, entry: e)
+                              : null,
                         ),
                     ],
                   ),

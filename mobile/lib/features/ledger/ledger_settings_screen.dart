@@ -1,5 +1,5 @@
-/// تنظیماتِ حالتِ نسخه‌ی ۲ (طرح ۱۲.۵): فقط چیزهایی که در نسخه‌ی ۲ معنا دارند. ابزارهای نسخه‌ی ۱
-/// اینجا نیستند؛ با خاموش کردنِ کلید برمی‌گردند.
+/// تنظیمات (طرح ۱۲.۵ و ۱۲.۸): راهنما، بانک‌ها، پشتیبان روی سرور، خانواده و سلامتِ گوشی‌ها، نسخه‌ی
+/// جدید و ظاهر. ابزارهای نسخه‌ی ۱ از فاز ۵ حذف شده‌اند.
 library;
 
 import 'package:flutter/material.dart';
@@ -10,7 +10,6 @@ import '../../core/theme/theme_controller.dart';
 import 'banks_view.dart';
 import 'guide_screen.dart';
 import 'ledger_controller.dart';
-import 'ledger_v2_toggle.dart';
 
 const kLedgerSettingsGuideKey = Key('ledger-settings-guide');
 const kLedgerSettingsBanksKey = Key('ledger-settings-banks');
@@ -18,6 +17,7 @@ const kLedgerSettingsFamilyKey = Key('ledger-settings-family');
 const kLedgerSettingsUpdateKey = Key('ledger-settings-update');
 const kLedgerSettingsLogoutKey = Key('ledger-settings-logout');
 const kLedgerSettingsSyncKey = Key('ledger-settings-sync');
+const kLedgerSettingsHealthKey = Key('ledger-settings-health');
 
 class LedgerSettingsScreen extends StatefulWidget {
   final LedgerController controller;
@@ -30,6 +30,9 @@ class LedgerSettingsScreen extends StatefulWidget {
   /// «همگام‌سازی الان»؛ پیامِ نتیجه را برمی‌گرداند.
   final Future<String> Function()? onSync;
 
+  /// «سلامتِ برنامه روی گوشی‌ها».
+  final VoidCallback? onOpenDevicesHealth;
+
   const LedgerSettingsScreen({
     super.key,
     required this.controller,
@@ -37,6 +40,7 @@ class LedgerSettingsScreen extends StatefulWidget {
     this.onLogout,
     this.onAddMember,
     this.onSync,
+    this.onOpenDevicesHealth,
   });
 
   @override
@@ -78,12 +82,10 @@ class _LedgerSettingsScreenState extends State<LedgerSettingsScreen> {
       body: AnimatedBuilder(
         animation: Listenable.merge([_c, themeController]),
         builder: (context, _) {
-          final people = _c.people?.call();
+          final people = _c.who;
           return ListView(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
             children: [
-              LedgerV2Toggle(controller: _c),
-              const SizedBox(height: 8),
               Card(
                 clipBehavior: Clip.antiAlias,
                 child: Column(children: [
@@ -137,10 +139,10 @@ class _LedgerSettingsScreenState extends State<LedgerSettingsScreen> {
                   ListTile(
                     key: kLedgerSettingsFamilyKey,
                     leading: const Icon(Icons.groups_outlined),
-                    title: Text(people?.meName ?? 'خانواده'),
-                    subtitle: Text((people?.members ?? const []).isEmpty
+                    title: Text(people.meName ?? 'خانواده'),
+                    subtitle: Text(people.members.isEmpty
                         ? 'اعضای خانواده هنوز از سرور گرفته نشده'
-                        : 'اعضا: ${people!.members.map((m) => m.name).join('، ')}'),
+                        : 'اعضا: ${people.members.map((m) => m.name).join('، ')}'),
                   ),
                   if (widget.onAddMember != null) ...[
                     const Divider(indent: 56),
@@ -149,6 +151,17 @@ class _LedgerSettingsScreenState extends State<LedgerSettingsScreen> {
                       title: const Text('افزودن عضو خانواده'),
                       trailing: const Icon(Icons.chevron_left_rounded),
                       onTap: widget.onAddMember,
+                    ),
+                  ],
+                  if (widget.onOpenDevicesHealth != null) ...[
+                    const Divider(indent: 56),
+                    ListTile(
+                      key: kLedgerSettingsHealthKey,
+                      leading: const Icon(Icons.health_and_safety_outlined),
+                      title: const Text('سلامتِ برنامه روی گوشی‌ها'),
+                      subtitle: const Text('برنامه روی گوشیِ بقیه‌ی خانواده درست کار می‌کند؟'),
+                      trailing: const Icon(Icons.chevron_left_rounded),
+                      onTap: widget.onOpenDevicesHealth,
                     ),
                   ],
                 ]),

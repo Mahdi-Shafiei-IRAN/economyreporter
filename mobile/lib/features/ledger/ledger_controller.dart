@@ -69,7 +69,7 @@ class AccountPrefill {
 
 typedef LedgerPeople = ({String? meName, String? meUserId, List<FamilyMember> members});
 
-/// فرستنده‌های پیامکِ بانک (در اپ: همان فهرستِ مجازِ نسخه‌ی ۱ از طریقِ DashboardController).
+/// فرستنده‌های پیامکِ بانک (در اپ: `ledgerSenderOps` روی جدولِ فرستنده‌های مجاز).
 class SenderOps {
   final Future<List<SenderCandidate>> Function() candidates;
   final Future<void> Function(String address, String? bankId) allow;
@@ -104,8 +104,15 @@ class LedgerController extends ChangeNotifier {
   /// صندوقِ پیامکِ گوشی (در اپ: SmsInboxService).
   Future<List<IncomingSms>> Function()? readInbox;
 
-  /// نام و اعضای خانواده (از داشبوردِ نسخه‌ی ۱) برای فرمِ حساب.
+  /// جایگزینِ «من و اعضای خانواده» (تست‌ها)؛ در اپ از تنظیماتِ گوشی خوانده می‌شود.
   LedgerPeople Function()? people;
+  LedgerPeople _people = (meName: null, meUserId: null, members: const []);
+
+  /// من و اعضای خانواده.
+  LedgerPeople get who => people?.call() ?? _people;
+
+  /// مدیرِ خانواده (حساب‌های بقیه را هم می‌بیند).
+  bool isManager = false;
 
   /// انتخابِ بانک‌ها (قدمِ ۱).
   SenderOps? senders;
@@ -169,9 +176,9 @@ class LedgerController extends ChangeNotifier {
   List<AllowedSender> get banks => _allowed;
 
   /// حسابِ خودم یا حسابی که روی همین گوشی ساخته شده. حساب‌های بقیه‌ی خانواده پیامکشان به گوشیِ
-  /// خودشان می‌رود؛ تا همگام‌سازیِ نسخه‌ی ۲ (فاز ۴) اینجا نشان داده نمی‌شوند.
+  /// خودشان می‌رود؛ فقط مدیر آن‌ها را (فقط دیدنی) از سرور می‌گیرد.
   bool isMine(LedgerAccount a) {
-    final me = people?.call().meUserId;
+    final me = who.meUserId;
     return a.ownerUserId == null || me == null || a.ownerUserId == me;
   }
 
@@ -179,7 +186,29 @@ class LedgerController extends ChangeNotifier {
       [for (final a in accounts) if (!a.account.archived && isMine(a.account)) a];
   List<AccountView> get archivedAccounts =>
       [for (final a in accounts) if (a.account.archived && isMine(a.account)) a];
-  int get othersAccountCount => [for (final a in accounts) if (!isMine(a.account)) a].length;
+
+  /// حساب‌های بقیه‌ی خانواده (فقط مدیر از سرور می‌گیرد) — فقط دیدنی (طرح ۱۲.۸).
+  List<AccountView> get familyAccounts =>
+      [for (final a in accounts) if (!a.account.archived && !isMine(a.account)) a];
+
+  /// جمعِ موجودیِ من و بقیه‌ی خانواده (حساب‌هایی که موجودی‌شان معلوم است).
+  int? get familyTotal {
+    final known = [
+      for (final a in [...activeAccounts, ...familyAccounts])
+        if (a.balance != null) a.balance!.balanceRial,
+    ];
+    return known.isEmpty ? null : known.fold<int>(0, (s, b) => s + b);
+  }
+
+  /// فقط صاحبِ حساب تراکنش‌هایش را ثبت/عوض/حذف می‌کند (سرور هم همین را اجرا می‌کند).
+  bool canEdit(String accountId) {
+    final a = account(accountId);
+    return a == null || isMine(a);
+  }
+
+  void _requireMine(String accountId) {
+    if (!canEdit(accountId)) throw StateError('این حساب مالِ عضوِ دیگری است؛ فقط دیدنی است');
+  }
 
   NextStep get nextStep {
     if (_allowed.isEmpty) return NextStep.chooseBanks;
@@ -211,6 +240,8 @@ class LedgerController extends ChangeNotifier {
   Future<void> _load() async {
     enabled = await repo.isEnabled();
     setupDone = await repo.isSetupDone();
+    _people = await repo.people();
+    isManager = await repo.myRole() == 'owner';
     startDate = await repo.startDate();
     _allowed = await allowedSenders();
     final accs = await repo.accounts();
@@ -226,7 +257,8 @@ class LedgerController extends ChangeNotifier {
     final ctx = SuggestionContext.build(accs, entries, cps);
     _ledgers = ctx.ledgers;
     accounts = [for (final a in accs) _view(a, ctx.ledgerOf(a.id))];
-    accountCandidates = findAccountCandidates(pending: pending, accounts: accs, parse: _parse);
+    accountCandidates = findAccountCandidates(
+        pending: pending, accounts: [for (final a in accs) if (isMine(a)) a], parse: _parse);
     final (from, to) = jalaliMonthRange(now);
     final totals = periodTotals(entries, from, to);
     monthIncome = totals.income;
@@ -330,6 +362,7 @@ class LedgerController extends ChangeNotifier {
     List<String> categoryIds = const [],
   }) =>
       _track(() async {
+        _requireMine(accountId);
         await repo.acceptSms(item.key,
             accountId: accountId,
             kind: kind,
@@ -383,6 +416,7 @@ class LedgerController extends ChangeNotifier {
     List<String> categoryIds = const [],
   }) =>
       _track(() async {
+        _requireMine(accountId);
         await repo.addEntry(
             accountId: accountId,
             kind: kind,
@@ -421,11 +455,13 @@ class LedgerController extends ChangeNotifier {
 
   /// «موجودیِ الان» / «تطبیق با موجودیِ واقعی»: نقطه‌ی دستی با زمانِ الان.
   Future<void> setBalanceNow(String accountId, int balanceRial) => _track(() async {
+        _requireMine(accountId);
         await repo.addCheckpoint(accountId: accountId, balanceRial: balanceRial, at: now);
         await _afterLedgerChange();
       });
 
   Future<void> setArchived(String accountId, bool archived) => _track(() async {
+        _requireMine(accountId);
         await repo.setArchived(accountId, archived);
         await _afterLedgerChange();
       });
@@ -456,6 +492,9 @@ class LedgerController extends ChangeNotifier {
 
   WindowHints hintsFor(DiscrepancyWindow w) => analyzeWindow(w, _items);
 
+  /// همه‌ی پیامک‌های دفتر (منتظر، ثبت‌شده، ردشده).
+  List<SmsItem> get allSmsItems => _items;
+
   SmsItem? smsItemByKey(String key) {
     for (final i in _items) {
       if (i.key == key) return i;
@@ -464,16 +503,23 @@ class LedgerController extends ChangeNotifier {
   }
 
   Future<void> updateEntry(Entry e, {List<String>? categoryIds}) => _track(() async {
+        final old = (await repo.entries()).where((x) => x.id == e.id).firstOrNull;
+        if (old != null) _requireMine(old.accountId);
+        _requireMine(e.accountId);
         await repo.updateEntry(e, categoryIds: categoryIds);
         await _afterLedgerChange();
       });
 
   Future<void> deleteEntry(String id) => _track(() async {
+        final old = (await repo.entries()).where((x) => x.id == id).firstOrNull;
+        if (old != null) _requireMine(old.accountId);
         await repo.deleteEntry(id);
         await _afterLedgerChange();
       });
 
   Future<void> deleteCheckpoint(String id) => _track(() async {
+        final old = (await repo.checkpoints()).where((x) => x.id == id).firstOrNull;
+        if (old != null) _requireMine(old.accountId);
         await repo.deleteCheckpoint(id);
         await _afterLedgerChange();
       });
@@ -484,6 +530,7 @@ class LedgerController extends ChangeNotifier {
 
   /// «اصلاح»: تراکنشِ صریح با یادداشتِ اجباری، وسطِ بازه تا داخلِ همان پنجره بیفتد (۱۲.۶).
   Future<void> addAdjustment(DiscrepancyWindow w, String note) => _track(() async {
+        _requireMine(w.accountId);
         final diff = w.diffRial;
         final mid = w.start.add(w.end.difference(w.start) ~/ 2);
         await repo.addEntry(
@@ -501,6 +548,8 @@ class LedgerController extends ChangeNotifier {
   DateTime gapTime(DiscrepancyWindow w) => w.start.add(w.end.difference(w.start) ~/ 2);
 
   Future<void> setEntryCategories(String entryId, List<String> categoryIds) => _track(() async {
+        final old = (await repo.entries()).where((x) => x.id == entryId).firstOrNull;
+        if (old != null) _requireMine(old.accountId);
         await repo.setEntryCategories(entryId, categoryIds);
         await _load();
         onLocalChange?.call();
@@ -508,13 +557,16 @@ class LedgerController extends ChangeNotifier {
 
   Future<List<String>> suggestedCategoryIds(SmsItem item) => repo.v1CategoryIdsFor(item);
 
-  /// گزارشِ ماهی که [anyTimeInMonth] در آن است؛ فقط حساب‌های خودم.
-  MonthReport monthReport(DateTime anyTimeInMonth) {
+  /// گزارشِ ماهی که [anyTimeInMonth] در آن است؛ حساب‌های خودم، یا با [family] کلِ خانواده.
+  MonthReport monthReport(DateTime anyTimeInMonth, {bool family = false}) {
     final (from, to) = jalaliMonthRange(anyTimeInMonth);
     return buildMonthReport(
       from: from,
       to: to,
-      ledgers: {for (final v in activeAccounts) v.account.id: ledgerOf(v.account.id)},
+      ledgers: {
+        for (final v in [...activeAccounts, if (family) ...familyAccounts])
+          v.account.id: ledgerOf(v.account.id),
+      },
       allocations: allocations,
       budgets: budgets,
     );
@@ -554,10 +606,10 @@ class LedgerController extends ChangeNotifier {
 
   /// «پیگیری نکن»: حسابِ کنارگذاشته؛ پیامک‌هایش «تراکنش نیست» پیشنهاد می‌شوند.
   Future<void> dismissCandidate(AccountCandidate c) => _track(() async {
-        final me = people?.call();
+        final me = who;
         final a = await repo.createAccount(
-          ownerName: me?.meName ?? 'من',
-          ownerUserId: me?.meUserId,
+          ownerName: me.meName ?? 'من',
+          ownerUserId: me.meUserId,
           label: _defaultLabel(c.bankId),
           bankId: c.bankId,
           cardLast4: c.cardLast4,

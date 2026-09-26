@@ -1,7 +1,7 @@
 import 'package:dio/dio.dart';
 import 'package:economy/core/auth/auth_repository.dart';
 import 'package:economy/core/family/family_api.dart';
-import 'package:economy/features/dashboard/dashboard_controller.dart';
+import 'package:economy/features/family/add_member_screen.dart';
 import 'package:economy/features/transactions/data/transaction_repository.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -20,8 +20,7 @@ class _FakeFamilyApi implements FamilyApi {
   }) : _members = members;
 
   @override
-  Future<UserProfile> me() async =>
-      const UserProfile(id: 'u-me', phone: '09120000001', fullName: 'من');
+  Future<UserProfile> me() async => const UserProfile(id: 'u-me', phone: '09120000001', fullName: 'من');
 
   @override
   Future<String?> myRole() async => 'owner';
@@ -30,79 +29,40 @@ class _FakeFamilyApi implements FamilyApi {
   Future<List<FamilyMember>> members() async => _members;
 
   @override
-  Future<void> addMember({
-    required String phone,
-    required String password,
-    String? fullName,
-  }) async {
+  Future<void> addMember({required String phone, required String password, String? fullName}) async {
     addCalls++;
     if (failStatus != null) {
       throw DioException(
         requestOptions: RequestOptions(path: '/family/x/members/invite/'),
-        response: Response(
-          requestOptions: RequestOptions(path: '/'),
-          statusCode: failStatus,
-          data: failBody,
-        ),
+        response: Response(requestOptions: RequestOptions(path: '/'), statusCode: failStatus, data: failBody),
       );
     }
     _members = [..._members, FamilyMember(id: 'u-$phone', name: fullName ?? phone)];
   }
 }
 
-Future<DashboardController> _controller(
-  FakeTransactionStore store,
-  FamilyApi api, {
-  String role = 'owner',
-}) async {
-  await store.setSetting(SettingKeys.myRole, role);
-  await store.setSetting(
-    SettingKeys.familyMembers,
-    FamilyMember.encodeList(await api.members()),
-  );
-  final c = DashboardController(store, familyApi: api);
-  await c.load();
-  return c;
-}
-
 void main() {
-  test('مدیر می‌تواند عضو اضافه کند (بدون سقف)', () async {
+  test('adding a member refreshes the stored member list', () async {
     final store = FakeTransactionStore();
     final api = _FakeFamilyApi();
-    final c = await _controller(store, api);
-
-    expect(c.canAddMember, isTrue);
-    final err = await c.addMember(phone: '09120000002', password: 'pass12', fullName: 'مامان');
+    final err = await addFamilyMember(api, store, phone: '09120000002', password: 'pass12', fullName: 'مامان');
     expect(err, isNull);
     expect(api.addCalls, 1);
-    expect(c.members.map((m) => m.name), contains('مامان'));
+    final members = FamilyMember.decodeList(await store.getSetting(SettingKeys.familyMembers));
+    expect(members.map((m) => m.name), contains('مامان'));
   });
 
-  test('عضوِ عادی نمی‌تواند عضو اضافه کند', () async {
-    final store = FakeTransactionStore();
-    final api = _FakeFamilyApi();
-    final c = await _controller(store, api, role: 'member');
-    expect(c.canAddMember, isFalse);
-  });
-
-  test('حتی با چند عضو، مدیر باز هم می‌تواند اضافه کند (سقف برداشته شد)', () async {
-    final store = FakeTransactionStore();
-    final api = _FakeFamilyApi(members: const [
-      FamilyMember(id: 'a', name: 'یک'),
-      FamilyMember(id: 'b', name: 'دو'),
-      FamilyMember(id: 'c', name: 'سه'),
-    ]);
-    final c = await _controller(store, api);
-    expect(c.canAddMember, isTrue);
-  });
-
-  test('خطای سرور به پیام فارسی تبدیل می‌شود', () async {
-    final store = FakeTransactionStore();
+  test('a server error becomes a Persian message', () async {
     final api = _FakeFamilyApi(failStatus: 400, failBody: {
       'phone': ['کاربری با این شماره از قبل هست.']
     });
-    final c = await _controller(store, api);
-    final err = await c.addMember(phone: '09120000002', password: 'pass12');
-    expect(err, 'کاربری با این شماره از قبل هست.');
+    expect(await addFamilyMember(api, FakeTransactionStore(), phone: '09120000002', password: 'pass12'),
+        'کاربری با این شماره از قبل هست.');
+  });
+
+  test('forbidden (not the manager)', () async {
+    final api = _FakeFamilyApi(failStatus: 403);
+    expect(await addFamilyMember(api, FakeTransactionStore(), phone: '09120000002', password: 'pass12'),
+        'فقط مدیرِ خانواده می‌تواند عضو اضافه کند');
   });
 }

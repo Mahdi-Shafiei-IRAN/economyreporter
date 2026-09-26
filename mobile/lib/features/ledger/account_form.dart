@@ -55,10 +55,10 @@ class _AccountFormState extends State<_AccountForm> {
   @override
   void initState() {
     super.initState();
-    final people = widget.controller.people?.call();
+    final people = widget.controller.who;
     final p = widget.prefill;
-    _owner = TextEditingController(text: people?.meName ?? '');
-    _ownerUserId = people?.meUserId;
+    _owner = TextEditingController(text: people.meName ?? '');
+    _ownerUserId = people.meUserId;
     _bankId = p.bankId;
     _card = TextEditingController(text: p.cardLast4 ?? '');
     _ref = TextEditingController(text: p.accountRef ?? '');
@@ -116,8 +116,8 @@ class _AccountFormState extends State<_AccountForm> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final people = widget.controller.people?.call();
-    final members = people?.members ?? const [];
+    final people = widget.controller.who;
+    final members = people.members;
     return Padding(
       padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
       child: SingleChildScrollView(

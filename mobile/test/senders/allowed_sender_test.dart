@@ -1,4 +1,4 @@
-import 'package:economy/core/sms/sms_importer.dart';
+import 'package:economy/core/sms/raw_sms.dart';
 import 'package:economy/features/senders/data/allowed_sender.dart';
 import 'package:economy/features/senders/data/sender_candidates.dart';
 import 'package:economy/features/transactions/data/transaction_record.dart';

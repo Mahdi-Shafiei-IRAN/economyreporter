@@ -78,7 +78,7 @@ class LedgerSyncTests(ApiTestCase):
         self.assertEqual(result["note"], "جدید")
         self.assertEqual(LedgerEntry.objects.get().note, "جدید")
 
-    def test_phase4_each_user_sees_and_writes_only_their_own(self):
+    def test_members_see_and_write_only_their_own(self):
         e = entry()
         self.push(ENTRIES, "entries", [e])
         self.auth(self.member)
@@ -86,6 +86,22 @@ class LedgerSyncTests(ApiTestCase):
         results = self.push(ENTRIES, "entries", [{**e, "note": "دست‌کاری"}])
         self.assertEqual(results[0]["status"], "forbidden")
         self.assertEqual(LedgerEntry.objects.get().note, "")
+
+    def test_phase5_manager_sees_the_whole_family_but_cannot_edit_it(self):
+        self.auth(self.member)
+        mine = entry(note="خریدِ عضو")
+        self.push(ENTRIES, "entries", [mine])
+        self.push(CHECKPOINTS, "checkpoints", [{
+            "id": str(uuid.uuid4()), "account_id": mine["account_id"], "at": "2026-09-24T10:00:00Z",
+            "balance_rial": 5, "client_updated_at": "2026-09-24T10:00:00Z",
+        }])
+        self.auth(self.owner)
+        self.assertEqual([r["note"] for r in self.client.get(ENTRIES).data["results"]], ["خریدِ عضو"])
+        self.assertEqual(len(self.client.get(CHECKPOINTS).data["results"]), 1)
+        results = self.push(ENTRIES, "entries", [{**mine, "note": "دست‌کاریِ مدیر"}])
+        self.assertEqual(results[0]["status"], "forbidden")
+        # تصمیم‌های پیامک شخصی می‌مانند.
+        self.assertEqual(self.client.get(DECISIONS).data["results"], [])
 
     def test_another_familys_id_is_a_conflict(self):
         e = entry()
@@ -150,6 +166,23 @@ class LedgerSyncTests(ApiTestCase):
         # سرور به وقتِ تهران برمی‌گرداند؛ همان لحظه است.
         self.assertEqual(parse_datetime(data["start_date"]), parse_datetime("2026-09-22T20:30:00Z"))
         self.assertFalse(data["setup_done"])
+
+    def test_settings_keep_the_first_start_date_and_setup_on_reinstall(self):
+        self.client.put(
+            SETTINGS, {"start_date": "2026-08-22T20:30:00Z", "setup_done": True}, format="json"
+        )
+        # گوشیِ تازه ماهِ بعد: تاریخِ این ماه و راهنمای ندیده.
+        resp = self.client.put(
+            SETTINGS,
+            {"enabled": True, "start_date": "2026-10-22T20:30:00Z", "setup_done": False},
+            format="json",
+        )
+        self.assertEqual(parse_datetime(resp.data["start_date"]), parse_datetime("2026-08-22T20:30:00Z"))
+        self.assertTrue(resp.data["setup_done"])
+        # تاریخِ زودتر پذیرفته می‌شود.
+        self.client.put(SETTINGS, {"start_date": "2026-07-22T20:30:00Z"}, format="json")
+        data = self.client.get(SETTINGS).data
+        self.assertEqual(parse_datetime(data["start_date"]), parse_datetime("2026-07-22T20:30:00Z"))
 
     def test_wallet_archived_round_trip_and_kept_when_old_clients_omit_it(self):
         wid = str(uuid.uuid4())

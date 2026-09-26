@@ -3,7 +3,7 @@
 library;
 
 import '../../../core/sms/bank_registry.dart';
-import '../../../core/sms/sms_importer.dart';
+import '../../../core/sms/raw_sms.dart';
 import '../../../core/sms/sms_parser.dart';
 import '../../transactions/data/transaction_record.dart';
 import 'allowed_sender.dart';

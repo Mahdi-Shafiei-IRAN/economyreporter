@@ -82,10 +82,17 @@ class FakeLedgerServer implements LedgerRemote {
     return Map.of(settings);
   }
 
+  /// مثلِ سرور: زودترین تاریخِ شروع و «راهنما دیده شده» می‌ماند.
   @override
   Future<void> putSettings(Map<String, Object?> s) async {
     _check();
+    final old = settings;
     settings = {...settings, ...s};
+    final a = old['start_date'] as String?, b = s['start_date'] as String?;
+    if (a != null && (b == null || DateTime.parse(a).isBefore(DateTime.parse(b)))) {
+      settings['start_date'] = a;
+    }
+    if (old['setup_done'] == true) settings['setup_done'] = true;
   }
 }
 
@@ -106,7 +113,8 @@ void main() {
   setUpAll(initSqfliteFfiForTests);
 
   /// یک «گوشی»: دیتابیسِ تازه با همان حساب (کیف‌ها با همگام‌سازیِ نسخه‌ی ۱ برمی‌گردند).
-  Future<(LedgerRepository, LedgerSyncService)> phone(FakeLedgerServer server, {String device = 'A'}) async {
+  Future<(LedgerRepository, LedgerSyncService)> phone(FakeLedgerServer server,
+      {String device = 'A', DateTime? at}) async {
     final db = await openAppDatabase(path: inMemoryDatabasePath, singleInstance: false);
     addTearDown(db.close);
     await db.insert('wallets', {
@@ -117,8 +125,8 @@ void main() {
       'account_ref': '1000005596',
       'created_at': now.toIso8601String(),
     });
-    final repo = LedgerRepository(db, deviceId: device, clock: () => now);
-    return (repo, LedgerSyncService(repo, server, clock: () => now));
+    final repo = LedgerRepository(db, deviceId: device, clock: () => at ?? now);
+    return (repo, LedgerSyncService(repo, server, clock: () => at ?? now));
   }
 
   Future<Map<String, String>> catIds(LedgerRepository r) async =>
@@ -143,13 +151,17 @@ void main() {
     expect(r.error, isNull);
     expect(r.sent, 2 + 1 + 3);
 
-    // گوشیِ تازه (نصبِ دوباره): اول همگام‌سازی، بعد صندوق — یا برعکس (پایینی).
-    final (b, syncB) = await phone(server, device: 'B');
-    expect(await b.isEnabled(), isFalse);
+    // گوشیِ تازه (نصبِ دوباره) در ماهِ بعد: اپ در شروع نسخه‌ی ۲ را روشن و تاریخِ این ماه را می‌گذارد
+    // (مثلِ main.dart)؛ اول همگام‌سازی، بعد صندوق — یا برعکس (پایینی).
+    final (b, syncB) = await phone(server, device: 'B', at: now.add(const Duration(days: 40)));
+    await b.setEnabled(true);
+    await b.ensureStartDate();
+    expect(await b.startDate(), isNot(await a.startDate()));
     await syncB.sync();
-    expect(await b.isEnabled(), isTrue);
+    // سرور تاریخِ شروعِ اصلی را نگه داشت و گوشی همان را گرفت (I5).
     expect(await b.isSetupDone(), isTrue);
     expect(await b.startDate(), await a.startDate());
+    expect(DateTime.parse(server.settings['start_date'] as String), await a.startDate());
     await b.intakeAll([...inbox, mellat('برداشت5,000', '845,000', now.add(const Duration(hours: 1)))],
         allowed: allowed);
 
@@ -268,14 +280,16 @@ void main() {
     }
   });
 
-  test('settings: turning v2 off on this phone is sent, not overwritten by the server', () async {
-    final server = FakeLedgerServer()..settings = {'enabled': true, 'start_date': null, 'setup_done': true};
+  test('settings: v2 stays on whatever the server says; start date = the earliest one', () async {
+    final server = FakeLedgerServer()
+      ..settings = {'enabled': false, 'start_date': '2026-08-22T20:30:00.000Z', 'setup_done': true};
     final (a, syncA) = await phone(server);
+    await a.setEnabled(true);
+    await a.ensureStartDate(); // ۱ مهرِ همین گوشی
     await syncA.sync();
     expect(await a.isEnabled(), isTrue);
-    await a.setEnabled(false);
-    await syncA.sync();
-    expect(server.settings['enabled'], isFalse);
-    expect(await a.isEnabled(), isFalse);
+    expect(await a.startDate(), DateTime.utc(2026, 8, 22, 20, 30)); // ۱ شهریور، از سرور
+    expect(await a.isSetupDone(), isTrue);
+    expect(server.settings['start_date'], '2026-08-22T20:30:00.000Z');
   });
 }

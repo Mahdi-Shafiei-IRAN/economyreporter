@@ -8,7 +8,7 @@ from rest_framework.exceptions import NotFound, PermissionDenied, ValidationErro
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.common.family import resolve_family
+from apps.common.family import is_family_manager, resolve_family
 from apps.common.sync import upsert_each
 
 from .models import LedgerCheckpoint, LedgerEntry, LedgerSettings, SmsDecision
@@ -57,7 +57,8 @@ def _page(qs, cursor, parse_pk, serializer):
 
 
 class _OwnedSyncView(APIView):
-    """تراکنش/نقطه: GET = ردیف‌های خودم از cursor؛ POST = upsert دسته‌ای با شناسه‌ی گوشی."""
+    """تراکنش/نقطه: GET = ردیف‌های خودم (مدیر: همه‌ی خانواده، فقط دیدنی) از cursor؛
+    POST = upsert دسته‌ای با شناسه‌ی گوشی (هر کس فقط ردیف‌های خودش)."""
 
     model = None
     serializer = None
@@ -65,7 +66,9 @@ class _OwnedSyncView(APIView):
 
     def get(self, request):
         family = resolve_family(request.user, request.query_params.get("family"))
-        qs = self.model.objects.filter(family=family, created_by=request.user)
+        qs = self.model.objects.filter(family=family)
+        if not is_family_manager(request.user, family):
+            qs = qs.filter(created_by=request.user)
         return _page(qs, request.query_params.get("since") or None, uuid.UUID, self.serializer)
 
     def post(self, request):
@@ -161,8 +164,16 @@ class LedgerSettingsView(APIView):
         return Response(LedgerSettingsSerializer(row).data)
 
     def put(self, request):
+        """گوشیِ تازه (نصبِ دوباره) با تاریخِ شروعِ ماهِ خودش می‌آید؛ زودترین تاریخ و «راهنما دیده شده»
+        می‌مانند تا دفتر همان بماند (I5)."""
         row, _ = LedgerSettings.objects.get_or_create(user=request.user)
         ser = LedgerSettingsSerializer(row, data=request.data, partial=True)
         ser.is_valid(raise_exception=True)
-        ser.save()
+        keep = {}
+        start = ser.validated_data.get("start_date")
+        if row.start_date is not None and (start is None or row.start_date < start):
+            keep["start_date"] = row.start_date
+        if row.setup_done:
+            keep["setup_done"] = True
+        ser.save(**keep)
         return Response(ser.data)

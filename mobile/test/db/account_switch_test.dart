@@ -1,5 +1,5 @@
 import 'package:economy/core/database/app_database.dart';
-import 'package:economy/core/sms/sms_importer.dart';
+import 'package:economy/core/sms/sms_parser.dart';
 import 'package:economy/features/transactions/data/transaction_repository.dart';
 import 'package:economy/features/wallets/data/wallet.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -31,13 +31,13 @@ void main() {
     await repo.addWallet(const Wallet(
         id: '', ownerName: 'غریبه', ownerUserId: 'u-stranger', label: 'کارت دیگر', cardLast4: '9999'));
 
-    final imported = await SmsImporter(repo).importOne(RawSms(
+    final imported = await repo.saveParsed(
+      const SmsParser().parse(sender: 'BankMellat', body: 'خرید مبلغ 50,000 ریال از کارت 1234'),
       sender: 'BankMellat',
-      body: 'خرید مبلغ 50,000 ریال از کارت 1234',
       receivedAt: DateTime.utc(2026, 9, 10),
-    ));
+    );
     final fruit = (await repo.categories()).firstWhere((c) => c.name == 'میوه');
-    await repo.categorize(imported!.id, [fruit.id]);
+    await repo.categorize(imported.id, [fruit.id]);
     await db.delete('outbox'); // قبلاً برای خانواده‌ی قبلی ارسال شده بود
     await repo.applyRemote({
       'id': 'remote-1',

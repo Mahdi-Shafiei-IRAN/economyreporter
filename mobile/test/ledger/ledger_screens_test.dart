@@ -12,7 +12,6 @@ import 'package:economy/features/ledger/guide_screen.dart';
 import 'package:economy/features/ledger/ledger_controller.dart';
 import 'package:economy/features/ledger/ledger_home_screen.dart';
 import 'package:economy/features/ledger/ledger_settings_screen.dart';
-import 'package:economy/features/ledger/ledger_v2_toggle.dart';
 import 'package:economy/features/ledger/pending_screen.dart';
 import 'package:economy/features/ledger/setup_screen.dart';
 import 'package:economy/features/senders/data/allowed_sender.dart';
@@ -276,7 +275,7 @@ void main() {
     await tester.pumpWidget(app(LedgerSettingsScreen(controller: c, onLogout: () {})));
     expect(find.byKey(kLedgerSettingsGuideKey), findsOneWidget);
     expect(find.byKey(kLedgerSettingsBanksKey), findsOneWidget);
-    expect(find.byKey(kLedgerV2ToggleKey), findsOneWidget);
+    expect(find.byType(SwitchListTile), findsNothing); // کلیدِ برگشت به نسخه‌ی ۱ حذف شد
     for (final old in ['بازبینی پیامک‌های مبهم', 'عیب‌یابی موجودی و پیامک‌ها', 'کارت‌ها و حساب‌ها',
       'منتظر دسته‌بندی', 'همگام‌سازی الان']) {
       expect(find.text(old), findsNothing, reason: old);
@@ -286,12 +285,4 @@ void main() {
     expect(find.byType(LedgerGuideScreen), findsOneWidget);
   });
 
-  testWidgets('settings toggle turns v2 off', (tester) async {
-    final c = await setup(tester);
-    await tester.pumpWidget(app(Scaffold(body: LedgerV2Toggle(controller: c))));
-    expect(tester.widget<SwitchListTile>(find.byKey(kLedgerV2ToggleKey)).value, isTrue);
-    await act(tester, c, () => tester.tap(find.byKey(kLedgerV2ToggleKey)));
-    expect(c.enabled, isFalse);
-    expect(tester.widget<SwitchListTile>(find.byKey(kLedgerV2ToggleKey)).value, isFalse);
-  });
 }

@@ -12,6 +12,7 @@ import 'package:uuid/uuid.dart';
 import '../../features/budgets/data/budget.dart';
 import '../../features/categories/data/category.dart';
 import '../../features/senders/data/allowed_sender.dart';
+import '../family/family_api.dart';
 import '../sms/digit_utils.dart';
 import '../sms/sms_parser.dart';
 import 'ledger_math.dart';
@@ -23,6 +24,9 @@ const kLedgerV2Setting = 'ledger_v2';
 const kLedgerStartSetting = 'ledger_start_date';
 const kLedgerSetupDoneSetting = 'ledger_setup_done';
 const kLedgerSettingsDirty = 'ledger_settings_dirty';
+
+/// شناسه‌ی کاربرِ همین گوشی (ProfileService می‌نویسد؛ همان `SettingKeys.meUserId`).
+const kMeUserIdSetting = 'me_user_id';
 
 class LedgerRepository {
   LedgerRepository(this.db,
@@ -48,6 +52,11 @@ class LedgerRepository {
   Future<void> _setSetting(String key, String value) => db.insert(
       'settings', {'key': key, 'value': value},
       conflictAlgorithm: ConflictAlgorithm.replace);
+
+  /// تنظیمِ کلید-مقدارِ دلخواه (مثلاً زمانِ آخرین گزارشِ سلامت).
+  Future<String?> value(String key) => _setting(key);
+
+  Future<void> setValue(String key, String value) => _setSetting(key, value);
 
   Future<bool> isEnabled() async => await _setting(kLedgerV2Setting) == '1';
 
@@ -95,15 +104,43 @@ class LedgerRepository {
 
   Future<void> markSettingsSent() => _setSetting(kLedgerSettingsDirty, '0');
 
-  /// تنظیماتِ سرور: وقتی اینجا تغییرِ ارسال‌نشده‌ای نیست، همان را بگیر (نصبِ دوباره → نسخه‌ی ۲).
+  /// تنظیماتِ سرور (نصبِ دوباره، I5): تاریخِ شروع = زودترینِ گوشی و سرور، و «راهنما دیده شده» اگر
+  /// یک‌بار دیده شده. پس گوشیِ تازه که در شروع تاریخِ این ماه را گذاشته، تاریخِ اصلی را پس می‌گیرد.
+  /// از فاز ۵ نسخه‌ی ۲ همیشه روشن است؛ `enabled`ِ سرور (برای کاربرانِ قدیمی false) نادیده گرفته می‌شود.
   Future<void> applyRemoteSettings(Map<String, dynamic> j) async {
-    if (await _setting(kLedgerSettingsDirty) == '1') return;
     final start = j['start_date'];
-    if (start is String && start.isNotEmpty && await startDate() == null) {
-      await _setSetting(kLedgerStartSetting, DateTime.parse(start).toUtc().toIso8601String());
+    if (start is String && start.isNotEmpty) {
+      final remote = DateTime.parse(start).toUtc();
+      final local = await startDate();
+      if (local == null || remote.isBefore(local)) {
+        await _setSetting(kLedgerStartSetting, remote.toIso8601String());
+      }
     }
-    if (j['enabled'] is bool) await _setSetting(kLedgerV2Setting, j['enabled'] == true ? '1' : '0');
     if (j['setup_done'] == true) await _setSetting(kLedgerSetupDoneSetting, '1');
+  }
+
+  /// خروج و ورود با کاربرِ دیگر روی همین گوشی: دادهٔ دفترِ کاربرِ قبلی پاک می‌شود (روی سرور به نامِ
+  /// خودش هست) تا به نامِ کاربرِ تازه فرستاده نشود (طرح ۱۲.۸). حساب‌ها (کیف‌ها) را نسخه‌ی ۱ جابه‌جا می‌کند.
+  Future<void> resetForAccountSwitch() async {
+    await db.transaction((txn) async {
+      for (final t in const [
+        'ledger_entries',
+        'ledger_checkpoints',
+        'ledger_entry_categories',
+        'sms_items',
+        'ledger_remote_decisions',
+      ]) {
+        await txn.delete(t);
+      }
+      await txn.delete('settings', where: "key LIKE 'ledger_cursor_%'");
+      await txn.delete('settings', where: 'key IN (?, ?, ?, ?, ?)', whereArgs: [
+        kLedgerStartSetting,
+        kLedgerSetupDoneSetting,
+        kLedgerSettingsDirty,
+        'ledger_last_sync',
+        'ledger_health_reported_at',
+      ]);
+    });
   }
 
   /// ردیف‌هایی که هنوز به سرور نرفته‌اند (تراکنش، نقطه، تصمیمِ پیامک).
@@ -372,8 +409,28 @@ class LedgerRepository {
   Future<List<LedgerItem>> ledger(String accountId) async =>
       orderLedger(await entries(accountId: accountId), await checkpoints(accountId: accountId));
 
+  /// من و اعضای خانواده (ProfileService از سرور می‌گیرد و در تنظیمات نگه می‌دارد).
+  Future<({String? meName, String? meUserId, List<FamilyMember> members})> people() async => (
+        meName: await _setting('me_name'),
+        meUserId: await _setting(kMeUserIdSetting),
+        members: FamilyMember.decodeList(await _setting('family_members')),
+      );
+
+  /// نقشِ من در خانواده ('owner' = مدیر).
+  Future<String?> myRole() => _setting('my_role');
+
+  /// پیامکِ این گوشی مالِ حساب‌های کاربرِ همین گوشی است؛ حساب‌های بقیه‌ی خانواده (که مدیر از سرور
+  /// می‌گیرد) در پیشنهاد شرکت نمی‌کنند.
+  Future<List<LedgerAccount>> myAccounts() async {
+    final me = await _setting(kMeUserIdSetting);
+    return [
+      for (final a in await accounts())
+        if (a.ownerUserId == null || me == null || a.ownerUserId == me) a,
+    ];
+  }
+
   Future<SuggestionContext> suggestionContext() async =>
-      SuggestionContext.build(await accounts(), await entries(), await checkpoints());
+      SuggestionContext.build(await myAccounts(), await entries(), await checkpoints());
 
   Future<List<SmsItem>> smsItems({SmsStatus? status}) async {
     final rows = await db.query('sms_items',
