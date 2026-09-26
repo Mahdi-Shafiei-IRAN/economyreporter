@@ -1,7 +1,7 @@
 import 'dart:io';
 
 import 'package:economy/core/database/app_database.dart';
-import 'package:economy/features/transactions/data/transaction_repository.dart';
+import 'package:economy/core/store/app_store.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sqflite/sqflite.dart';
 
@@ -149,16 +149,18 @@ void main() {
         .toSet();
     expect(walletCols, contains('owner_user_id'));
 
-    final repo = TransactionRepository(v5);
+    final repo = AppStore(v5);
     await repo.setSetting('k', 'v');
     expect(await repo.getSetting('k'), 'v');
 
-    final a = await repo.getById('bank-unknown');
-    expect(a!.needsReview, isFalse);
-    expect(a.origin, 'local');
-    final b = await repo.getById('no-amount');
-    expect(b!.needsReview, isTrue);
-    expect(b.reviewReasons, ['amount', 'kind']);
+    Future<Map<String, Object?>> tx(String id) async =>
+        (await v5.query('transactions', where: 'id = ?', whereArgs: [id])).single;
+    final a = await tx('bank-unknown');
+    expect(a['needs_review'], 0);
+    expect(a['origin'], 'local');
+    final b = await tx('no-amount');
+    expect(b['needs_review'], 1);
+    expect(b['review_reason'], 'amount,kind');
 
     await v5.close();
     await tmpDir.delete(recursive: true);
@@ -183,7 +185,7 @@ void main() {
     await v5.close();
 
     final v6 = await openAppDatabase(path: path);
-    final repo = TransactionRepository(v6);
+    final repo = AppStore(v6);
     expect(await repo.getSetting('me_user_id'), 'u1');
     expect(await repo.allowedSenders(), isEmpty);
     await repo.addAllowedSender('BankMellat', bankId: 'mellat');

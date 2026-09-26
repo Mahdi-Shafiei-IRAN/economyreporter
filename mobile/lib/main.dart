@@ -14,7 +14,8 @@ import 'core/format/money_format.dart';
 import 'core/ledger/ledger_repository.dart';
 import 'core/ledger/ledger_sync.dart';
 import 'core/network/api_client.dart';
-import 'core/sync/remote_transaction_api.dart';
+import 'core/store/app_store.dart';
+import 'core/sync/remote_sync_api.dart';
 import 'core/sync/sync_service.dart';
 import 'core/theme/app_theme.dart';
 import 'core/theme/theme_controller.dart';
@@ -31,7 +32,6 @@ import 'features/ledger/pending_screen.dart';
 import 'features/ledger/sender_ops.dart';
 import 'features/notifications/notification_service.dart';
 import 'features/sms/sms_inbox_service.dart';
-import 'features/transactions/data/transaction_repository.dart';
 
 /// کلید ناوبری سراسری (برای باز کردن صفحه از نوتیفیکیشن).
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
@@ -68,7 +68,7 @@ class EconomyApp extends StatelessWidget {
 
 class _Services {
   final AuthController auth;
-  final TransactionRepository store; // تنظیمات، کیف‌ها، بودجه، فرستنده‌ها
+  final AppStore store; // تنظیمات، فرستنده‌ها، کیف‌ها و بودجه
   final SyncService sync; // کیف‌ها و بودجه با سرور
   final ProfileService profile;
   final FamilyApi familyApi;
@@ -95,7 +95,7 @@ class _Services {
   });
 
   /// پروفایل/اعضا از سرور → کیف‌ها و بودجه → دفتر. در حالت آفلاین بی‌صدا شکست می‌خورد (چیزی گم نمی‌شود).
-  Future<void> refreshFromServer({bool force = false}) async {
+  Future<void> refreshFromServer() async {
     final previousUser = await store.getSetting(SettingKeys.meUserId);
     if (await profile.refresh() == ProfileStatus.needsRelogin) {
       await auth.expireSession(kLegacyAccountNotice);
@@ -106,7 +106,7 @@ class _Services {
       // کاربرِ دیگری روی همین گوشی وارد شد: دفترِ قبلی به نامِ او فرستاده نشود (طرح ۱۲.۸).
       await ledger.repo.resetForAccountSwitch();
     }
-    await sync.sync(force: force).catchError((_) => const SyncSummary(synced: 0, failed: 0));
+    await sync.sync().catchError((_) => SyncSummary.ok);
     await syncLedger();
   }
 
@@ -124,7 +124,7 @@ class _Services {
 
   /// «همگام‌سازی الان» در تنظیمات.
   Future<String> syncLedgerNow() async {
-    await sync.sync(force: true).catchError((_) => const SyncSummary(synced: 0, failed: 0));
+    await sync.sync().catchError((_) => SyncSummary.ok);
     final r = await syncLedger();
     if (r.error != null) return 'همگام‌سازی نشد: ${r.error}. تغییرها روی گوشی می‌مانند و بعداً فرستاده می‌شوند.';
     return 'همگام‌سازی انجام شد: ${toPersianDigits('${r.sent}')} ارسال، ${toPersianDigits('${r.received}')} دریافت'
@@ -166,7 +166,7 @@ class _BootstrapState extends State<_Bootstrap> {
     await auth.bootstrap();
 
     final db = await openAppDatabase();
-    final store = TransactionRepository(db);
+    final store = AppStore(db);
 
     // شناسه‌ی ثابت گوشی.
     var deviceId = await store.getSetting(SettingKeys.deviceId);
@@ -175,7 +175,7 @@ class _BootstrapState extends State<_Bootstrap> {
       await store.setSetting(SettingKeys.deviceId, deviceId);
     }
 
-    final sync = SyncService(db: db, api: DioRemoteTransactionApi(api.dio), deviceId: deviceId);
+    final sync = SyncService(store: store, api: DioRemoteSyncApi(api.dio));
     final familyApi = DioFamilyApi(api.dio);
     final ledgerRepo = LedgerRepository(db, deviceId: deviceId);
 
@@ -215,7 +215,7 @@ class _BootstrapState extends State<_Bootstrap> {
       debounce?.cancel();
       debounce = Timer(const Duration(seconds: 3), () async {
         if (!auth.authenticated) return;
-        await sync.sync().catchError((_) => const SyncSummary(synced: 0, failed: 0));
+        await sync.sync().catchError((_) => SyncSummary.ok);
         await ledgerSync.sync();
         await ledger.load();
       });

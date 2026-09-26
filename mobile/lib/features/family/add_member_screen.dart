@@ -6,7 +6,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 
 import '../../core/family/family_api.dart';
-import '../transactions/data/transaction_repository.dart';
+import '../../core/store/app_store.dart';
 
 const kAddMemberPhoneKey = Key('add-member-phone');
 const kAddMemberPasswordKey = Key('add-member-password');
@@ -20,7 +20,7 @@ typedef AddMemberFn = Future<String?> Function(
 /// افزودنِ عضو با سرور و تازه کردنِ فهرستِ اعضا روی گوشی؛ خطا = پیامِ فارسی، موفق = null.
 Future<String?> addFamilyMember(
   FamilyApi api,
-  TransactionStore store, {
+  AppStore store, {
   required String phone,
   required String password,
   String? fullName,

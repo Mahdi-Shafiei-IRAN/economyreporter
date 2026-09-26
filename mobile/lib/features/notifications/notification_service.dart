@@ -13,7 +13,7 @@ import '../ledger/ledger_notifications.dart';
 
 const _channelId = 'transactions';
 const _channelName = 'تراکنش‌ها';
-const _channelDesc = 'اعلان تراکنش‌های جدید برای دسته‌بندی';
+const _channelDesc = 'پیامکِ بانکیِ تازه که منتظرِ تأییدِ توست';
 
 const _android = AndroidInitializationSettings('@mipmap/ic_launcher');
 

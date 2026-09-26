@@ -1,11 +1,10 @@
-/// پیشنهاد فرستنده‌های بانک: فرستنده‌هایی که پیامکِ مبلغ‌دار داده‌اند ولی هنوز مجاز
-/// نیستند — از صندوق گوشی و از تراکنش‌هایی که قبلاً ثبت شده (منطق خالص و تست‌پذیر).
+/// پیشنهاد فرستنده‌های بانک: فرستنده‌هایی که در صندوقِ گوشی پیامکِ مبلغ‌دار داده‌اند ولی هنوز
+/// مجاز نیستند (منطق خالص و تست‌پذیر).
 library;
 
 import '../../../core/sms/bank_registry.dart';
 import '../../../core/sms/raw_sms.dart';
 import '../../../core/sms/sms_parser.dart';
-import '../../transactions/data/transaction_record.dart';
 import 'allowed_sender.dart';
 
 class SenderCandidate {
@@ -18,9 +17,6 @@ class SenderCandidate {
   /// پیامک‌های تراکنش‌مانندِ صندوق گوشی از این فرستنده.
   final int inboxCount;
 
-  /// تراکنش‌هایی که قبلاً (پیش از تعیین فرستنده‌ها) از این فرستنده ثبت شده‌اند.
-  final List<TransactionRecord> stored;
-
   /// جدیدترین متن پیامک (تا معلوم شود بانک است یا تبلیغ/فروشگاه).
   final String? sample;
   final DateTime? lastAt;
@@ -28,20 +24,18 @@ class SenderCandidate {
   const SenderCandidate({
     required this.address,
     required this.inboxCount,
-    required this.stored,
     this.bankId,
     this.sample,
     this.lastAt,
   });
 
-  int get weight => inboxCount + stored.length;
+  int get weight => inboxCount;
 }
 
 class _Group {
   final String address;
   String? bankId;
   int inboxCount = 0;
-  final List<TransactionRecord> stored = [];
   String? sample;
   DateTime? lastAt;
 
@@ -56,7 +50,6 @@ class _Group {
 
 List<SenderCandidate> findSenderCandidates({
   required Iterable<RawSms> inbox,
-  required Iterable<TransactionRecord> stored,
   required Iterable<AllowedSender> allowed,
   Iterable<String> dismissed = const [],
   SmsParser parser = const SmsParser(),
@@ -88,22 +81,12 @@ List<SenderCandidate> findSenderCandidates({
     g.offer(sms.body, sms.receivedAt);
   }
 
-  for (final t in stored) {
-    final sender = t.smsSender?.trim();
-    if (sender == null || sender.isEmpty || t.isRemote || t.isDeleted) continue;
-    if (isDismissed(sender) || findAllowedSender(allowed, sender) != null) continue;
-    final g = groupFor(sender)..bankId ??= t.bankId;
-    g.stored.add(t);
-    if (t.smsBody != null) g.offer(t.smsBody!, t.smsReceivedAt ?? t.effectiveTime);
-  }
-
   return [
     for (final g in groups)
       SenderCandidate(
         address: g.address,
         bankId: detectBank(g.address)?.id ?? g.bankId,
         inboxCount: g.inboxCount,
-        stored: List.unmodifiable(g.stored),
         sample: g.sample,
         lastAt: g.lastAt,
       ),

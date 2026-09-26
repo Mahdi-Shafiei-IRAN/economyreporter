@@ -1,5 +1,4 @@
 import 'package:economy/core/sms/digit_utils.dart';
-import 'package:economy/core/sms/sms_fingerprint.dart';
 import 'package:economy/core/sms/sms_parser.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -72,14 +71,6 @@ void main() {
       expect([pasargad.accountRef, pasargad.amountRial, pasargad.balanceAfterRial],
           ['777.888.10000001.1', 7400000, 95812229]);
     });
-  });
-
-  test('اثرانگشتِ پیامک با پاک‌سازیِ تازه عوض نمی‌شود (پیامکِ ثبت‌شده دوباره ثبت نمی‌شود)', () {
-    const body = 'حساب\u2060490000\u200F0002\nمبلغ86،184';
-    // همان فرمولِ نسخه‌های قبل: فقط normalizeForParsing روی متنِ خام.
-    expect(smsFingerprint(sender: 'Bank Mellat', body: body),
-        smsFingerprint(sender: 'Bank Mellat', body: body));
-    expect(normalizeForParsing(body), contains('\u2060'));
   });
 
   test('describeInvisible نویسه‌های نامرئی را نام می‌برد', () {

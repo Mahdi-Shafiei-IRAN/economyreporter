@@ -10,10 +10,10 @@ import 'package:economy/core/ledger/ledger_repository.dart';
 import 'package:economy/core/ledger/models.dart';
 import 'package:economy/core/ledger/sms_intake.dart';
 import 'package:economy/core/sms/raw_sms.dart';
+import 'package:economy/core/store/app_store.dart';
 import 'package:economy/features/ledger/ledger_controller.dart';
 import 'package:economy/features/ledger/ledger_health.dart';
 import 'package:economy/features/ledger/sender_ops.dart';
-import 'package:economy/features/transactions/data/transaction_repository.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
@@ -37,7 +37,7 @@ void main() {
   var now = DateTime.utc(2026, 9, 28, 10); // ۱۴۰۵/۰۷/۰۶
   final t1 = DateTime.utc(2026, 9, 23, 7), t2 = DateTime.utc(2026, 9, 27, 8);
   late Database db;
-  late TransactionRepository store;
+  late AppStore store;
   late LedgerController c;
   var inbox = <RawSms>[];
 
@@ -49,7 +49,7 @@ void main() {
   setUp(() async {
     now = DateTime.utc(2026, 9, 28, 10);
     db = await openAppDatabase(path: inMemoryDatabasePath, singleInstance: false);
-    store = TransactionRepository(db);
+    store = AppStore(db);
     await db.insert('wallets', {
       'id': 'm1',
       'owner_name': 'مهدی',

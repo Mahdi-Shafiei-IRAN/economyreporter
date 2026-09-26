@@ -230,7 +230,7 @@ void main() {
           clock: () => now,
           senders: SenderOps(
             candidates: () async => allowedNow.isEmpty
-                ? const [SenderCandidate(address: 'Bank Mellat', bankId: 'mellat', inboxCount: 1, stored: [])]
+                ? const [SenderCandidate(address: 'Bank Mellat', bankId: 'mellat', inboxCount: 1)]
                 : const [],
             allow: (address, bankId) async =>
                 allowedNow = [AllowedSender(id: 's1', address: address, bankId: bankId)],

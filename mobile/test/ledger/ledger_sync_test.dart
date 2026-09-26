@@ -8,7 +8,7 @@ import 'package:economy/core/ledger/ledger_repository.dart';
 import 'package:economy/core/ledger/ledger_sync.dart';
 import 'package:economy/core/ledger/models.dart';
 import 'package:economy/core/ledger/sms_intake.dart';
-import 'package:economy/core/sync/remote_transaction_api.dart';
+import 'package:economy/core/sync/remote_sync_api.dart';
 import 'package:economy/features/senders/data/allowed_sender.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';

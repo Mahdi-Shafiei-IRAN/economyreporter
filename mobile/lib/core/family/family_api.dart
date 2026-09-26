@@ -1,6 +1,6 @@
 /// اعضای خانواده (کاربران سرور) و پروفایل کاربر جاری.
 ///
-/// شناسه‌ی کاربر جاری لازم است تا معلوم شود کدام تراکنش‌ها «مال من» است
+/// شناسه‌ی کاربر جاری لازم است تا معلوم شود کدام حساب‌ها «مال من» است
 /// (قابل ویرایش) و کدام مال عضو دیگر (فقط دیدنی).
 library;
 
@@ -8,8 +8,8 @@ import 'dart:convert';
 
 import 'package:dio/dio.dart';
 
-import '../../features/transactions/data/transaction_repository.dart';
 import '../auth/auth_repository.dart';
+import '../store/app_store.dart';
 
 class FamilyMember {
   final String id;
@@ -126,7 +126,7 @@ enum ProfileStatus {
 /// پروفایل و اعضا را از سرور می‌گیرد و در تنظیمات محلی نگه می‌دارد (برای آفلاین).
 class ProfileService {
   final FamilyApi api;
-  final TransactionStore store;
+  final AppStore store;
 
   ProfileService(this.api, this.store);
 
@@ -153,11 +153,6 @@ class ProfileService {
       // نقش بعداً دوباره گرفته می‌شود
     }
     if (role != null) await store.setSetting(SettingKeys.myRole, role);
-    final effectiveRole = role ?? await store.getSetting(SettingKeys.myRole);
-    // عضوِ عادی نباید جزئیاتِ بقیه را داشته باشد؛ داده‌ی سروریِ غیرِخودم پاک شود.
-    if (effectiveRole == 'member' && me.id.isNotEmpty) {
-      await store.purgeRemoteNotOwnedBy(me.id);
-    }
 
     final previous = await store.getSetting(SettingKeys.meUserId);
     if (previous != null && previous != me.id) {
@@ -175,7 +170,6 @@ class ProfileService {
       await store.setSetting(
           SettingKeys.familyMembers, FamilyMember.encodeList(members));
     }
-    if (previous != me.id) await store.reattributeLocal();
     return ProfileStatus.ok;
   }
 }

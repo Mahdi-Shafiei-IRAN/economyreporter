@@ -1,9 +1,10 @@
-/// کلاینت endpoint همگام‌سازی سرور. اینترفیس تزریق‌پذیر تا در تست fake شود.
+/// کلاینتِ همگام‌سازیِ کیف‌ها (حساب‌ها) و بودجه‌ها با سرور؛ دفترِ نسخه‌ی ۲ در `core/ledger/ledger_sync.dart`.
+/// اینترفیسِ تزریق‌پذیر تا در تست fake شود.
 library;
 
 import 'package:dio/dio.dart';
 
-/// یک صفحه از تغییرات خانواده که از سرور دریافت می‌شود.
+/// یک صفحه از تغییراتِ خانواده که از سرور دریافت می‌شود (کیف، بودجه و دفتر).
 class PullPage {
   final List<Map<String, dynamic>> results;
 
@@ -16,18 +17,7 @@ class PullPage {
   static const empty = PullPage(results: []);
 }
 
-abstract class RemoteTransactionApi {
-  /// یک دسته تراکنش را می‌فرستد و لیست نتیجه‌ی هر آیتم را (به همان ترتیب)
-  /// برمی‌گرداند: `{id, status}` که status یکی از
-  /// created/updated/already_exists/forbidden/error است.
-  Future<List<Map<String, dynamic>>> syncBatch({
-    required String deviceId,
-    required List<Map<String, dynamic>> transactions,
-  });
-
-  /// تغییرات تراکنش‌های خانواده بعد از [since] (همه‌ی اعضا).
-  Future<PullPage> pull({String? since, int limit = 500});
-
+abstract class RemoteSyncApi {
   /// آپلود دسته‌ای کیف‌ها (کارت/حساب)؛ upsert با شناسه‌ی گوشی. نتیجه‌ی هر آیتم به همان
   /// ترتیب: `{id, status}` (created/updated/conflict/error)؛ سرورِ قدیمی خودِ کیف را.
   Future<List<Map<String, dynamic>>> syncWallets({required List<Map<String, dynamic>> wallets});
@@ -42,10 +32,10 @@ abstract class RemoteTransactionApi {
   Future<PullPage> pullBudgets({String? since});
 }
 
-class DioRemoteTransactionApi implements RemoteTransactionApi {
+class DioRemoteSyncApi implements RemoteSyncApi {
   final Dio dio;
 
-  DioRemoteTransactionApi(this.dio);
+  DioRemoteSyncApi(this.dio);
 
   /// همگام‌سازی ممکن است دسته‌ی بزرگ باشد و سرور کند؛ ۱۰ ثانیه‌ی پیش‌فرض کم است.
   static final _slow = Options(
@@ -56,32 +46,6 @@ class DioRemoteTransactionApi implements RemoteTransactionApi {
   static List<Map<String, dynamic>> _results(Object? data) => data is Map && data['results'] is List
       ? [for (final e in data['results'] as List) if (e is Map) Map<String, dynamic>.from(e)]
       : const [];
-
-  @override
-  Future<List<Map<String, dynamic>>> syncBatch({
-    required String deviceId,
-    required List<Map<String, dynamic>> transactions,
-  }) async {
-    final resp = await dio.post(
-      '/sync/transactions/',
-      data: {'device_id': deviceId, 'transactions': transactions},
-      options: _slow,
-    );
-    final results = (resp.data['results'] as List)
-        .map((e) => Map<String, dynamic>.from(e as Map))
-        .toList();
-    return results;
-  }
-
-  @override
-  Future<PullPage> pull({String? since, int limit = 500}) async {
-    final resp = await dio.get(
-      '/sync/transactions/',
-      queryParameters: {if (since != null) 'since': since, 'limit': limit},
-      options: _slow,
-    );
-    return _pageFrom(resp.data);
-  }
 
   @override
   Future<List<Map<String, dynamic>>> syncWallets(

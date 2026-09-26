@@ -132,12 +132,10 @@ Future<LedgerController> _controller(WidgetTester tester) async {
                 address: '+98300089',
                 bankId: 'tejarat',
                 inboxCount: 23,
-                stored: [],
                 sample: 'بانک تجارت\nبرداشت از حساب 1234567\nمبلغ 2,500,000 ریال\nمانده 18,300,000'),
             const SenderCandidate(
                 address: 'Digikala',
                 inboxCount: 4,
-                stored: [],
                 sample: 'خرید شما به مبلغ 1,290,000 ریال ثبت شد. کد تخفیف: DK20'),
           ],
           allow: (_, __) async {},

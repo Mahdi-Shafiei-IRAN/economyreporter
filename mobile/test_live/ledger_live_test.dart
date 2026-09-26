@@ -15,7 +15,8 @@ import 'package:economy/core/ledger/ledger_sync.dart';
 import 'package:economy/core/ledger/models.dart';
 import 'package:economy/core/ledger/sms_intake.dart';
 import 'package:economy/core/network/api_client.dart';
-import 'package:economy/core/sync/remote_transaction_api.dart';
+import 'package:economy/core/store/app_store.dart';
+import 'package:economy/core/sync/remote_sync_api.dart';
 import 'package:economy/core/sync/sync_service.dart';
 import 'package:economy/features/senders/data/allowed_sender.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -27,9 +28,9 @@ import '../test/helpers/in_memory_token_store.dart';
 class _Phone {
   final LedgerRepository ledger;
   final LedgerSyncService ledgerSync;
-  final SyncService v1Sync; // کیف‌ها (حساب‌ها) و بودجه
+  final SyncService walletSync; // کیف‌ها (حساب‌ها) و بودجه
 
-  _Phone(this.ledger, this.ledgerSync, this.v1Sync);
+  _Phone(this.ledger, this.ledgerSync, this.walletSync);
 
   static Future<_Phone> login(String base, String deviceId) async {
     final tokens = InMemoryTokenStore();
@@ -40,12 +41,12 @@ class _Phone {
     return _Phone(
       ledger,
       LedgerSyncService(ledger, DioLedgerRemote(api.dio)),
-      SyncService(db: db, api: DioRemoteTransactionApi(api.dio), deviceId: deviceId),
+      SyncService(store: AppStore(db), api: DioRemoteSyncApi(api.dio)),
     );
   }
 
   Future<void> syncAll() async {
-    await v1Sync.sync(force: true);
+    expect((await walletSync.sync()).failure, isNull);
     final r = await ledgerSync.sync();
     expect(r.error, isNull);
     expect(r.failed, 0);
@@ -89,9 +90,11 @@ void main() {
     expect(await a.ledger.unsyncedCount(), 0);
 
     // «حذف و نصبِ دوباره»: گوشیِ تازه با همان کاربر.
+    // مثلِ main.dart: گوشیِ تازه خودش نسخه‌ی ۲ را روشن و تاریخِ این ماه را می‌گذارد؛ سرور زودتری را نگه می‌دارد.
     final b = await _Phone.login(base, 'live-B-${now.millisecondsSinceEpoch}');
+    await b.ledger.setEnabled(true);
+    await b.ledger.ensureStartDate();
     await b.syncAll();
-    expect(await b.ledger.isEnabled(), isTrue);
     expect(await b.ledger.isSetupDone(), isTrue);
     expect(await b.ledger.startDate(), await a.ledger.startDate());
 
@@ -115,8 +118,5 @@ void main() {
 
     // چیزی برای ارسالِ دوباره روی گوشیِ تازه نمانده.
     expect(await b.ledger.unsyncedCount(), 0);
-    // cleanup: خاموش کردن تا اجرای بعدی از صفر شروع شود.
-    await b.ledger.setEnabled(false);
-    await b.ledgerSync.sync();
   });
 }

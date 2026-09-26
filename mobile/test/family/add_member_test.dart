@@ -1,11 +1,13 @@
 import 'package:dio/dio.dart';
 import 'package:economy/core/auth/auth_repository.dart';
+import 'package:economy/core/database/app_database.dart';
 import 'package:economy/core/family/family_api.dart';
+import 'package:economy/core/store/app_store.dart';
 import 'package:economy/features/family/add_member_screen.dart';
-import 'package:economy/features/transactions/data/transaction_repository.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
-import '../helpers/fake_transaction_store.dart';
+import '../helpers/db_test_helper.dart';
 
 class _FakeFamilyApi implements FamilyApi {
   List<FamilyMember> _members;
@@ -42,8 +44,19 @@ class _FakeFamilyApi implements FamilyApi {
 }
 
 void main() {
+  late Database db;
+  late AppStore store;
+
+  setUpAll(initSqfliteFfiForTests);
+
+  setUp(() async {
+    db = await openAppDatabase(path: inMemoryDatabasePath, singleInstance: false);
+    store = AppStore(db);
+  });
+
+  tearDown(() => db.close());
+
   test('adding a member refreshes the stored member list', () async {
-    final store = FakeTransactionStore();
     final api = _FakeFamilyApi();
     final err = await addFamilyMember(api, store, phone: '09120000002', password: 'pass12', fullName: 'مامان');
     expect(err, isNull);
@@ -56,13 +69,13 @@ void main() {
     final api = _FakeFamilyApi(failStatus: 400, failBody: {
       'phone': ['کاربری با این شماره از قبل هست.']
     });
-    expect(await addFamilyMember(api, FakeTransactionStore(), phone: '09120000002', password: 'pass12'),
+    expect(await addFamilyMember(api, store, phone: '09120000002', password: 'pass12'),
         'کاربری با این شماره از قبل هست.');
   });
 
   test('forbidden (not the manager)', () async {
     final api = _FakeFamilyApi(failStatus: 403);
-    expect(await addFamilyMember(api, FakeTransactionStore(), phone: '09120000002', password: 'pass12'),
+    expect(await addFamilyMember(api, store, phone: '09120000002', password: 'pass12'),
         'فقط مدیرِ خانواده می‌تواند عضو اضافه کند');
   });
 }

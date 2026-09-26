@@ -4,12 +4,12 @@ library;
 import 'dart:convert';
 
 import '../../core/sms/raw_sms.dart';
+import '../../core/store/app_store.dart';
 import '../senders/data/sender_candidates.dart';
-import '../transactions/data/transaction_repository.dart';
 import 'ledger_controller.dart';
 
 SenderOps ledgerSenderOps(
-  TransactionRepository repo, {
+  AppStore repo, {
   required Future<List<RawSms>> Function() readInbox,
   required Future<({String? meName, String? meUserId})> Function() me,
 }) {
@@ -33,7 +33,6 @@ SenderOps ledgerSenderOps(
       }
       return findSenderCandidates(
         inbox: inbox,
-        stored: const [],
         allowed: await repo.allowedSenders(),
         dismissed: await dismissed(),
       );

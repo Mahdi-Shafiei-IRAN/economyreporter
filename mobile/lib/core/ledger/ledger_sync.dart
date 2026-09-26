@@ -6,7 +6,7 @@ import 'dart:convert';
 
 import 'package:dio/dio.dart';
 
-import '../sync/remote_transaction_api.dart' show PullPage;
+import '../sync/remote_sync_api.dart' show PullPage;
 import 'ledger_repository.dart';
 import 'models.dart';
 

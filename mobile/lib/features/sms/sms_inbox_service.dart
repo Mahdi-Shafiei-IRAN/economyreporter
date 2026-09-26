@@ -9,9 +9,9 @@ import '../../core/database/app_database.dart';
 import '../../core/ledger/ledger_repository.dart';
 import '../../core/ledger/sms_intake.dart';
 import '../../core/sms/raw_sms.dart';
+import '../../core/store/app_store.dart';
 import '../ledger/ledger_notifications.dart';
 import '../notifications/notification_service.dart';
-import '../transactions/data/transaction_repository.dart';
 
 IncomingSms toIncomingSms(RawSms raw) => IncomingSms(
     sender: raw.sender, body: raw.body, receivedAt: (raw.receivedAt ?? DateTime.now()).toUtc());
@@ -61,7 +61,7 @@ RawSms _toRaw(SmsMessage m) => RawSms(
 Future<void> backgroundSmsHandler(SmsMessage message) async {
   final db = await openAppDatabase(singleInstance: false);
   try {
-    final repo = TransactionRepository(db);
+    final repo = AppStore(db);
     final ledger = LedgerRepository(db,
         deviceId: await repo.getSetting(SettingKeys.deviceId) ?? 'unknown');
     await ledgerIntakeAndNotify(ledger, toIncomingSms(_toRaw(message)),

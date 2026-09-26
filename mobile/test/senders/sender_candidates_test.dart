@@ -14,7 +14,6 @@ void main() {
   test('فرستنده‌ی مبلغ‌دار به‌عنوان پیشنهاد می‌آید', () {
     final list = findSenderCandidates(
       inbox: [sms('BankMellat', bankBody)],
-      stored: const [],
       allowed: const [],
     );
     expect(list.map((c) => c.address), contains('BankMellat'));
@@ -23,7 +22,6 @@ void main() {
   test('فرستنده‌ی «بانک نیست» (dismissed) دیگر پیشنهاد نمی‌شود', () {
     final list = findSenderCandidates(
       inbox: [sms('98404014014201', bankBody)],
-      stored: const [],
       allowed: const [],
       dismissed: const ['98404014014201'],
     );
@@ -33,7 +31,6 @@ void main() {
   test('dismissed با شکل‌های مختلف شماره هم می‌گیرد', () {
     final list = findSenderCandidates(
       inbox: [sms('+989120000510', bankBody)],
-      stored: const [],
       allowed: const [],
       dismissed: const ['09120000510'],
     );
