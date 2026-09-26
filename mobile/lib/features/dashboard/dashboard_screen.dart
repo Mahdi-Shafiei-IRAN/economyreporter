@@ -66,6 +66,9 @@ class DashboardScreen extends StatefulWidget {
   /// باز کردن خلاصه‌ی خانواده از سرور (نیازمند شبکه).
   final VoidCallback? onOpenFamilyDashboard;
 
+  /// بالای زبانه‌ی تنظیمات (کلیدِ نسخه‌ی ۲).
+  final Widget? settingsHeader;
+
   const DashboardScreen({
     super.key,
     required this.controller,
@@ -73,6 +76,7 @@ class DashboardScreen extends StatefulWidget {
     this.onSync,
     this.onCheckUpdate,
     this.onOpenFamilyDashboard,
+    this.settingsHeader,
   });
 
   @override
@@ -111,6 +115,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 onCheckUpdate: widget.onCheckUpdate,
                 onLogout: widget.onLogout,
                 onOpenFamilyDashboard: widget.onOpenFamilyDashboard,
+                header: widget.settingsHeader,
               ),
             ],
           ),

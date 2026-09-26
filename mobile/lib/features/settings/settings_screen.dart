@@ -45,6 +45,9 @@ class SettingsScreen extends StatefulWidget {
   final VoidCallback? onLogout;
   final VoidCallback? onOpenFamilyDashboard;
 
+  /// بالای فهرست (کلیدِ نسخه‌ی ۲).
+  final Widget? header;
+
   const SettingsScreen({
     super.key,
     required this.controller,
@@ -52,6 +55,7 @@ class SettingsScreen extends StatefulWidget {
     this.onCheckUpdate,
     this.onLogout,
     this.onOpenFamilyDashboard,
+    this.header,
   });
 
   @override
@@ -133,6 +137,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           return ListView(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
             children: [
+              if (widget.header != null) widget.header!,
               _Group(title: 'حساب', children: [
                 ListTile(
                   leading: const Icon(Icons.person_outline_rounded),

@@ -9,6 +9,7 @@ import 'core/dashboard/remote_dashboard_api.dart';
 import 'core/database/app_database.dart';
 import 'core/family/family_api.dart';
 import 'core/family/health_api.dart';
+import 'core/ledger/ledger_repository.dart';
 import 'core/network/api_client.dart';
 import 'core/sms/sms_importer.dart';
 import 'core/sync/remote_transaction_api.dart';
@@ -23,8 +24,14 @@ import 'features/categories/categorize_screen.dart';
 import 'features/dashboard/dashboard_controller.dart';
 import 'features/dashboard/dashboard_screen.dart';
 import 'features/family/family_dashboard_screen.dart';
+import 'features/ledger/ledger_controller.dart';
+import 'features/ledger/ledger_home_screen.dart';
+import 'features/ledger/ledger_notifications.dart';
+import 'features/ledger/ledger_v2_toggle.dart';
+import 'features/ledger/pending_screen.dart';
 import 'features/notifications/notification_service.dart';
 import 'features/senders/senders_screen.dart';
+import 'features/settings/settings_screen.dart';
 import 'features/sms/sms_inbox_service.dart';
 import 'features/transactions/data/transaction_repository.dart';
 
@@ -69,6 +76,7 @@ class _Services {
   final RemoteDashboardApi dashboardApi;
   final SmsInboxService smsInbox;
   final UpdateService updater;
+  final LedgerController ledger;
 
   const _Services({
     required this.auth,
@@ -78,6 +86,7 @@ class _Services {
     required this.dashboardApi,
     required this.smsInbox,
     required this.updater,
+    required this.ledger,
   });
 
   /// پروفایل/اعضا از سرور → ارسال و دریافت تراکنش‌ها → تازه‌سازی صفحه.
@@ -142,6 +151,14 @@ class _BootstrapState extends State<_Bootstrap> {
     // هر ویرایش محلی (دسته‌بندی، حذف، کارت) بی‌درنگ برای بقیه‌ی اعضا فرستاده شود.
     dashboard.onLocalChange = () => sync.sync().ignore();
 
+    // نسخه‌ی ۲ (پشتِ پرچم): دفترِ حساب با تأییدِ کاربر.
+    final ledger = LedgerController(
+      LedgerRepository(db, deviceId: deviceId),
+      allowedSenders: repo.allowedSenders,
+      people: () =>
+          (meName: dashboard.meName, meUserId: dashboard.meUserId, members: dashboard.members),
+    );
+
     final smsInbox = SmsInboxService(
       importer: SmsImporter(repo, deviceId: deviceId),
       onChanged: () {
@@ -149,11 +166,20 @@ class _BootstrapState extends State<_Bootstrap> {
         sync.sync().ignore(); // ارسال خودکار به سرور خانواده
       },
       onTransactionCaptured: (tx) {
-        if (tx.promptCategorize) {
+        if (tx.promptCategorize && !ledger.enabled) {
           NotificationService.showTransaction(tx.id, tx.amountRial);
         }
       },
+      onLiveSms: (raw) async {
+        if (!ledger.enabled) return;
+        for (final item in await ledger.intake([toIncomingSms(raw)])) {
+          await NotificationService.showLedgerSms(item, ledger.account(item.suggestion.accountId));
+        }
+      },
     );
+    ledger.readInbox =
+        () async => [for (final raw in await smsInbox.readInbox()) toIncomingSms(raw)];
+    await ledger.load();
 
     // پیشنهاد فرستنده‌های بانک از صندوق گوشی؛ و بعد از مجاز کردن یک فرستنده،
     // خواندن دوباره‌ی صندوق تا پیامک‌های قبلیِ همان فرستنده هم ثبت شوند.
@@ -173,6 +199,7 @@ class _BootstrapState extends State<_Bootstrap> {
       dashboardApi: DioRemoteDashboardApi(api.dio),
       smsInbox: smsInbox,
       updater: UpdateService(AppConfig.updatesBaseUrl),
+      ledger: ledger,
     );
   }
 
@@ -235,6 +262,12 @@ class _RootState extends State<_Root> with WidgetsBindingObserver {
     if (state != AppLifecycleState.resumed) return;
     final s = widget.services;
     s.dashboard.load();
+    // پیامک‌ها و دکمه‌های نوتیفیکیشن که در پس‌زمینه ثبت شده‌اند.
+    if (s.ledger.enabled) {
+      s.ledger.syncInbox().catchError((_) => 0).ignore();
+    } else {
+      s.ledger.load().ignore();
+    }
     if (s.auth.authenticated) {
       s.refreshFromServer().ignore();
       s.dashboard.reportHealthIfDue().ignore();
@@ -259,7 +292,7 @@ class _RootState extends State<_Root> with WidgetsBindingObserver {
     s.refreshFromServer().ignore();
 
     try {
-      await NotificationService.init(onTap: _openCategorize);
+      await NotificationService.init(onTap: _onNotificationTap, onAction: _onNotificationAction);
 
       final granted = await s.smsInbox.requestPermission();
       if (granted) {
@@ -272,6 +305,13 @@ class _RootState extends State<_Root> with WidgetsBindingObserver {
         }
         await s.smsInbox.importInbox();
         await s.dashboard.load();
+        if (s.ledger.enabled) {
+          try {
+            await s.ledger.syncInbox();
+          } catch (_) {
+            // از صفحه‌ی اصلیِ نسخه‌ی ۲ با کشیدن به پایین دوباره خوانده می‌شود.
+          }
+        }
         s.smsInbox.startListener();
       }
       // وضعیتِ برنامه روی این گوشی برای مدیرِ خانواده (هر ۶ ساعت؛ بی‌صدا اگر آفلاین).
@@ -280,7 +320,7 @@ class _RootState extends State<_Root> with WidgetsBindingObserver {
 
       final launchPayload = await NotificationService.launchPayload();
       if (launchPayload != null) {
-        _openCategorize(launchPayload);
+        _onNotificationTap(launchPayload);
       } else if (granted && s.dashboard.needsSenderSetup) {
         // بعد از نصب/ورود: اگر هیچ فرستنده‌ای مجاز نشده، صفحه‌ی انتخاب فرستنده‌ها را
         // خودکار باز کن تا کاربر از روی پیامک‌هایش انتخاب و صاحب تعیین کند.
@@ -433,6 +473,42 @@ class _RootState extends State<_Root> with WidgetsBindingObserver {
     return 'به‌روزترین نسخه را داری (نسخه‌ی فعلی: $currentName).';
   }
 
+  /// لمسِ نوتیفیکیشن: پیامکِ نسخه‌ی ۲ → منتظرِ تأیید؛ تراکنشِ نسخه‌ی ۱ → دسته‌بندی.
+  void _onNotificationTap(String payload) {
+    if (ledgerKeyOf(payload) == null) {
+      _openCategorize(payload);
+      return;
+    }
+    final ledger = widget.services.ledger;
+    ledger.load().whenComplete(() => navigatorKey.currentState?.push(
+        MaterialPageRoute(builder: (_) => PendingScreen(controller: ledger))));
+  }
+
+  /// دکمه‌ی «ثبت» / «تراکنش نیست» روی نوتیفیکیشن وقتی اپ باز است.
+  void _onNotificationAction(String actionId, String payload) {
+    final key = ledgerKeyOf(payload);
+    if (key != null) {
+      widget.services.ledger.applyNotificationAction(actionId, key).ignore();
+    }
+  }
+
+  void _openLedgerSettings(BuildContext context) {
+    final s = widget.services;
+    Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => SettingsScreen(
+        controller: s.dashboard,
+        onSync: () async => (await s.refreshFromServer(force: true)).message,
+        onCheckUpdate: _manualCheckUpdate,
+        onLogout: () {
+          Navigator.of(context).popUntil((r) => r.isFirst);
+          _setupDone = false;
+          s.auth.logout();
+        },
+        header: LedgerV2Toggle(controller: s.ledger),
+      ),
+    ));
+  }
+
   /// باز کردن صفحه‌ی دسته‌بندی برای تراکنشِ نوتیفیکیشن.
   Future<void> _openCategorize(String txId) async {
     final record = await widget.services.dashboard.transactionById(txId);
@@ -451,10 +527,17 @@ class _RootState extends State<_Root> with WidgetsBindingObserver {
   Widget build(BuildContext context) {
     final services = widget.services;
     return AnimatedBuilder(
-      animation: services.auth,
+      animation: Listenable.merge([services.auth, services.ledger]),
       builder: (context, _) {
+        if (services.auth.authenticated && services.ledger.enabled) {
+          return LedgerHomeScreen(
+            controller: services.ledger,
+            onOpenSettings: () => _openLedgerSettings(context),
+          );
+        }
         if (services.auth.authenticated) {
           return DashboardScreen(
+            settingsHeader: LedgerV2Toggle(controller: services.ledger),
             controller: services.dashboard,
             onLogout: () {
               _setupDone = false;

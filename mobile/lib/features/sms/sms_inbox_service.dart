@@ -10,9 +10,15 @@ library;
 import 'package:another_telephony/telephony.dart';
 
 import '../../core/database/app_database.dart';
+import '../../core/ledger/ledger_repository.dart';
+import '../../core/ledger/sms_intake.dart';
 import '../../core/sms/sms_importer.dart';
+import '../ledger/ledger_notifications.dart';
 import '../notifications/notification_service.dart';
 import '../transactions/data/transaction_repository.dart';
+
+IncomingSms toIncomingSms(RawSms raw) => IncomingSms(
+    sender: raw.sender, body: raw.body, receivedAt: (raw.receivedAt ?? DateTime.now()).toUtc());
 
 class SmsInboxService {
   final Telephony _telephony = Telephony.instance;
@@ -24,10 +30,14 @@ class SmsInboxService {
   /// وقتی یک تراکنشِ جدید (زنده) گرفته شد — برای نوتیفیکیشن.
   final void Function(ImportedTx)? onTransactionCaptured;
 
+  /// هر پیامکِ زنده (برای دفترِ نسخه‌ی ۲).
+  final Future<void> Function(RawSms)? onLiveSms;
+
   SmsInboxService({
     required this.importer,
     this.onChanged,
     this.onTransactionCaptured,
+    this.onLiveSms,
   });
 
   /// درخواست مجوز خواندن/دریافت پیامک.
@@ -61,11 +71,13 @@ class SmsInboxService {
   void startListener() {
     _telephony.listenIncomingSms(
       onNewMessage: (SmsMessage message) async {
-        final imported = await importer.importOne(_toRaw(message));
+        final raw = _toRaw(message);
+        final imported = await importer.importOne(raw);
         if (imported != null) {
           onChanged?.call();
           onTransactionCaptured?.call(imported);
         }
+        await onLiveSms?.call(raw);
       },
       onBackgroundMessage: backgroundSmsHandler,
       listenInBackground: true,
@@ -83,14 +95,22 @@ RawSms _toRaw(SmsMessage m) => RawSms(
 
 /// هندلر پس‌زمینه (ایزوله‌ی جدا). باید top-level و vm:entry-point باشد.
 /// در پس‌زمینه DB را با اتصال جداگانه باز می‌کند (تا بستنش اتصال اپ را نبندد)
-/// و تراکنش را همان لحظه ذخیره می‌کند.
+/// و تراکنش را همان لحظه ذخیره می‌کند. با نسخه‌ی ۲ روشن: پیامکِ منتظر + نوتیفیکیشنِ دکمه‌دار
+/// (و نوتیفیکیشنِ دسته‌بندیِ نسخه‌ی ۱ نه).
 @pragma('vm:entry-point')
 Future<void> backgroundSmsHandler(SmsMessage message) async {
   final db = await openAppDatabase(singleInstance: false);
   try {
-    final importer = SmsImporter(TransactionRepository(db));
-    final imported = await importer.importOne(_toRaw(message));
-    if (imported != null && imported.promptCategorize) {
+    final repo = TransactionRepository(db);
+    final raw = _toRaw(message);
+    final imported = await SmsImporter(repo).importOne(raw);
+    final ledger = LedgerRepository(db,
+        deviceId: await repo.getSetting(SettingKeys.deviceId) ?? 'unknown');
+    if (await ledger.isEnabled()) {
+      await ledgerIntakeAndNotify(ledger, toIncomingSms(raw),
+          allowed: await repo.allowedSenders(),
+          notify: NotificationService.showLedgerFromBackground);
+    } else if (imported != null && imported.promptCategorize) {
       await NotificationService.showFromBackground(
           imported.id, imported.amountRial);
     }
