@@ -27,14 +27,17 @@ String monthTitle(DateTime at) {
 class MonthReportScreen extends StatefulWidget {
   final LedgerController controller;
 
-  const MonthReportScreen({super.key, required this.controller});
+  /// ماهی که اول نشان داده می‌شود (پیش‌فرض: ماهِ جاری).
+  final DateTime? initialMonth;
+
+  const MonthReportScreen({super.key, required this.controller, this.initialMonth});
 
   @override
   State<MonthReportScreen> createState() => _MonthReportScreenState();
 }
 
 class _MonthReportScreenState extends State<MonthReportScreen> {
-  late DateTime _month = widget.controller.now;
+  late DateTime _month = widget.initialMonth ?? widget.controller.now;
 
   /// کلِ خانواده (فقط مدیر که حساب‌های بقیه را دارد).
   bool _family = false;
@@ -90,13 +93,13 @@ class _MonthReportScreenState extends State<MonthReportScreen> {
               IconButton(
                 key: kReportPrevKey,
                 tooltip: 'ماهِ قبل',
-                icon: const Icon(Icons.chevron_right_rounded),
+                icon: const Icon(Icons.chevron_left_rounded),
                 onPressed: () => _shift(-1),
               ),
               IconButton(
                 key: kReportNextKey,
                 tooltip: 'ماهِ بعد',
-                icon: const Icon(Icons.chevron_left_rounded),
+                icon: const Icon(Icons.chevron_right_rounded),
                 onPressed: isCurrent ? null : () => _shift(1),
               ),
             ],

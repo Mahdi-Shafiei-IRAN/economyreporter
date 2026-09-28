@@ -28,39 +28,39 @@ DeviceHealthReport ledgerHealthReport(LedgerController c, {String? appVersion}) 
   if (c.banks.isEmpty) {
     issues.add(const HealthIssue(HealthLevel.bad, 'no_senders',
         'هیچ بانکی انتخاب نشده؛ هیچ پیامکی خوانده نمی‌شود.',
-        hint: 'تنظیمات / بانک‌ها'));
+        hint: 'تنظیمات / بانک‌ها و کارت‌ها'));
   }
   final oldPending = c.pendingActive.where((i) => now.difference(i.receivedAt) > const Duration(days: 3)).length;
   if (oldPending > 0) {
     issues.add(HealthIssue(HealthLevel.warn, 'pending_old',
         '${_fa(oldPending)} پیامک بیش از ۳ روز منتظرِ تأیید مانده.',
-        hint: 'خانه / کارتِ «قدمِ بعدی»'));
+        hint: 'خانه / تراشه‌ی «پیامکِ منتظر»'));
   }
   if (c.accountCandidates.isNotEmpty) {
     issues.add(HealthIssue(HealthLevel.warn, 'accounts_found',
         '${_fa(c.accountCandidates.length)} حساب در پیامک‌ها پیدا شده که هنوز تأیید نشده.',
-        hint: 'خانه / کارتِ «قدمِ بعدی»'));
+        hint: 'خانه / تراشه‌ی «حسابِ تازه»'));
   }
   final noAnchor = c.activeAccounts.where((a) => a.needsAnchor).length;
   if (noAnchor > 0) {
     issues.add(HealthIssue(HealthLevel.warn, 'no_anchor',
         '${_fa(noAnchor)} حساب هنوز «موجودیِ الان» ندارد؛ موجودی‌اش نامعلوم است.',
-        hint: 'خانه / کارتِ حساب'));
+        hint: 'خانه / تراشه‌ی «حسابِ بی‌موجودی»'));
   }
   final withWindows = c.activeAccounts.where((a) => a.discrepancyCount > 0).toList();
   if (withWindows.isNotEmpty) {
     final n = withWindows.fold<int>(0, (s, a) => s + a.discrepancyCount);
     issues.add(HealthIssue(HealthLevel.warn, 'chain',
         '${_fa(n)} جا در ${_fa(withWindows.length)} حساب با مانده‌ی بانک نمی‌خواند.',
-        hint: 'خانه / لمسِ همان حساب'));
+        hint: 'خانه / تراشه‌ی «اختلاف با بانک»'));
   }
   if (c.lastSyncError != null) {
     issues.add(HealthIssue(HealthLevel.warn, 'sync_failed', 'آخرین همگام‌سازی نشد: ${c.lastSyncError}.',
-        hint: 'تنظیمات / پشتیبان روی سرور'));
+        hint: 'تنظیمات / بیشتر / پشتیبان روی سرور'));
   } else if (c.lastSyncAt == null || now.difference(c.lastSyncAt!) > const Duration(days: 2)) {
     issues.add(const HealthIssue(HealthLevel.warn, 'sync_stale',
         'بیش از ۲ روز است با سرور همگام نشده (اینترنت یا باز نشدنِ برنامه).',
-        hint: 'تنظیمات / پشتیبان روی سرور'));
+        hint: 'تنظیمات / بیشتر / پشتیبان روی سرور'));
   }
 
   // بانک‌ها: پیامک‌های رسیده از تاریخِ شروع، ثبت‌شده و منتظر.

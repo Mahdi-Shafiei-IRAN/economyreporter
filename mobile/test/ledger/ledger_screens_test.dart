@@ -102,22 +102,25 @@ void main() {
   List<SmsItem> oldestFirst(LedgerController c) =>
       [...c.pending]..sort((a, b) => a.receivedAt.compareTo(b.receivedAt));
 
-  testWidgets('home: next step goes from "balance now" to pending SMS', (tester) async {
+  testWidgets('home: task chips go from "balance now" to pending SMS', (tester) async {
     final c = await setup(tester);
     await tester.pumpWidget(app(LedgerHomeScreen(controller: c, autoSetup: false)));
-    expect(find.text('قدمِ بعدی: موجودیِ الانِ ۱ حساب'), findsOneWidget);
+    expect(find.text('۱ حسابِ بی‌موجودی'), findsOneWidget);
+    expect(find.text('۲ پیامکِ منتظرِ تأیید'), findsOneWidget);
 
+    await tester.tap(find.byKey(kHomeAnchorChipKey));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(ledgerSetBalanceKey('m1')));
     await tester.pumpAndSettle();
     expect(find.text('۱۲۰٬۰۰۰'), findsOneWidget); // ۱٬۲۰۰٬۰۰۰ ریال
     await act(tester, c, () => tester.tap(find.byKey(kBalanceSaveKey)));
-
     expect(c.accounts.single.balance!.balanceRial, 1200000);
-    expect(find.text('۱۲۰٬۰۰۰ تومان'), findsWidgets);
-    expect(find.byKey(ledgerSetBalanceKey('m1')), findsNothing);
-    expect(find.text('قدمِ بعدی: ۲ پیامکِ منتظرِ تأیید'), findsOneWidget);
+    await tester.pageBack();
+    await tester.pumpAndSettle();
 
-    await tester.tap(find.byKey(kLedgerNextStepKey));
+    expect(find.byKey(kHomeAnchorChipKey), findsNothing);
+    expect(find.textContaining('موجودیِ الانِ این کارت‌ها: ۱۲۰٬۰۰۰ تومان'), findsOneWidget);
+    await tester.tap(find.byKey(kHomePendingChipKey));
     await tester.pumpAndSettle();
     expect(find.byType(PendingScreen), findsOneWidget);
   });
@@ -270,19 +273,34 @@ void main() {
     expect(find.byType(PendingScreen), findsOneWidget);
   });
 
-  testWidgets('v2 settings show only v2 things (no old review/diagnostics tools)', (tester) async {
+  testWidgets('settings: 4 rows + logout; guide lives under "more"', (tester) async {
     final c = await setup(tester);
     await tester.pumpWidget(app(LedgerSettingsScreen(controller: c, onLogout: () {})));
-    expect(find.byKey(kLedgerSettingsGuideKey), findsOneWidget);
-    expect(find.byKey(kLedgerSettingsBanksKey), findsOneWidget);
+    for (final k in [kLedgerSettingsBanksKey, kLedgerSettingsFamilyKey, kLedgerSettingsMoreKey,
+      kLedgerSettingsLogoutKey]) {
+      expect(find.byKey(k), findsOneWidget);
+    }
+    expect(find.text('ظاهر'), findsOneWidget);
+    expect(find.byKey(kLedgerSettingsGuideKey), findsNothing);
     expect(find.byType(SwitchListTile), findsNothing); // کلیدِ برگشت به نسخه‌ی ۱ حذف شد
-    for (final old in ['بازبینی پیامک‌های مبهم', 'عیب‌یابی موجودی و پیامک‌ها', 'کارت‌ها و حساب‌ها',
-      'منتظر دسته‌بندی', 'همگام‌سازی الان']) {
+    for (final old in ['بازبینی پیامک‌های مبهم', 'عیب‌یابی موجودی و پیامک‌ها', 'منتظر دسته‌بندی']) {
       expect(find.text(old), findsNothing, reason: old);
     }
+
+    await tester.tap(find.byKey(kLedgerSettingsMoreKey));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(kLedgerSettingsGuideKey));
     await tester.pumpAndSettle();
     expect(find.byType(LedgerGuideScreen), findsOneWidget);
-  });
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    await tester.pageBack();
+    await tester.pumpAndSettle();
 
+    await tester.tap(find.byKey(kLedgerSettingsBanksKey));
+    await tester.pumpAndSettle();
+    expect(find.byType(LedgerCardsSettingsScreen), findsOneWidget);
+    expect(find.byKey(ledgerAccountCardKey('m1')), findsOneWidget);
+    expect(find.byKey(kLedgerNewAccountKey), findsOneWidget);
+  });
 }

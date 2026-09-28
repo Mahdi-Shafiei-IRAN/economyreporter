@@ -8,6 +8,7 @@ import 'package:flutter/foundation.dart' hide Category;
 
 import '../../core/family/family_api.dart';
 import '../../core/ledger/account_candidates.dart';
+import '../../core/ledger/dashboard.dart';
 import '../../core/ledger/ledger_math.dart';
 import '../../core/ledger/ledger_repository.dart';
 import '../../core/ledger/models.dart';
@@ -84,7 +85,7 @@ class SenderOps {
   });
 }
 
-/// کارتِ «قدمِ بعدی» بالای خانه (طرح ۱۲.۵)؛ همیشه یکی، به همین ترتیب.
+/// قدمِ بعدیِ راهنمای سه‌قدمی (طرح ۱۲.۵)؛ همیشه یکی، به همین ترتیب. خانه همه‌ی کارها را تراشه‌ای نشان می‌دهد (۱۲.۹).
 enum NextStep { chooseBanks, confirmAccounts, setBalances, reviewPending, allGood }
 
 class LedgerController extends ChangeNotifier {
@@ -556,6 +557,27 @@ class LedgerController extends ChangeNotifier {
       });
 
   Future<List<String>> suggestedCategoryIds(SmsItem item) => repo.v1CategoryIdsFor(item);
+
+  /// صفحه‌ی اصلی (طرح ۱۲.۹): ماهی که [anyTimeInMonth] در آن است، کارت‌های من و بقیه‌ی خانواده (بی‌کنارگذاشته‌ها).
+  Dashboard dashboard(DateTime anyTimeInMonth, {String? personKey, String? accountId}) {
+    final (from, to) = jalaliMonthRange(anyTimeInMonth);
+    return buildDashboard(
+      accounts: [for (final v in [...activeAccounts, ...familyAccounts]) v.account],
+      ledgers: _ledgers,
+      isMine: isMine,
+      from: from,
+      to: to,
+      personKey: personKey,
+      accountId: accountId,
+      meName: who.meName,
+    );
+  }
+
+  /// اولین ماهی که صفحه‌ی اصلی نشان می‌دهد: ماهِ تاریخِ شروع.
+  DateTime get firstMonth => jalaliMonthRange(startDate ?? now).$1;
+
+  /// جاهایی از حساب‌های خودم که با مانده‌ی بانک نمی‌خواند.
+  int get windowCount => activeAccounts.fold(0, (s, v) => s + v.discrepancyCount);
 
   /// گزارشِ ماهی که [anyTimeInMonth] در آن است؛ حساب‌های خودم، یا با [family] کلِ خانواده.
   MonthReport monthReport(DateTime anyTimeInMonth, {bool family = false}) {

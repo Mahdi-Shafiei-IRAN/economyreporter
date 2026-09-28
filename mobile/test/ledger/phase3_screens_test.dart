@@ -3,6 +3,7 @@ library;
 
 import 'package:economy/core/database/app_database.dart';
 import 'package:economy/core/format/money_format.dart';
+import 'package:economy/core/ledger/dashboard.dart';
 import 'package:economy/core/ledger/ledger_repository.dart';
 import 'package:economy/core/ledger/models.dart';
 import 'package:economy/core/ledger/sms_intake.dart';
@@ -259,11 +260,12 @@ void main() {
     });
     await tester.pumpWidget(app(LedgerHomeScreen(controller: c, autoSetup: false)));
     await tester.pumpAndSettle();
-    expect(find.byKey(kLedgerFamilySectionKey), findsOneWidget);
-    expect(find.text('جمعِ همه ${formatToman(1400000)}'), findsOneWidget); // ۹۰ + ۵۰ هزار تومان
-    expect(find.textContaining('سامان'), findsWidgets);
+    expect(find.byKey(homePersonChipKey(kMePersonKey)), findsOneWidget); // حسابِ همین گوشی، بی‌شناسه
+    expect(find.byKey(homePersonChipKey('u2')), findsOneWidget);
+    expect(find.byKey(homePersonSectionKey('u2')), findsOneWidget);
+    expect(find.textContaining('موجودیِ الانِ این کارت‌ها: ${formatToman(1400000)}'), findsOneWidget); // ۹۰ + ۵۰
 
-    await tester.tap(find.textContaining('سامان').first);
+    await tester.tap(find.byKey(homeCardDetailsKey('z1')));
     await tester.pumpAndSettle();
     expect(find.byType(AccountDetailsScreen), findsOneWidget);
     expect(find.text('حسابِ زهرا؛ فقط دیدنی.'), findsOneWidget);

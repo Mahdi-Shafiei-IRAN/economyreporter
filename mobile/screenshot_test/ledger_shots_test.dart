@@ -96,17 +96,45 @@ Future<LedgerController> _controller(WidgetTester tester) async {
   late LedgerController c;
   await tester.runAsync(() async {
     final db = await openAppDatabase(path: inMemoryDatabasePath, singleInstance: false);
-    for (final (id, owner, label, bank, ref) in const [
-      ('m1', 'مهدی', 'ملت حقوق', 'mellat', '1000000009'),
-      ('p1', 'زهرا', 'پاسارگاد', 'pasargad', '777.888.10000001.1'),
+    for (final (id, owner, user, label, bank, ref) in const [
+      ('m1', 'مهدی', 'u1', 'ملت حقوق', 'mellat', '1000000009'),
+      ('p1', 'مهدی', 'u1', 'پاسارگاد', 'pasargad', '777.888.10000001.1'),
+      ('z1', 'زهرا', 'u2', 'سامان', 'saman', null),
     ]) {
       await db.insert('wallets', {
         'id': id,
         'owner_name': owner,
+        'owner_user_id': user,
         'label': label,
         'bank_id': bank,
         'account_ref': ref,
+        'card_last4': id == 'z1' ? '4411' : null,
         'created_at': _now.toIso8601String(),
+      });
+    }
+    // دفترِ زهرا از سرور (مدیر می‌بیند).
+    final repo = LedgerRepository(db, deviceId: 'dev', clock: () => _now);
+    await repo.applyRemoteCheckpoint({
+      'id': 'zc1',
+      'account_id': 'z1',
+      'balance_rial': 42000000,
+      'at': '2026-09-22T21:00:00Z',
+      'client_updated_at': '2026-09-22T21:00:00Z',
+    });
+    for (final (id, kind, amount, at, note) in const [
+      ('ze1', 'expense', 8600000, '2026-09-23T15:20:00Z', 'میوه‌فروشی'),
+      ('ze2', 'income', 15000000, '2026-09-24T06:00:00Z', 'واریزِ حقوق'),
+      ('ze3', 'expense', 2300000, '2026-09-25T05:40:00Z', 'داروخانه'),
+    ]) {
+      await repo.applyRemoteEntry({
+        'id': id,
+        'account_id': 'z1',
+        'kind': kind,
+        'amount_rial': amount,
+        'occurred_at': at,
+        'source': 'manual',
+        'note': note,
+        'client_updated_at': at,
       });
     }
     final inbox = [
@@ -121,7 +149,7 @@ Future<LedgerController> _controller(WidgetTester tester) async {
       _sms('Bank Mellat', 'رمز پویا: 482913\nمبلغ 1,000,000 ریال\nاعتبار 120 ثانیه',
           DateTime.utc(2026, 9, 25, 8)),
     ];
-    c = LedgerController(LedgerRepository(db, deviceId: 'dev', clock: () => _now),
+    c = LedgerController(repo,
         allowedSenders: () async => _allowed,
         readInbox: () async => inbox,
         clock: () => _now,
@@ -180,6 +208,30 @@ void main() {
     await _shot(tester, 'v2_01_home_light');
   });
 
+  testWidgets('ledger home: a card open', (tester) async {
+    _phone(tester);
+    await tester.pumpWidget(_app(LedgerHomeScreen(
+        controller: await _controller(tester), onOpenSettings: () {}, autoSetup: false)));
+    await tester.tap(find.byKey(homeCardRowKey('m1')));
+    await _shot(tester, 'v2_01b_home_card_open');
+  });
+
+  testWidgets('ledger home: day by day', (tester) async {
+    _phone(tester);
+    await tester.pumpWidget(_app(LedgerHomeScreen(
+        controller: await _controller(tester), onOpenSettings: () {}, autoSetup: false)));
+    await tester.tap(find.text('روز به روز'));
+    await _shot(tester, 'v2_01c_home_by_day');
+  });
+
+  testWidgets('ledger home: one member', (tester) async {
+    _phone(tester);
+    await tester.pumpWidget(_app(LedgerHomeScreen(
+        controller: await _controller(tester), onOpenSettings: () {}, autoSetup: false)));
+    await tester.tap(find.byKey(homePersonChipKey('u2')));
+    await _shot(tester, 'v2_01d_home_member');
+  });
+
   testWidgets('ledger home dark', (tester) async {
     _phone(tester);
     await tester.pumpWidget(_app(
@@ -207,6 +259,12 @@ void main() {
     await tester.pumpWidget(_app(LedgerSettingsScreen(
         controller: await _controller(tester), onCheckUpdate: () async => '', onLogout: () {})));
     await _shot(tester, 'v2_09_settings');
+  });
+
+  testWidgets('settings: banks and cards', (tester) async {
+    _phone(tester);
+    await tester.pumpWidget(_app(LedgerCardsSettingsScreen(controller: await _controller(tester))));
+    await _shot(tester, 'v2_09b_settings_cards');
   });
 
   testWidgets('account details with a window', (tester) async {
