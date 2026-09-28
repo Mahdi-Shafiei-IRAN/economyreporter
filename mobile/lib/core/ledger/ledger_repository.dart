@@ -557,18 +557,19 @@ class LedgerRepository {
           r['category_id']! as String,
       ];
 
-  /// دسته‌هایی که نسخه‌ی ۱ به همین پیامک داده بود (پیش‌پرِ برگه‌ی ثبت؛ طرح ۹.۳).
+  /// دسته‌هایی که نسخه‌ی ۱ به همین پیامک داده بود (پیش‌پرِ برگه‌ی ثبت؛ طرح ۹.۳). جدول‌های نسخه‌ی ۱ در
+  /// مهاجرتِ ۱۴ پاک شدند؛ فقط همین نگاشت (`legacy_sms_categories`) مانده.
   Future<List<String>> v1CategoryIdsFor(SmsItem item) async {
     final body = item.body;
     if (body == null) return const [];
-    // همان اثرانگشتِ محتوای نسخه‌ی ۱ (`sms_content_hash` در transactions).
+    // همان اثرانگشتِ محتوای نسخه‌ی ۱ (`sms_content_hash`).
     final hash = sha256
         .convert(utf8.encode('${item.sender.trim()}|${normalizeForParsing(body)}'))
         .toString();
     final rows = await db.rawQuery('''
-      SELECT DISTINCT tc.category_id AS c FROM transaction_categories tc
-      JOIN transactions t ON t.id = tc.transaction_id
-      WHERE t.sms_content_hash = ? AND t.deleted_at IS NULL
+      SELECT l.category_id AS c FROM legacy_sms_categories l
+      JOIN categories c ON c.id = l.category_id
+      WHERE l.content_hash = ?
     ''', [hash]);
     return [for (final r in rows) r['c']! as String];
   }

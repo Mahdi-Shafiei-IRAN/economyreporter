@@ -59,21 +59,13 @@ void main() {
     expect(await repo.ensureStartDate(fromServer: DateTime.utc(2020)), start);
   });
 
-  test('scenario 8: migrating v10 → v11 creates empty ledger tables, v1 data untouched', () async {
+  test('scenario 8: migrating from v10 creates empty ledger tables and no entries', () async {
     for (final t in ['sms_items', 'ledger_entries', 'ledger_checkpoints']) {
       await db.execute('DROP TABLE $t');
     }
-    await db.insert('transactions', {
-      'id': 'old',
-      'kind': 'expense',
-      'amount_rial': 5,
-      'created_at': now.toIso8601String(),
-      'updated_at': now.toIso8601String(),
-    });
-    await migrateSchema(db, 10, 11);
+    await migrateSchema(db, 10, kDbVersion);
     expect(await repo.entries(), isEmpty);
     expect(await repo.smsItems(), isEmpty);
-    expect((await db.query('transactions')).single['id'], 'old');
     expect((await repo.accounts()).single.archived, isFalse);
   });
 
@@ -272,16 +264,9 @@ void main() {
       final v1Hash = sha256
           .convert(utf8.encode('${item.sender.trim()}|${normalizeForParsing(item.body!)}'))
           .toString();
-      await db.insert('transactions', {
-        'id': 'v1tx',
-        'kind': 'expense',
-        'amount_rial': 100000,
-        'sms_content_hash': v1Hash,
-        'created_at': now.toIso8601String(),
-        'updated_at': now.toIso8601String(),
-      });
-      await db.insert('transaction_categories',
-          {'id': 'tc', 'transaction_id': 'v1tx', 'category_id': ids['نان'], 'amount_rial': 100000});
+      // نگاشتی که مهاجرتِ ۱۴ از جدول‌های نسخه‌ی ۱ نگه داشت (test/db/migration_test.dart).
+      await db.insert('legacy_sms_categories', {'content_hash': v1Hash, 'category_id': ids['نان']});
+      await db.insert('legacy_sms_categories', {'content_hash': 'other', 'category_id': ids['میوه']});
       expect(await repo.v1CategoryIdsFor(item), [ids['نان']]);
     });
 

@@ -198,21 +198,4 @@ void main() {
     expect((await sync.sync()).failure, isNull);
     expect((await walletRow(a.id))!['sync_status'], 'synced');
   });
-
-  test('v1 transactions are no longer sent or pulled', () async {
-    await db.insert('transactions', {
-      'id': 'old-v1',
-      'kind': 'expense',
-      'amount_rial': 1000,
-      'source': 'sms',
-      'created_at': now.toIso8601String(),
-      'updated_at': now.toIso8601String(),
-      'sync_status': 'pending',
-    });
-    await db.insert('outbox', {'transaction_id': 'old-v1', 'payload': '{}', 'status': 'pending', 'retry_count': 0});
-    final r = await sync.sync();
-    expect(r.failure, isNull);
-    expect(remote.sentWallets, isEmpty);
-    expect(remote.sentBudgets, isEmpty);
-  });
 }

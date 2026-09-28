@@ -1,8 +1,7 @@
 /// چیزهای غیرِدفتریِ گوشی (جای مخزنِ تراکنش‌های نسخه‌ی ۱؛ طرح ۱۲.۸): تنظیمات، فرستنده‌های پیامکِ
 /// بانک، و همگام‌سازیِ کیف‌ها (حساب‌ها) و بودجه‌ها. دفترِ نسخه‌ی ۲ در `core/ledger/` است.
 ///
-/// جدول‌های نسخه‌ی ۱ (`transactions`، `outbox`، …) یک نسخه فقط‌خواندنی روی گوشی می‌مانند (پیش‌پرِ دسته‌ها
-/// در برگه‌ی ثبت)؛ دیگر نوشته یا به سرور فرستاده نمی‌شوند.
+/// جدول‌های نسخه‌ی ۱ در مهاجرتِ ۱۴ پاک شدند (`core/database/app_database.dart`).
 library;
 
 import 'package:sqflite/sqflite.dart';
@@ -27,15 +26,9 @@ class SettingKeys {
   /// JSON: فرستنده‌هایی که کاربر «بانک نیست» زده تا دیگر پیشنهاد نشوند.
   static const dismissedSenders = 'dismissed_senders';
 
-  /// JSON وضعیتِ آخرین همگام‌سازیِ کیف‌ها و بودجه.
-  static const lastSync = 'last_sync';
-
   /// cursorِ دریافتِ کیف‌ها و بودجه‌ها از سرور.
   static const walletCursor = 'wallet_cursor';
   static const budgetCursor = 'budget_cursor';
-
-  /// cursorِ دریافتِ تراکنش‌های نسخه‌ی ۱ (دیگر خوانده نمی‌شود؛ با عوض شدنِ کاربر پاک می‌شود).
-  static const pullCursor = 'pull_cursor';
 }
 
 class AppStore {
@@ -199,12 +192,8 @@ class AppStore {
           whereArgs: keep,
         );
       }
-      await txn.delete('settings', where: 'key IN (?, ?, ?, ?)', whereArgs: [
-        SettingKeys.pullCursor,
-        SettingKeys.walletCursor,
-        SettingKeys.budgetCursor,
-        SettingKeys.lastSync,
-      ]);
+      await txn.delete('settings',
+          where: 'key IN (?, ?)', whereArgs: [SettingKeys.walletCursor, SettingKeys.budgetCursor]);
     });
   }
 

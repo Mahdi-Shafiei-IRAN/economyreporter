@@ -11,7 +11,7 @@ import 'package:uuid/uuid.dart';
 import '../ledger/ledger_schema.dart';
 
 const String kDbName = 'economy.db';
-const int kDbVersion = 13;
+const int kDbVersion = 14;
 
 /// دسته‌های پیش‌فرض (قابل ویرایش توسط کاربر بعداً).
 const List<String> kDefaultCategories = [
@@ -120,6 +120,62 @@ Future<void> migrateSchema(Database db, int oldVersion, int newVersion) async {
     // نسخه ۱۳: تصمیم‌های پیامکِ دریافتی از سرور (همگام‌سازیِ نسخه‌ی ۲).
     await createLedgerTables(db);
   }
+  if (oldVersion < 14) {
+    // نسخه ۱۴ (طرح ۹.۴ و ۱۲.۸): جدول‌های نسخه‌ی ۱ (با متنِ خامِ پیامک‌ها) پاک می‌شوند؛ فقط «دسته‌های هر
+    // پیامک» (اثرانگشتِ محتوا ← دسته) برای پیش‌پرِ برگه‌ی ثبت می‌ماند (۹.۳).
+    await _dropV1Tables(db);
+  }
+}
+
+/// تنظیم‌های نسخه‌ی ۱ که دیگر خوانده نمی‌شوند.
+const List<String> kV1SettingKeys = [
+  'categorize_from',
+  'pull_cursor',
+  'last_sync',
+  'dismissed_gaps',
+  'dismissed_dups',
+  'dismissed_transfers',
+  'show_sms_text',
+  'account_aliases',
+  'kept_transactions',
+  'repair_result',
+  'auto_removed',
+  'user_deleted',
+  'health_reported',
+  'inbox_watermark',
+  'parser_version',
+];
+
+Future<bool> _hasTable(Database db, String table) async => (await db.rawQuery(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", [table]))
+    .isNotEmpty;
+
+/// اثرانگشتِ محتوای پیامک (فرستنده + متنِ پاک‌شده، بی‌زمان) ← دسته‌ای که در نسخه‌ی ۱ خورده بود.
+Future<void> _createLegacyCategoriesTable(Database db) => db.execute('''
+      CREATE TABLE IF NOT EXISTS legacy_sms_categories (
+        content_hash TEXT NOT NULL,
+        category_id TEXT NOT NULL,
+        PRIMARY KEY (content_hash, category_id)
+      )
+    ''');
+
+Future<void> _dropV1Tables(Database db) async {
+  await _createLegacyCategoriesTable(db);
+  if (await _hasTable(db, 'transactions') && await _hasTable(db, 'transaction_categories')) {
+    await db.execute('''
+      INSERT OR IGNORE INTO legacy_sms_categories (content_hash, category_id)
+      SELECT DISTINCT t.sms_content_hash, tc.category_id
+      FROM transaction_categories tc JOIN transactions t ON t.id = tc.transaction_id
+      WHERE t.sms_content_hash IS NOT NULL AND t.deleted_at IS NULL
+    ''');
+  }
+  for (final t in const ['transaction_categories', 'outbox', 'transactions']) {
+    await db.execute('DROP TABLE IF EXISTS $t');
+  }
+  if (await _hasTable(db, 'settings')) {
+    await db.delete('settings',
+        where: 'key IN (${List.filled(kV1SettingKeys.length, '?').join(',')})', whereArgs: kV1SettingKeys);
+  }
 }
 
 /// بودجه‌ها: سقفِ خرجِ هر دسته (بر اساسِ نامِ دسته) + ستون‌های هم‌گام‌سازی.
@@ -148,11 +204,13 @@ Future<void> _addWalletSyncColumns(Database db) async {
   await _ensureColumn(db, 'wallets', 'sync_status', "TEXT NOT NULL DEFAULT 'pending'");
 }
 
-/// اگر ستون نبود، اضافه‌اش می‌کند (تا ALTER تکراری خطا ندهد).
+/// اگر ستون نبود، اضافه‌اش می‌کند (تا ALTER تکراری خطا ندهد). جدولی که نیست (مثلاً جدول‌های نسخه‌ی ۱ بعد از
+/// نسخه‌ی ۱۴) نادیده گرفته می‌شود.
 Future<void> _ensureColumn(Database db, String table, String col, String type) async {
   final cols = (await db.rawQuery('PRAGMA table_info($table)'))
       .map((r) => r['name'] as String)
       .toSet();
+  if (cols.isEmpty) return;
   if (!cols.contains(col)) {
     await db.execute('ALTER TABLE $table ADD COLUMN $col $type');
   }
@@ -198,72 +256,19 @@ const List<String> _v5TransactionColumns = [
   "origin TEXT NOT NULL DEFAULT 'local'",
 ];
 
-/// ساخت جداول نسخه‌ی فعلی.
+/// ساخت جداول نسخه‌ی فعلی (نصبِ تازه). جدول‌های نسخه‌ی ۱ دیگر ساخته نمی‌شوند.
 Future<void> createSchema(Database db) async {
-  await db.execute('''
-    CREATE TABLE transactions (
-      id TEXT PRIMARY KEY,
-      bank_id TEXT,
-      kind TEXT NOT NULL,
-      amount_rial INTEGER,
-      balance_after_rial INTEGER,
-      raw_amount TEXT,
-      raw_unit TEXT NOT NULL DEFAULT 'rial',
-      card_last4 TEXT,
-      account_ref TEXT,
-      counterparty TEXT,
-      description TEXT,
-      transaction_date TEXT,
-      client_created_at TEXT,
-      source TEXT NOT NULL DEFAULT 'sms',
-      source_message_hash TEXT,
-      device_id TEXT,
-      needs_review INTEGER NOT NULL DEFAULT 0,
-      sync_status TEXT NOT NULL DEFAULT 'pending',
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL,
-      ${_v5TransactionColumns.join(',\n      ')}
-    )
-  ''');
-
-  await db.execute(
-    'CREATE INDEX idx_tx_date ON transactions(transaction_date)',
-  );
-  await db.execute('CREATE INDEX idx_tx_kind ON transactions(kind)');
-  await db.execute('CREATE INDEX idx_tx_sync ON transactions(sync_status)');
-
-  // ضدتکرارِ پیامک در سطح دیتابیس (ایندکس یکتای جزئی؛ رکوردهای دستی hash ندارند).
-  await db.execute('''
-    CREATE UNIQUE INDEX idx_tx_source_hash
-    ON transactions(source_message_hash)
-    WHERE source_message_hash IS NOT NULL
-  ''');
-  await _createV5Indexes(db);
-
-  // صف خروجی همگام‌سازی: هر ردیف یعنی «این تراکنش باید به سرور برود».
-  await db.execute('''
-    CREATE TABLE outbox (
-      transaction_id TEXT PRIMARY KEY,
-      payload TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'pending',
-      retry_count INTEGER NOT NULL DEFAULT 0,
-      last_attempt_at TEXT,
-      next_retry_at TEXT,
-      last_error TEXT
-    )
-  ''');
-
-  await _createCategoryTables(db);
+  await _createCategoriesTable(db);
   await _seedCategories(db);
   await _createWalletsTable(db);
   await db.execute('ALTER TABLE wallets ADD COLUMN owner_user_id TEXT');
   await _addWalletSyncColumns(db);
+  await _ensureColumn(db, 'wallets', 'archived', 'INTEGER NOT NULL DEFAULT 0');
   await _createBudgetsTable(db);
-  await _ensureColumn(db, 'transactions', 'pinned_wallet_id', 'TEXT');
   await _createSettingsTable(db);
   await _createAllowedSendersTable(db);
-  await _ensureColumn(db, 'wallets', 'archived', 'INTEGER NOT NULL DEFAULT 0');
   await createLedgerTables(db);
+  await _createLegacyCategoriesTable(db);
 }
 
 Future<void> _createV5Indexes(Database db) async {
@@ -312,16 +317,19 @@ Future<void> _createWalletsTable(Database db) async {
   ''');
 }
 
-/// جدول‌های دسته‌بندی: دسته‌ها + تخصیص مبلغ هر تراکنش به چند دسته.
+/// دسته‌ها (نسخه‌ی ۲ هم همین را دارد؛ تخصیصِ تراکنش‌هایش در `ledger_entry_categories`).
+Future<void> _createCategoriesTable(Database db) => db.execute('''
+      CREATE TABLE categories (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL UNIQUE,
+        is_system INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL
+      )
+    ''');
+
+/// مهاجرتِ ۳ (نسخه‌ی ۱): دسته‌ها + تخصیص مبلغ هر تراکنش به چند دسته.
 Future<void> _createCategoryTables(Database db) async {
-  await db.execute('''
-    CREATE TABLE categories (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL UNIQUE,
-      is_system INTEGER NOT NULL DEFAULT 0,
-      created_at TEXT NOT NULL
-    )
-  ''');
+  await _createCategoriesTable(db);
   await db.execute('''
     CREATE TABLE transaction_categories (
       id TEXT PRIMARY KEY,
