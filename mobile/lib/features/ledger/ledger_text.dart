@@ -33,6 +33,13 @@ String? notTxText(String? reason) => switch (reason) {
 
 String accountTitle(LedgerAccount a) => a.label.isEmpty ? a.ownerName : a.label;
 
+/// عنوانِ کوتاهِ کارت با ۴ رقمِ آخر: «ملت ۵۵۹۶».
+String accountShortLabel(LedgerAccount a) {
+  final ref = a.accountRef;
+  final number = a.cardLast4 ?? (ref == null || ref.length < 4 ? ref : ref.substring(ref.length - 4));
+  return [accountTitle(a), if (number != null) toPersianDigits(number)].join(' ');
+}
+
 /// «مهدی • بانک ملت • حساب ۱۰۰۰۰۰۵۵۹۶»
 String accountSubtitle(LedgerAccount a) => [
       a.ownerName,

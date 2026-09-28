@@ -77,11 +77,38 @@ class SenderOps {
   final Future<void> Function(String address) dismiss;
   final Future<void> Function(String id) remove;
 
+  /// همه‌ی فرستنده‌های صندوق (برای «افزودنِ دستی»).
+  final Future<List<InboxSender>> Function()? inboxSenders;
+
   const SenderOps({
     required this.candidates,
     required this.allow,
     required this.dismiss,
     required this.remove,
+    this.inboxSenders,
+  });
+}
+
+/// پیامک‌های یک فرستنده از تاریخِ شروع.
+class SenderStatus {
+  final int total;
+  final int accepted;
+  final int pending;
+  final int rejected;
+
+  /// پیامکِ منتظرِ تراکنش‌مانند که حسابش معلوم نیست (← «حسابِ تازه»).
+  final int unknownAccount;
+
+  /// کارت‌هایی که پیامک‌های این فرستنده به آن‌ها ثبت یا پیشنهاد شده.
+  final List<LedgerAccount> accounts;
+
+  const SenderStatus({
+    required this.total,
+    required this.accepted,
+    required this.pending,
+    required this.rejected,
+    required this.unknownAccount,
+    required this.accounts,
   });
 }
 
@@ -152,6 +179,7 @@ class LedgerController extends ChangeNotifier {
   int monthIncome = 0;
   int monthExpense = 0;
   Map<String, LedgerAccount> _byId = const {};
+  Map<String, String> _entryAccount = const {};
   List<AllowedSender> _allowed = const [];
 
   final Set<Future<Object?>> _inflight = {};
@@ -257,11 +285,14 @@ class LedgerController extends ChangeNotifier {
     budgets = await repo.budgets();
     final ctx = SuggestionContext.build(accs, entries, cps);
     _ledgers = ctx.ledgers;
+    _entryAccount = {for (final e in entries) e.id: e.accountId};
     accounts = [for (final a in accs) _view(a, ctx.ledgerOf(a.id))];
     accountCandidates = findAccountCandidates(
         pending: pending, accounts: [for (final a in accs) if (isMine(a)) a], parse: _parse);
     final (from, to) = jalaliMonthRange(now);
-    final totals = periodTotals(entries, from, to);
+    // فقط کارت‌های خودم که هستند (تراکنشِ کارتِ حذف‌شده یا مالِ بقیه شمرده نمی‌شود).
+    final mine = {for (final v in activeAccounts) v.account.id};
+    final totals = periodTotals([for (final e in entries) if (mine.contains(e.accountId)) e], from, to);
     monthIncome = totals.income;
     monthExpense = totals.expense;
     unsyncedCount = await repo.unsyncedCount();
@@ -461,6 +492,51 @@ class LedgerController extends ChangeNotifier {
         await _afterLedgerChange();
       });
 
+  /// «حذفِ کارت»: کارت با تراکنش‌ها و نقطه‌هایش (فقط کارتِ خودم). تعدادِ تراکنش‌های حذف‌شده.
+  Future<int> deleteAccount(String accountId) => _track(() async {
+        _requireMine(accountId);
+        final n = await repo.deleteAccount(accountId);
+        await _afterLedgerChange();
+        return n;
+      });
+
+  /// تعدادِ تراکنش‌های یک کارت (برای پرسیدن پیش از حذف).
+  int entryCountOf(String accountId) => ledgerOf(accountId).whereType<EntryItem>().length;
+
+  /// وضعیتِ پیامک‌های یک فرستنده از تاریخِ شروع (برای «فرستنده‌های پیامکِ بانک»).
+  SenderStatus senderStatus(AllowedSender sender) {
+    var total = 0, accepted = 0, pendingN = 0, rejected = 0, unknown = 0;
+    final accountIds = <String>{};
+    for (final i in _items) {
+      if (!sender.matches(i.sender)) continue;
+      total++;
+      switch (i.status) {
+        case SmsStatus.accepted:
+          accepted++;
+          final acc = _entryAccount[i.entryId];
+          if (acc != null) accountIds.add(acc);
+        case SmsStatus.pending:
+          pendingN++;
+          final acc = i.suggestion.accountId;
+          if (acc != null) {
+            accountIds.add(acc);
+          } else if (i.suggestion.looksLikeTx) {
+            unknown++;
+          }
+        case SmsStatus.rejected:
+          rejected++;
+      }
+    }
+    return SenderStatus(
+      total: total,
+      accepted: accepted,
+      pending: pendingN,
+      rejected: rejected,
+      unknownAccount: unknown,
+      accounts: [for (final id in accountIds) if (_byId[id] != null) _byId[id]!],
+    );
+  }
+
   Future<void> setArchived(String accountId, bool archived) => _track(() async {
         _requireMine(accountId);
         await repo.setArchived(accountId, archived);
@@ -570,6 +646,12 @@ class LedgerController extends ChangeNotifier {
       personKey: personKey,
       accountId: accountId,
       meName: who.meName,
+      members: isManager
+          ? [
+              for (final m in who.members)
+                if (m.id != who.meUserId) (key: m.id, name: m.name),
+            ]
+          : const [],
     );
   }
 
@@ -645,6 +727,8 @@ class LedgerController extends ChangeNotifier {
 
   Future<List<SenderCandidate>> senderCandidates() async =>
       await senders?.candidates() ?? const [];
+
+  Future<List<InboxSender>> inboxSenders() async => await senders?.inboxSenders?.call() ?? const [];
 
   /// «بانک است»: فرستنده مجاز می‌شود و پیامک‌هایش (از تاریخِ شروع) منتظرِ تأیید می‌آیند.
   Future<void> allowSender(String address, String? bankId) => _track(() async {

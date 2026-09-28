@@ -9,12 +9,14 @@ import '../../core/format/money_format.dart';
 import '../../core/ledger/ledger_math.dart';
 import '../../core/ledger/models.dart';
 import '../../core/ledger/suggestion.dart';
+import 'account_card.dart';
 import 'account_form.dart';
 import 'entry_sheet.dart';
 import 'ledger_controller.dart';
 import 'ledger_text.dart';
 
 const kDetailsReconcileKey = Key('details-reconcile');
+const kDetailsDeleteKey = Key('details-delete');
 Key windowCardKey(int i) => Key('window-$i');
 Key windowAcceptSmsKey(String smsKey) => Key('window-accept-$smsKey');
 Key windowFlipKey(String entryId) => Key('window-flip-$entryId');
@@ -69,7 +71,19 @@ class AccountDetailsScreen extends StatelessWidget {
         }
         final balance = v.balance;
         return Scaffold(
-          appBar: AppBar(title: Text(accountTitle(v.account))),
+          appBar: AppBar(title: Text(accountTitle(v.account)), actions: [
+            if (!readOnly)
+              IconButton(
+                key: kDetailsDeleteKey,
+                tooltip: 'حذفِ کارت و تراکنش‌هایش',
+                icon: const Icon(Icons.delete_outline_rounded),
+                onPressed: () async {
+                  if (await confirmDeleteAccount(context, controller, v.account) && context.mounted) {
+                    Navigator.of(context).pop();
+                  }
+                },
+              ),
+          ]),
           body: ListView(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
             children: [

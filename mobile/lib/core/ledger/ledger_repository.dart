@@ -387,6 +387,31 @@ class LedgerRepository {
         whereArgs: [accountId]);
   }
 
+  /// «حذفِ کارت» (طرح ۱۲.۱۰): کارت، تراکنش‌ها و نقطه‌های موجودی‌اش با هم حذف می‌شوند (نرم، تا به سرور و
+  /// گوشی‌های دیگر هم برسد). پیامک‌هایی که به این تراکنش‌ها ثبت شده بودند «رد» می‌شوند، مثلِ حذفِ یک تراکنش.
+  /// تعدادِ تراکنش‌های حذف‌شده.
+  Future<int> deleteAccount(String accountId) async {
+    final now = _now().toIso8601String();
+    final live = [for (final e in await entries(accountId: accountId)) if (!e.isDeleted) e];
+    await db.transaction((txn) async {
+      await txn.update(
+          'wallets',
+          {'is_deleted': 1, 'updated_at': now, 'client_updated_at': now, 'sync_status': 'pending'},
+          where: 'id = ?',
+          whereArgs: [accountId]);
+      for (final e in live) {
+        await txn.update(
+            'ledger_entries', {'deleted_at': now, 'updated_at': now, 'sync_status': 'pending'},
+            where: 'id = ?', whereArgs: [e.id]);
+        if (e.smsKey != null) await _markRejected(txn, e.smsKey!, RejectReason.other);
+      }
+      await txn.update(
+          'ledger_checkpoints', {'deleted_at': now, 'updated_at': now, 'sync_status': 'pending'},
+          where: 'account_id = ? AND deleted_at IS NULL', whereArgs: [accountId]);
+    });
+    return live.length;
+  }
+
   Future<List<Entry>> entries({String? accountId}) async {
     final rows = await db.query('ledger_entries',
         where: accountId == null ? 'deleted_at IS NULL' : 'deleted_at IS NULL AND account_id = ?',

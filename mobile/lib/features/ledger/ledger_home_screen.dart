@@ -28,8 +28,8 @@ const kHomeMonthPrevKey = Key('home-month-prev');
 const kHomeMonthNextKey = Key('home-month-next');
 const kHomeMonthTitleKey = Key('home-month-title');
 const kHomeNetKey = Key('home-net');
+const kHomeBalanceKey = Key('home-balance');
 const kHomePersonAllKey = Key('home-person-all');
-const kHomeCardAllKey = Key('home-card-all');
 const kHomeViewKey = Key('home-view');
 const kHomeBanksChipKey = Key('home-chip-banks');
 const kHomeCandidatesChipKey = Key('home-chip-candidates');
@@ -37,7 +37,6 @@ const kHomeAnchorChipKey = Key('home-chip-anchor');
 const kHomePendingChipKey = Key('home-chip-pending');
 const kHomeWindowsChipKey = Key('home-chip-windows');
 Key homePersonChipKey(String key) => Key('home-person-$key');
-Key homeCardChipKey(String id) => Key('home-card-$id');
 Key homePersonSectionKey(String key) => Key('home-section-$key');
 Key homeCardRowKey(String id) => Key('home-card-row-$id');
 Key homeCardDetailsKey(String id) => Key('home-card-details-$id');
@@ -61,14 +60,7 @@ String _totals(int income, int expense) => [
       if (income > 0) 'درآمد ${_short(income)}',
     ].join(' • ');
 
-/// عنوانِ کارتِ کوچک (تراشه): «ملت ۵۵۹۶».
-String _cardChipLabel(LedgerAccount a) {
-  final number = a.cardLast4 ??
-      (a.accountRef == null || a.accountRef!.length < 4
-          ? a.accountRef
-          : a.accountRef!.substring(a.accountRef!.length - 4));
-  return [accountTitle(a), if (number != null) toPersianDigits(number)].join(' ');
-}
+String _cardChipLabel(LedgerAccount a) => accountShortLabel(a);
 
 class LedgerHomeScreen extends StatefulWidget {
   final LedgerController controller;
@@ -94,7 +86,6 @@ class _LedgerHomeScreenState extends State<LedgerHomeScreen> {
 
   late DateTime _month = _c.now;
   String? _person;
-  String? _card;
   bool _byDay = false;
   final Set<String> _collapsedPeople = {};
   final Set<String> _openCards = {};
@@ -153,10 +144,9 @@ class _LedgerHomeScreenState extends State<LedgerHomeScreen> {
       body: AnimatedBuilder(
         animation: _c,
         builder: (context, _) {
-          final d = _c.dashboard(_month, personKey: _person, accountId: _card);
-          // عضو یا کارتی که دیگر نیست (مثلاً کنار گذاشته شد) = همه.
-          final person = d.people.any((p) => p.key == _person) ? _person : null;
-          final card = d.cardChoices.any((a) => a.id == _card) ? _card : null;
+          final d = _c.dashboard(_month, personKey: _person);
+          // عضوی که دیگر نیست = همه.
+          final person = d.people.where((p) => p.key == _person).firstOrNull;
           return RefreshIndicator(
             onRefresh: _c.syncInbox,
             child: ListView(
@@ -173,50 +163,20 @@ class _LedgerHomeScreenState extends State<LedgerHomeScreen> {
                       key: kHomePersonAllKey,
                       label: const Text('همه'),
                       selected: person == null,
-                      onSelected: (_) => setState(() {
-                        _person = null;
-                        _card = null;
-                      }),
+                      onSelected: (_) => setState(() => _person = null),
                     ),
                     for (final p in d.people)
                       ChoiceChip(
                         key: homePersonChipKey(p.key),
                         label: Text(p.name),
-                        selected: person == p.key,
-                        onSelected: (_) => setState(() {
-                          _person = p.key;
-                          _card = null;
-                        }),
-                      ),
-                  ]),
-                if (d.cardChoices.length > 1)
-                  _ChipRow(children: [
-                    ChoiceChip(
-                      key: kHomeCardAllKey,
-                      label: const Text('همه‌ی کارت‌ها'),
-                      selected: card == null,
-                      onSelected: (_) => setState(() => _card = null),
-                    ),
-                    for (final a in d.cardChoices)
-                      ChoiceChip(
-                        key: homeCardChipKey(a.id),
-                        avatar: Icon(a.bankId == null ? Icons.payments_outlined : Icons.credit_card_rounded,
-                            size: 18),
-                        label: Text(_cardChipLabel(a)),
-                        selected: card == a.id,
-                        onSelected: (_) => setState(() => _card = a.id),
+                        selected: person?.key == p.key,
+                        onSelected: (_) => setState(() => _person = p.key),
                       ),
                   ]),
                 _SummaryCard(
                   dashboard: d,
                   month: _monthTitle(_month),
-                  scope: [
-                    if (person == null)
-                      'همه'
-                    else
-                      d.people.firstWhere((p) => p.key == person).name,
-                    if (card != null) _cardChipLabel(d.cardChoices.firstWhere((a) => a.id == card)),
-                  ].join(' • '),
+                  scope: person?.name ?? 'همه',
                   onTap: () => _push(MonthReportScreen(controller: _c, initialMonth: _month)),
                 ),
                 _TaskChips(controller: _c, onOpen: _push),
@@ -234,7 +194,10 @@ class _LedgerHomeScreenState extends State<LedgerHomeScreen> {
                     onSelectionChanged: (s) => setState(() => _byDay = s.first),
                   ),
                 ),
-                if (d.shown.isEmpty)
+                if (d.shown.isEmpty && person != null)
+                  _Empty('«${person.name}» هنوز کارتی ندارد. برنامه باید روی گوشیِ خودش نصب شود و '
+                      'بانک‌ها و کارت‌هایش را تأیید کند؛ بعد این‌جا دیده می‌شود.')
+                else if (d.shown.isEmpty)
                   const _Empty('هنوز حسابی نیست؛ تراشه‌های بالا راهنمایی می‌کنند.')
                 else if (_byDay)
                   ..._dayView(d)
@@ -446,6 +409,7 @@ class _ChipRow extends StatelessWidget {
       );
 }
 
+/// بالا: موجودیِ الانِ همین کارت‌ها بزرگ؛ زیرش خالص، درآمد و هزینه‌ی ماه کوچک (طرح ۱۲.۱۰).
 class _SummaryCard extends StatelessWidget {
   final Dashboard dashboard;
   final String month;
@@ -479,30 +443,26 @@ class _SummaryCard extends StatelessWidget {
           child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             Row(children: [
               Expanded(
-                  child: Text('خالصِ $month ($scope)',
+                  child: Text('موجودیِ الان ($scope)',
                       style: theme.textTheme.labelLarge?.copyWith(color: muted),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis)),
-              Text('گزارش', style: theme.textTheme.labelLarge?.copyWith(color: onHero)),
+              Text('گزارشِ ماه', style: theme.textTheme.labelLarge?.copyWith(color: onHero)),
               const Icon(Icons.chevron_right_rounded, color: onHero, size: 20),
             ]),
             const SizedBox(height: 4),
-            Text(_signed(d.netRial),
-                key: kHomeNetKey,
+            Text(d.balanceRial == null ? 'نامعلوم' : formatToman(d.balanceRial!),
+                key: kHomeBalanceKey,
                 style: theme.textTheme.headlineMedium?.copyWith(color: onHero, fontWeight: FontWeight.w800)),
-            const SizedBox(height: 8),
+            if (d.unknownBalances > 0)
+              Text('بدونِ ${_fa(d.unknownBalances)} کارتی که موجودی‌اش هنوز وارد نشده',
+                  style: theme.textTheme.bodySmall?.copyWith(color: muted)),
+            const SizedBox(height: 10),
             Row(children: [
+              Expanded(child: _HeroFigure(label: 'خالصِ $month', value: _signed(d.netRial), valueKey: kHomeNetKey)),
               Expanded(child: _HeroFigure(label: 'درآمد', value: formatToman(d.incomeRial))),
               Expanded(child: _HeroFigure(label: 'هزینه', value: formatToman(d.expenseRial))),
             ]),
-            const SizedBox(height: 8),
-            Text(
-              d.balanceRial == null
-                  ? 'موجودیِ الانِ این کارت‌ها: نامعلوم'
-                  : 'موجودیِ الانِ این کارت‌ها: ${formatToman(d.balanceRial!)}'
-                      '${d.unknownBalances > 0 ? ' (+ ${_fa(d.unknownBalances)} کارتِ نامعلوم)' : ''}',
-              style: theme.textTheme.bodySmall?.copyWith(color: muted),
-            ),
           ]),
         ),
       ),
@@ -513,15 +473,25 @@ class _SummaryCard extends StatelessWidget {
 class _HeroFigure extends StatelessWidget {
   final String label;
   final String value;
+  final Key? valueKey;
 
-  const _HeroFigure({required this.label, required this.value});
+  const _HeroFigure({required this.label, required this.value, this.valueKey});
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Text(label, style: theme.textTheme.labelSmall?.copyWith(color: Colors.white.withOpacity(0.85))),
-      Text(value, style: theme.textTheme.titleSmall?.copyWith(color: Colors.white, fontWeight: FontWeight.w700)),
+      Text(label,
+          style: theme.textTheme.labelSmall?.copyWith(color: Colors.white.withOpacity(0.85)),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis),
+      FittedBox(
+        fit: BoxFit.scaleDown,
+        alignment: AlignmentDirectional.centerStart,
+        child: Text(value,
+            key: valueKey,
+            style: theme.textTheme.titleSmall?.copyWith(color: Colors.white, fontWeight: FontWeight.w700)),
+      ),
     ]);
   }
 }

@@ -2,6 +2,7 @@
 library;
 
 import 'package:economy/core/database/app_database.dart';
+import 'package:economy/core/family/family_api.dart';
 import 'package:economy/core/format/money_format.dart';
 import 'package:economy/core/ledger/dashboard.dart';
 import 'package:economy/core/ledger/ledger_repository.dart';
@@ -91,38 +92,39 @@ void main() {
       );
 
   String net(WidgetTester tester) => tester.widget<Text>(find.byKey(kHomeNetKey)).data!;
+  String balance(WidgetTester tester) => tester.widget<Text>(find.byKey(kHomeBalanceKey)).data!;
 
-  testWidgets('family month at the top, then by member, by card and by month', (tester) async {
+  testWidgets('balance big, month net small; by member and by month', (tester) async {
     final c = await setup(tester);
     await tester.pumpWidget(app(LedgerHomeScreen(controller: c, autoSetup: false)));
     await tester.pumpAndSettle();
 
-    // همه: درآمد ۳۰۰ − هزینه (۱۰۰ + ۲۰ + ۲۰۰) هزار ریال.
+    // همه: بزرگ = موجودیِ الان (ملت ۱٬۱۵۰ + سامان ۵۰۰ هزار ریال؛ نقد نامعلوم)،
+    // کوچک = خالص: درآمد ۳۰۰ − هزینه (۱۰۰ + ۲۰ + ۲۰۰).
     expect(find.text('مهر ۱۴۰۵'), findsOneWidget);
+    expect(balance(tester), formatToman(1650000));
+    expect(find.text('موجودیِ الان (همه)'), findsOneWidget);
+    expect(find.textContaining('بدونِ ۱ کارتی که موجودی‌اش'), findsOneWidget);
     expect(net(tester), '−${formatToman(20000)}');
-    expect(find.text('خالصِ مهر ۱۴۰۵ (همه)'), findsOneWidget);
+    expect(find.text('خالصِ مهر ۱۴۰۵'), findsOneWidget);
     expect(find.byKey(homePersonSectionKey(kMePersonKey)), findsOneWidget);
     expect(find.byKey(homePersonSectionKey('u2')), findsOneWidget);
     expect(find.text('۳ تراکنش • ۲ کارت/حساب'), findsOneWidget); // مهدی
     expect(find.text('۱ تراکنش • ۱ کارت/حساب'), findsOneWidget); // زهرا
 
-    // فقط زهرا: یک کارت → تراشه‌ی کارت‌ها لازم نیست.
+    // تراشه‌ها فقط نامِ افراد است، نه کارت‌ها.
+    expect(find.text('همه‌ی کارت‌ها'), findsNothing);
     await tester.tap(find.byKey(homePersonChipKey('u2')));
     await tester.pumpAndSettle();
+    expect(balance(tester), formatToman(500000));
     expect(net(tester), '−${formatToman(200000)}');
-    expect(find.byKey(kHomeCardAllKey), findsNothing);
+    expect(find.text('موجودیِ الان (زهرا)'), findsOneWidget);
     expect(find.byKey(homePersonSectionKey(kMePersonKey)), findsNothing);
-    expect(find.textContaining('موجودیِ الانِ این کارت‌ها: ${formatToman(500000)}'), findsOneWidget);
 
-    // مهدی، بعد فقط کارتِ نقد.
     await tester.tap(find.byKey(homePersonChipKey(kMePersonKey)));
     await tester.pumpAndSettle();
+    expect(balance(tester), formatToman(1150000));
     expect(net(tester), '+${formatToman(180000)}');
-    await tester.tap(find.byKey(homeCardChipKey('m2')));
-    await tester.pumpAndSettle();
-    expect(net(tester), '−${formatToman(20000)}');
-    expect(find.text('خالصِ مهر ۱۴۰۵ (مهدی • نقد)'), findsOneWidget);
-    expect(find.textContaining('نامعلوم'), findsWidgets); // نقد موجودیِ الان ندارد
 
     // ماهِ قبل (شهریور)، و مرزها.
     await tester.tap(find.byKey(kHomePersonAllKey));
@@ -184,5 +186,29 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byType(AccountDetailsScreen), findsOneWidget);
     expect(find.text('حسابِ زهرا؛ فقط دیدنی.'), findsOneWidget);
+  });
+
+  testWidgets("the manager sees every family member, even one who has no card yet", (tester) async {
+    final c = await setup(tester);
+    await tester.runAsync(() async {
+      await c.repo.db.insert('settings', {'key': 'my_role', 'value': 'owner'});
+      await c.load();
+    });
+    c.people = () => (
+          meName: 'مهدی',
+          meUserId: 'u1',
+          members: const [
+            FamilyMember(id: 'u1', name: 'مهدی'),
+            FamilyMember(id: 'u2', name: 'زهرا'),
+            FamilyMember(id: 'u3', name: 'بابا'),
+          ],
+        );
+    await tester.pumpWidget(app(LedgerHomeScreen(controller: c, autoSetup: false)));
+    await tester.pumpAndSettle();
+    expect(find.byKey(homePersonChipKey('u3')), findsOneWidget);
+    await tester.tap(find.byKey(homePersonChipKey('u3')));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('«بابا» هنوز کارتی ندارد'), findsOneWidget);
+    expect(balance(tester), 'نامعلوم');
   });
 }

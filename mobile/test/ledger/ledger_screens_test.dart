@@ -119,7 +119,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byKey(kHomeAnchorChipKey), findsNothing);
-    expect(find.textContaining('موجودیِ الانِ این کارت‌ها: ۱۲۰٬۰۰۰ تومان'), findsOneWidget);
+    expect(tester.widget<Text>(find.byKey(kHomeBalanceKey)).data, '۱۲۰٬۰۰۰ تومان');
     await tester.tap(find.byKey(kHomePendingChipKey));
     await tester.pumpAndSettle();
     expect(find.byType(PendingScreen), findsOneWidget);

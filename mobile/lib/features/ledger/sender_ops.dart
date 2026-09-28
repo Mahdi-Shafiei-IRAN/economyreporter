@@ -48,5 +48,14 @@ SenderOps ledgerSenderOps(
       await repo.setSetting(SettingKeys.dismissedSenders, jsonEncode(keys.toList()));
     },
     remove: repo.deleteAllowedSender,
+    inboxSenders: () async {
+      var inbox = const <RawSms>[];
+      try {
+        inbox = await readInbox();
+      } catch (_) {
+        // بی‌مجوزِ پیامک فقط تایپِ دستی می‌ماند.
+      }
+      return listInboxSenders(inbox: inbox, allowed: await repo.allowedSenders());
+    },
   );
 }

@@ -11,8 +11,9 @@ const kMePersonKey = 'me';
 
 /// کلیدِ «عضو» برای حساب‌ها: «من»؛ وگرنه شناسه‌ی کاربر؛ حسابِ بی‌شناسه با نامِ یکی از اعضا مالِ همان عضو،
 /// وگرنه با نامش.
-String Function(LedgerAccount) personKeys(Iterable<LedgerAccount> accounts, bool Function(LedgerAccount) isMine) {
-  final byName = <String, String>{};
+String Function(LedgerAccount) personKeys(Iterable<LedgerAccount> accounts, bool Function(LedgerAccount) isMine,
+    {Iterable<({String key, String name})> members = const []}) {
+  final byName = <String, String>{for (final m in members) m.name.trim(): m.key};
   for (final a in accounts) {
     if (!isMine(a) && a.ownerUserId != null) byName.putIfAbsent(a.ownerName.trim(), () => a.ownerUserId!);
   }
@@ -121,6 +122,7 @@ class Dashboard {
 
 /// [accounts]: حساب‌های نشان‌دادنی (کنارگذاشته‌ها نه). [personKey]/[accountId]: فیلتر؛ کارتی که مالِ عضوِ
 /// انتخاب‌شده نیست نادیده گرفته می‌شود. [meName]: نامِ «من» (وگرنه نامِ صاحبِ اولین حسابِ خودم).
+/// [members]: بقیه‌ی اعضای خانواده (کلید = شناسه‌ی کاربر) تا عضوِ بی‌کارت هم در تراشه‌ها باشد (فقط مدیر).
 Dashboard buildDashboard({
   required List<LedgerAccount> accounts,
   required Map<String, List<LedgerItem>> ledgers,
@@ -130,14 +132,18 @@ Dashboard buildDashboard({
   String? personKey,
   String? accountId,
   String? meName,
+  List<({String key, String name})> members = const [],
 }) {
   // اعضا: «من» اول، بعد به ترتیبِ نام.
-  final personKeyOf = personKeys(accounts, isMine);
+  final personKeyOf = personKeys(accounts, isMine, members: members);
   final names = <String, ({String key, String name, bool isMe})>{};
   for (final a in accounts) {
     final k = personKeyOf(a);
     final isMe = k == kMePersonKey;
     names[k] ??= (key: k, name: (isMe ? meName?.trim() : null) ?? a.ownerName.trim(), isMe: isMe);
+  }
+  for (final m in members) {
+    names[m.key] ??= (key: m.key, name: m.name.trim(), isMe: false);
   }
   final people = names.values.toList()
     ..sort((x, y) {

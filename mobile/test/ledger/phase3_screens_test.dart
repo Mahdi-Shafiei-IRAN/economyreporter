@@ -263,7 +263,7 @@ void main() {
     expect(find.byKey(homePersonChipKey(kMePersonKey)), findsOneWidget); // حسابِ همین گوشی، بی‌شناسه
     expect(find.byKey(homePersonChipKey('u2')), findsOneWidget);
     expect(find.byKey(homePersonSectionKey('u2')), findsOneWidget);
-    expect(find.textContaining('موجودیِ الانِ این کارت‌ها: ${formatToman(1400000)}'), findsOneWidget); // ۹۰ + ۵۰
+    expect(tester.widget<Text>(find.byKey(kHomeBalanceKey)).data, formatToman(1400000)); // ۹۰ + ۵۰
 
     await tester.tap(find.byKey(homeCardDetailsKey('z1')));
     await tester.pumpAndSettle();

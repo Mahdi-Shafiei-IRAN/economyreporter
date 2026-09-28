@@ -96,3 +96,41 @@ List<SenderCandidate> findSenderCandidates({
       return (b.lastAt ?? DateTime(0)).compareTo(a.lastAt ?? DateTime(0));
     });
 }
+
+/// یک فرستنده‌ی صندوقِ گوشی (برای «افزودنِ دستی» وقتی برنامه بانک بودنش را تشخیص نداده).
+class InboxSender {
+  final String address;
+  final int count;
+  final String? sample;
+  final DateTime? lastAt;
+
+  const InboxSender({required this.address, required this.count, this.sample, this.lastAt});
+}
+
+/// همه‌ی فرستنده‌های صندوق که هنوز مجاز نیستند، پرپیامک‌ترها اول (بی‌توجه به شکلِ متن).
+List<InboxSender> listInboxSenders({
+  required Iterable<RawSms> inbox,
+  required Iterable<AllowedSender> allowed,
+}) {
+  final groups = <_Group>[];
+  for (final sms in inbox) {
+    final address = sms.sender.trim();
+    if (address.isEmpty || findAllowedSender(allowed, address) != null) continue;
+    var g = groups.where((x) => sameSender(x.address, address)).firstOrNull;
+    if (g == null) {
+      g = _Group(address);
+      groups.add(g);
+    }
+    g
+      ..inboxCount += 1
+      ..offer(sms.body, sms.receivedAt);
+  }
+  return [
+    for (final g in groups)
+      InboxSender(address: g.address, count: g.inboxCount, sample: g.sample, lastAt: g.lastAt),
+  ]..sort((a, b) {
+      final c = b.count.compareTo(a.count);
+      if (c != 0) return c;
+      return (b.lastAt ?? DateTime(0)).compareTo(a.lastAt ?? DateTime(0));
+    });
+}

@@ -5,12 +5,45 @@ import 'package:flutter/material.dart';
 
 import '../../core/format/date_format.dart';
 import '../../core/format/money_format.dart';
+import '../../core/ledger/models.dart';
 import 'account_form.dart';
 import 'ledger_controller.dart';
 import 'ledger_text.dart';
 
 Key ledgerAccountCardKey(String id) => Key('ledger-account-$id');
 Key ledgerSetBalanceKey(String id) => Key('ledger-set-balance-$id');
+Key ledgerAccountMenuKey(String id) => Key('ledger-account-menu-$id');
+const kDeleteAccountConfirmKey = Key('delete-account-confirm');
+
+/// «حذفِ کارت» با پرسش: کارت، تراکنش‌ها و موجودی‌هایش با هم می‌روند (طرح ۱۲.۱۰). true = حذف شد.
+Future<bool> confirmDeleteAccount(BuildContext context, LedgerController controller, LedgerAccount a) async {
+  final n = controller.entryCountOf(a.id);
+  final ok = await showDialog<bool>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: Text('حذفِ «${accountShortLabel(a)}»؟'),
+      content: Text([
+        n == 0
+            ? 'کارت و موجودی‌هایش حذف می‌شود.'
+            : 'کارت با ${toPersianDigits('$n')} تراکنش و موجودی‌هایش حذف می‌شود؛ از جمع‌ها و گزارش‌ها هم بیرون می‌رود.',
+        'پیامک‌هایی که به این تراکنش‌ها ثبت شده بودند «رد» می‌شوند.',
+        'اگر فقط نمی‌خواهی دیده شود و تراکنش‌ها بمانند، «پیگیری نشود» را بزن.',
+      ].join('\n\n')),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('انصراف')),
+        FilledButton(
+          key: kDeleteAccountConfirmKey,
+          style: FilledButton.styleFrom(backgroundColor: Theme.of(context).colorScheme.error),
+          onPressed: () => Navigator.pop(context, true),
+          child: const Text('حذف'),
+        ),
+      ],
+    ),
+  );
+  if (ok != true) return false;
+  await controller.deleteAccount(a.id);
+  return true;
+}
 
 class LedgerAccountCard extends StatelessWidget {
   final LedgerController controller;
@@ -54,12 +87,14 @@ class LedgerAccountCard extends StatelessWidget {
                     ),
                   ),
                   if (!readOnly) PopupMenuButton<String>(
+                    key: ledgerAccountMenuKey(a.id),
                     tooltip: 'بیشتر',
                     onSelected: (v) => switch (v) {
                       'reconcile' => showBalanceDialog(
                           context, controller, view,
                           reconcile: true),
                       'archive' => controller.setArchived(a.id, !a.archived),
+                      'delete' => confirmDeleteAccount(context, controller, a),
                       _ => null,
                     },
                     itemBuilder: (_) => [
@@ -72,6 +107,10 @@ class LedgerAccountCard extends StatelessWidget {
                           child: Text(a.archived
                               ? 'دوباره پیگیری شود'
                               : 'پیگیری نشود (کنار بگذار)')),
+                      PopupMenuItem(
+                          value: 'delete',
+                          child: Text('حذفِ کارت و تراکنش‌هایش',
+                              style: TextStyle(color: Theme.of(context).colorScheme.error))),
                     ],
                   ),
                 ],

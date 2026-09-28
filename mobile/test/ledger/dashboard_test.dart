@@ -116,6 +116,29 @@ void main() {
     expect(d.shown.last.cards.map((c) => c.account.id), ['z1', 'z2']);
   });
 
+  test('family members come in as people even without a card; an unlinked card joins its owner by name', () {
+    const babaByName = LedgerAccount(id: 'b2', ownerName: 'بابا', label: 'ملی');
+    final d = buildDashboard(
+      accounts: const [mellat, babaByName],
+      ledgers: ledgers,
+      isMine: (a) => a.ownerUserId == 'u1',
+      from: from,
+      to: to,
+      members: const [(key: 'u2', name: 'زهرا'), (key: 'u3', name: 'بابا')],
+    );
+    expect(d.people.map((p) => p.key), [kMePersonKey, 'u3', 'u2']);
+    expect(d.shown.map((p) => p.key), [kMePersonKey, 'u3']); // زهرا کارتی ندارد
+    expect(buildDashboard(
+      accounts: const [mellat],
+      ledgers: ledgers,
+      isMine: (a) => a.ownerUserId == 'u1',
+      from: from,
+      to: to,
+      personKey: 'u2',
+      members: const [(key: 'u2', name: 'زهرا')],
+    ).shown, isEmpty);
+  });
+
   test('an empty month still lists members and their cards', () {
     final d = buildDashboard(
       accounts: const [mellat],
